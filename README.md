@@ -54,11 +54,38 @@ Three styles, all monochrome glass with one blue accent: **Creature** (the defau
 
 ## Install
 
-gitchat requires Chrome 120 or later. It is not on the Chrome Web Store yet.
+gitchat requires Chrome 120 or later. It is not on the Chrome Web Store yet, so it is loaded as an unpacked extension. The ready-to-load files are kept on the [`dist` branch](https://github.com/Aero123421/gitchat/tree/dist), so installing and updating are one git command each.
 
-1. Download `gitchat-<version>.zip` from the [latest release](https://github.com/Aero123421/gitchat/releases/latest) and unzip it to a folder you keep.
+1. Download the extension to a folder you keep:
+
+   ```sh
+   git clone -b dist https://github.com/Aero123421/gitchat.git ~/gitchat-extension
+   ```
+
 2. Open `chrome://extensions` and turn on **Developer mode** (top right).
-3. Click **Load unpacked** and select the unzipped folder.
+3. Click **Load unpacked** and select the `gitchat-extension` folder.
+
+### Update
+
+```sh
+git -C ~/gitchat-extension pull
+```
+
+Then reload gitchat: press its reload button in `chrome://extensions`, or **Reload** in gitchat's settings under **About**. Reload open chat tabs afterwards. Your sign-in, settings and saved chats stay, because Chrome keeps them for as long as the extension is loaded from the same folder.
+
+<details>
+<summary>Installed from a zip before?</summary>
+
+Put a git copy where the zip was unpacked, so Chrome sees the same folder and keeps your data (replace the path with yours):
+
+```sh
+mv ~/gitchat ~/gitchat-zip-old
+git clone -b dist https://github.com/Aero123421/gitchat.git ~/gitchat
+```
+
+Then reload gitchat as above. Each [release](https://github.com/Aero123421/gitchat/releases) still has a zip if you prefer it.
+
+</details>
 
 <details>
 <summary>Build from source instead</summary>
@@ -72,7 +99,7 @@ npm install
 npm run build
 ```
 
-Then load the `dist/` folder with **Load unpacked**.
+Then load the `dist/` folder with **Load unpacked**. To update: `git pull && npm install && npm run build`, then reload.
 
 </details>
 

@@ -54,11 +54,38 @@ AI との良い会話は、残しておきたいし、次のツールにもそ�
 
 ## インストール
 
-Chrome 120 以降が必要です。Chrome ウェブストアにはまだ公開していません。
+Chrome 120 以降が必要です。Chrome ウェブストアにはまだ公開していないため、「パッケージ化されていない拡張機能」として読み込みます。読み込める状態のファイルは [`dist` ブランチ](https://github.com/Aero123421/gitchat/tree/dist) に置いてあるので、インストールも更新も git のコマンド 1 つで済みます。
 
-1. [最新リリース](https://github.com/Aero123421/gitchat/releases/latest) から `gitchat-<version>.zip` をダウンロードし、残しておくフォルダに展開します。
+1. 残しておくフォルダに拡張機能をダウンロードします。
+
+   ```sh
+   git clone -b dist https://github.com/Aero123421/gitchat.git ~/gitchat-extension
+   ```
+
 2. `chrome://extensions` を開き、右上の **デベロッパー モード** をオンにします。
-3. **パッケージ化されていない拡張機能を読み込む** をクリックし、展開したフォルダを選びます。
+3. **パッケージ化されていない拡張機能を読み込む** をクリックし、`gitchat-extension` フォルダを選びます。
+
+### 更新
+
+```sh
+git -C ~/gitchat-extension pull
+```
+
+そのあと gitchat を再読み込みします。`chrome://extensions` で gitchat の再読み込みボタンを押すか、gitchat の設定 → **情報** の **再読み込み** を押してください。開いているチャットのタブも再読み込みします。同じフォルダから読み込んでいる限り Chrome がデータを保持するので、サインイン・設定・保存済みのチャットはそのまま残ります。
+
+<details>
+<summary>以前 zip でインストールした場合</summary>
+
+zip を展開したのと同じ場所に git で取得したフォルダを置くと、Chrome は同じ拡張機能として扱い、データも引き継がれます（パスはご自分のものに置き換えてください）。
+
+```sh
+mv ~/gitchat ~/gitchat-zip-old
+git clone -b dist https://github.com/Aero123421/gitchat.git ~/gitchat
+```
+
+そのあと上と同じ方法で gitchat を再読み込みします。zip も各[リリース](https://github.com/Aero123421/gitchat/releases)に引き続き添付しています。
+
+</details>
 
 <details>
 <summary>ソースコードからビルドする場合</summary>
@@ -72,7 +99,7 @@ npm install
 npm run build
 ```
 
-`dist/` フォルダを **パッケージ化されていない拡張機能を読み込む** で読み込みます。
+`dist/` フォルダを **パッケージ化されていない拡張機能を読み込む** で読み込みます。更新は `git pull && npm install && npm run build` のあと再読み込みします。
 
 </details>
 

@@ -31,6 +31,8 @@ npm run zip          # build and package dist/ into gitchat-<version>.zip
 npm run playground   # serve http://localhost:5180/playground/ to work on the widgets
 ```
 
+Releases: bump the version in `package.json`, attach the `npm run zip` archive to a GitHub release, and publish it. Publishing runs `.github/workflows/dist.yml`, which commits the built extension to the `dist` branch that users install and update with git (run that workflow by hand with a tag to republish one).
+
 To test the extension in Chrome:
 
 1. Run `npm run build` (or `npm run dev`).

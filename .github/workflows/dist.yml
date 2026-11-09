@@ -1,0 +1,73 @@
+# Publishes the built extension to the `dist` branch, so it can be installed and updated with git:
+#   git clone -b dist https://github.com/Aero123421/gitchat.git ~/gitchat-extension
+#   git -C ~/gitchat-extension pull
+# Runs for every published release; run it by hand to (re)publish a given tag.
+name: Publish dist branch
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Release tag to publish (for example v0.1.3)
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dist-branch
+  cancel-in-progress: false
+
+jobs:
+  dist:
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.ref }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Commit the built extension to the dist branch
+        run: |
+          set -euo pipefail
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          out="$RUNNER_TEMP/dist-branch"
+          if git ls-remote --exit-code --heads origin dist > /dev/null; then
+            git fetch --depth 1 origin dist
+            git worktree add "$out" FETCH_HEAD
+            git -C "$out" switch -c dist
+          else
+            git worktree add --orphan -b dist "$out"
+          fi
+          # replace everything with this build (the branch history keeps earlier versions)
+          find "$out" -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -R dist/. "$out/"
+          cat > "$out/README.md" <<EOF
+          # gitchat (built extension)
+
+          This branch holds the ready-to-load gitchat extension, version ${TAG#v}. The source code is on
+          [main](https://github.com/${GITHUB_REPOSITORY}).
+
+          Install: \`git clone -b dist https://github.com/${GITHUB_REPOSITORY}.git ~/gitchat-extension\`, then
+          load that folder in \`chrome://extensions\` (Developer mode → Load unpacked).
+
+          Update: \`git -C ~/gitchat-extension pull\`, then press gitchat's reload button in
+          \`chrome://extensions\` (or Settings → About → Reload in gitchat).
+          EOF
+          cd "$out"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "dist branch already holds this build"
+            exit 0
+          fi
+          git commit -m "gitchat ${TAG#v}"
+          git push origin HEAD:dist

@@ -8,14 +8,32 @@ This guide walks through installing gitchat, connecting your GitHub account, cho
 
 gitchat requires Chrome 120 or later. Until it is listed on the Chrome Web Store, load it as an unpacked extension.
 
-### Option A: From a release archive
+### Option A: With git (recommended)
 
-1. Download `gitchat-<version>.zip` from [GitHub Releases](https://github.com/Aero123421/gitchat/releases) and extract it to a permanent folder on your computer (Chrome reads unpacked extensions from disk whenever it starts).
-2. Open `chrome://extensions` in Chrome.
-3. Turn on **Developer mode** in the top-right corner.
-4. Click **Load unpacked** and select the extracted folder.
+The ready-to-load extension is kept on the repository's `dist` branch, updated with every release.
 
-### Option B: Build from source
+1. Download it to a permanent folder (Chrome reads unpacked extensions from disk whenever it starts):
+
+   ```sh
+   git clone -b dist https://github.com/Aero123421/gitchat.git ~/gitchat-extension
+   ```
+
+2. Open `chrome://extensions` in Chrome and turn on **Developer mode** in the top-right corner.
+3. Click **Load unpacked** and select the `gitchat-extension` folder.
+
+**Updating** is one command, then a reload:
+
+```sh
+git -C ~/gitchat-extension pull
+```
+
+Press gitchat's reload button in `chrome://extensions` (or **Reload** in gitchat's settings under **About**), then reload any open chat tabs. Chrome keeps your sign-in, settings and saved chats for as long as gitchat is loaded from the same folder. If you installed from a zip before, clone into the folder you loaded then (after moving the old one aside) to keep your data.
+
+### Option B: From a release archive
+
+Download `gitchat-<version>.zip` from [GitHub Releases](https://github.com/Aero123421/gitchat/releases), extract it to a permanent folder, and load that folder as above. To update, replace the folder's contents with the next release's and reload.
+
+### Option C: Build from source
 
 Requires Node.js 22.12 or later:
 
@@ -26,7 +44,7 @@ npm install
 npm run build
 ```
 
-Then open `chrome://extensions`, enable **Developer mode**, click **Load unpacked**, and select the `dist/` folder inside the repository.
+Then open `chrome://extensions`, enable **Developer mode**, click **Load unpacked**, and select the `dist/` folder inside the repository. To update, run `git pull && npm install && npm run build` and reload.
 
 ## 2. Complete the setup wizard
 
