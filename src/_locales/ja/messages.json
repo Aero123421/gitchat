@@ -466,5 +466,17 @@
   },
   "errInitCoverage": {
     "message": "一部のメッセージを読み取れなかったため、保存しませんでした。もう一度お試しください。"
+  },
+  "shotRepo": {
+    "message": "① 名前（入力済み）・② Private・③ Create repository"
+  },
+  "shotAccess": {
+    "message": "① Only select repositories ・ ② 作成したリポジトリを選ぶ"
+  },
+  "shotPermissions": {
+    "message": "① Contents: Read and write と ② Metadata: Read-only は入力済み ・ ③ Generate token を押して、表示されたトークンをコピー"
+  },
+  "openFullSize": {
+    "message": "原寸で開く"
   }
 }

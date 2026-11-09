@@ -1,32 +1,67 @@
-# gitchat
+<p align="center">
+  <img src="docs/images/gitchat.png" width="112" alt="">
+</p>
 
-[English](README.md)
+<h1 align="center">gitchat</h1>
 
-**gitchat** は、ChatGPT・Claude・Gemini の会話を Markdown ファイルとして自分の GitHub リポジトリに保存するオープンソースの Chrome 拡張機能です。1 つのチャットが 1 つの Markdown ファイルとして `chatgpt/`・`claude/`・`gemini/` フォルダに整理されます。会話全体を別のチャットや Claude Code などの AI エージェントにコピペなしでそのまま渡すために作られており、GitHub を会話履歴の保管・共有場所として使います。保存対象のチャットでは、AI の回答が終わるたびに新しいメッセージが自動でステージされ、任意のタイミングでコミットとプッシュを行えます（自動コミット・自動プッシュへの切り替えも可能です）。
+<p align="center">
+  ChatGPT・Claude・Gemini の会話を、自分の GitHub リポジトリへ。<br>
+  1 チャット = 1 つの Markdown。git と同じ <b>ステージ → コミット → プッシュ</b> で保存します。
+</p>
+
+<p align="center">
+  <a href="https://github.com/Aero123421/gitchat/releases/latest"><img src="https://img.shields.io/github/v/release/Aero123421/gitchat?color=111113" alt="最新リリース"></a>
+  <a href="https://github.com/Aero123421/gitchat/actions/workflows/ci.yml"><img src="https://github.com/Aero123421/gitchat/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/Aero123421/gitchat?color=111113" alt="MIT ライセンス"></a>
+  <img src="https://img.shields.io/badge/Chrome-120%2B-0a84ff" alt="Chrome 120 以降">
+</p>
+
+<p align="center"><a href="README.md">English</a> · <b>日本語</b></p>
+
+<p align="center">
+  <img src="docs/images/demo-ja.gif" width="760" alt="チャットで質問を送ると AI が回答し、その回答がページ右端の gitchat のキャラの横に滴として現れる。キャラにマウスを乗せてコミットすると滴が取り込まれ、プッシュすると GitHub へ送られる。">
+</p>
+
+## gitchat とは
+
+AI との良い会話は、残しておきたいし、次のツールにもそのまま渡したいもの。gitchat はチャットを 1 つずつ Markdown ファイルにして、あなたの GitHub リポジトリに保存します。Claude Code などのエージェントや同僚には、コピペの代わりにリンクを 1 つ渡すだけ。履歴はブラウザや PC をまたいで残ります。
+
+## 使い心地
+
+チャット画面の右端に、小さなウィジェットがいます。
+
+- **ステージ**: AI が回答を終えると、新しいメッセージがウィジェットの周りに滴として現れます。まだ保存はされていません。
+- **コミット**: ウィジェットにマウスを乗せてコミットを押すと、滴が取り込まれて青い点になります。青い点は、まだ GitHub に送っていないコミットの数です。
+- **プッシュ**: プッシュを押すと青い点が飛び立ち、チャットのファイルがリポジトリに届きます。
+- **パネル**: ウィジェットをクリックすると、そのチャットのコミットグラフ（上ほど古く、点線から上は GitHub にあるもの）、GitHub のリンクをコピーするボタン、**自動コミット**・**自動プッシュ** のスイッチが開きます。自動にした操作のボタンは非表示になります。
+
+<p align="center">
+  <img src="docs/images/styles-ja.png" width="470" alt="ウィジェットの 3 つのスタイル: キャラ・ライン・ドット">
+  &nbsp;
+  <img src="docs/images/panel.png" width="300" alt="パネル: 点線で区切られたコミットグラフ、コミット・プッシュ・リンクのコピー・設定、自動コミットと自動プッシュのスイッチ">
+</p>
+
+スタイルは 3 種類。どれもモノクロのガラスに青のアクセントひとつです。**キャラ**（初期設定。AI が考えている間は一緒に考え、操作に反応します）・**ライン**・**ドット** から設定で選べます。
 
 ## 主な機能
 
-- **1 チャット = 1 つの Markdown ファイル**: 各会話は `<service>/<date>-<title-slug>--<id8>.md` として保存されます。ファイル先頭には YAML フロントマター（`gitchat`, `service`, `id`, `url`, `title`, `created`, `captured`, `messages`）が付き、続けて `## User` と `## Assistant` のセクションが並びます。一度作られたファイル名は後から変わりません。
-- **必要なチャットだけを選択して保存（init）**: すべてのチャットが無差別に保存されるわけではなく、「保存を始める」を押すまでは未追跡（untracked）のままです。保存を開始（init）すると、gitchat がチャットの先頭まで自動でスクロールし、過去のメッセージが遅延読み込みされるのを待ってから上から下まで順番に読み取り、元のスクロール位置に戻します。進捗は読み込んだメッセージ数、続いて読み取りのパーセンテージとして表示され、途中でキャンセルすることもできます。一時チャット（ChatGPT の一時チャット）は保存されません。
-- **技術的な会話もそのまま再現**: 見出し、リスト、リンク、引用、表（サイト側が保持している場合は列の揃え位置も維持）、言語指定付きのコードブロック、そして元の TeX 記法（`$...$`・`$$...$$`）に復元された数式を保存します。
-- **インタラクティブな可視化の保存**: Claude のアーティファクト、ChatGPT のインライン可視化、Gemini の Canvas プレビューが取り込み時に画面上に表示されている場合、レンダリング済みの HTML をチャットと同じ場所の `<chat>.assets/<name>.html` に保存し、Markdown からリンクします。
-- **git と同じワークフロー**: AI の回答が完了すると変更が自動でステージされます。ローカルでのコミット（IndexedDB に保存）と GitHub へのプッシュを手動で行うことも、**自動コミット**・**自動プッシュ**をオンにすることもできます。**プッシュ**を押すと、現在のチャットでステージされている変更が先にコミットされるため、未コミットの変更が取り残されることはありません。
-- **手動での競合解決がいらないマルチデバイス同期**: プッシュは常に fast-forward のみ（`force: false`）で行われます。別の端末が先にプッシュしていた場合はローカルのコミットをその上に自動でリプレイし、同じチャットが 2 台の端末で更新されていた場合は、両方の変更をメッセージ単位で統合します（両方が同じメッセージを変えていた場合だけ、新しい方の取り込みを採用します）。
-- **ページ上の 3 種類のウィジェット**: **キャラ（Creature・標準）**、**ライン（Line）**、**ドット（Dot）** の 3 つのスタイルとツールバーのポップアップから操作できます。ウィジェットにカーソルを合わせるとコミット・プッシュボタンが現れ、クリックするとコミットグラフ、GitHub 上のファイル URL のコピーボタン、自動スイッチ、設定へのリンクを備えたパネルが開きます。
-- **ブラウザから自分のリポジトリへ直接送信**: gitchat 独自のサーバーやアクセス解析、テレメトリは一切ありません。チャットの内容はブラウザ上のページから GitHub API を通じてあなた自身の GitHub リポジトリへ直接送られます。
+- **1 チャット = 1 つの Markdown**: `chatgpt/`・`claude/`・`gemini/` フォルダに `<日付>-<タイトル>--<ID>.md` で保存。YAML フロントマターと `## User` / `## Assistant` の見出しで構成されます。
+- **技術的な会話もそのまま**: 見出し、リスト、リンク、表、言語付きのコードブロック、TeX に戻した数式（`$…$`・`$$…$$`）に加え、Claude のアーティファクト・ChatGPT の可視化・Gemini の Canvas は HTML ファイルとしてチャットの横に保存します。
+- **過去の履歴もまとめて**: **このチャットの保存を始める** を押したチャットだけが保存対象です。開始すると一番上までスクロールし、古いメッセージの読み込みを待って全体を読み取り、スクロール位置を元に戻します。一時チャットは保存しません。
+- **複数の PC でも衝突なし**: プッシュは fast-forward のみ。別の PC が先にプッシュしていれば自動でその上に積み直し、同じチャットを両方で変更した場合はメッセージ単位で統合します。
+- **編集や再生成にも対応**: 古い分岐は新しい分岐に置き換わります。ページと保存内容が合わなくなったときは、会話全体を自動で読み直します。
+- **データはあなたのもの**: 独自サーバーも解析ツールもありません。チャットはブラウザから GitHub API を通じて、あなたのリポジトリへ直接送られます。
 
 ## インストール
 
-Chrome 120 以降が必要です。現在は Chrome ウェブストア公開前のため、リリースの zip ファイルまたはソースコードからビルドして読み込みます。
+Chrome 120 以降が必要です。Chrome ウェブストアにはまだ公開していません。
 
-### GitHub Releases からインストール
+1. [最新リリース](https://github.com/Aero123421/gitchat/releases/latest) から `gitchat-<version>.zip` をダウンロードし、残しておくフォルダに展開します。
+2. `chrome://extensions` を開き、右上の **デベロッパー モード** をオンにします。
+3. **パッケージ化されていない拡張機能を読み込む** をクリックし、展開したフォルダを選びます。
 
-1. [Releases](https://github.com/Aero123421/gitchat/releases) から最新の `gitchat-<version>.zip` をダウンロードして展開します。
-2. Chrome で `chrome://extensions` を開きます。
-3. 右上の **デベロッパー モード** をオンにします。
-4. **パッケージ化されていない拡張機能を読み込む** をクリックし、展開したフォルダを選択します。
-
-### ソースコードからビルド
+<details>
+<summary>ソースコードからビルドする場合</summary>
 
 Node.js 22.12 以降が必要です。
 
@@ -37,26 +72,74 @@ npm install
 npm run build
 ```
 
-ビルド後、`chrome://extensions` を開いて **デベロッパー モード** をオンにし、**パッケージ化されていない拡張機能を読み込む** から `dist/` フォルダを選択します。
+`dist/` フォルダを **パッケージ化されていない拡張機能を読み込む** で読み込みます。
 
-## はじめに
+</details>
 
-インストール直後に自動でセットアップウィザードが開きます。
+## 初期設定（約 3 分）
 
-1. **GitHub と接続**: 「GitHub でサインイン」（OAuth クライアント ID が設定されている場合、Device Flow で認証）を使うか、チャット保存用リポジトリの **Contents: Read and write** と **Metadata: Read** のみを許可した fine-grained 個人アクセストークンを作成して接続します。
-2. **保存先のリポジトリを選択**: gitchat で新しい非公開リポジトリを作成するか（標準の名前は `ai-chats`）、既存の空のリポジトリまたは gitchat 管理済みのリポジトリを選びます。誤って別用途のリポジトリに書き込むのを防ぐため、gitchat が作成したものではないファイルが入ったリポジトリは拒否されます。
-3. **見た目と動作を選択**: 右端のライブプレビューを見ながらウィジェットのスタイル（**キャラ**・**ライン**・**ドット**）を選び、必要に応じて **自動コミット** と **自動プッシュ** を切り替えます。
-4. **チャットの保存を開始**: ChatGPT・Claude・Gemini で会話を開き、画面右端のウィジェットにカーソルを合わせて **このチャットの保存を始める** をクリックします。
+インストールすると設定ページが自動で開きます（ツールバーの gitchat アイコン → **セットアップ** からも開けます）。
 
-詳しい手順は [はじめに](docs/getting-started.ja.md)、うまく動かない場合は [トラブルシューティング](docs/troubleshooting.ja.md) を参照してください。
+1. **チャット用の非公開リポジトリを作成**: 設定ページから、名前 `ai-chats` と **Private** が選ばれた状態の GitHub のフォームが開きます。**Create repository** を押します。
+2. **そのリポジトリ専用の fine-grained トークンを作成**: 名前と **Contents: Read and write** の権限が入力済みのフォームが開きます。**Repository access** で **Only select repositories** を選んでリポジトリを指定し、**Generate token** を押してトークンをコピーします。
+3. **トークンを設定ページに貼り付け**: トークンはこの PC にだけ保存されます。
+4. **リポジトリとウィジェットのスタイルを選択**: 必要なら自動コミット・自動プッシュもオンにします。
+5. **チャットを開く**: ChatGPT・Claude・Gemini のチャットで右端のウィジェットにマウスを乗せ、**このチャットの保存を始める** を押します。
 
-## 仕組み
+<details>
+<summary>GitHub の画面はこうなります</summary>
+<br>
 
-1. **ステージ（Stage）**: チャットの保存を開始すると会話全体を取り込みます。以降は AI の回答が終わるたびに、前回のコミットとメッセージ ID および本文ハッシュを比較し、追加・変更されたメッセージを自動でステージします。
-2. **コミット（Commit）**: **コミット** を押す（または **自動コミット** をオンにする）と、チャットの Markdown と関連アセットが IndexedDB 内のローカルコミットとして記録されます。自動コミットは AI の回答が完了したときにだけ実行されるため、質問と回答が別々のコミットに分かれることはありません。
-3. **プッシュ（Push）**: **プッシュ** を押す（または **自動プッシュ** をオンにする）と、現在のチャットでステージ中の変更をコミットしたうえで、未プッシュのコミットを順番に GitHub Git Data API でリポジトリへ書き込みます。**自動プッシュ** をオンにすると **自動コミット** もオンになり、**自動コミット** をオフにすると **自動プッシュ** もオフになります。自動化されている操作のボタンはウィジェットから非表示になります。
+<img src="src/options/img/github-new-repo.png" width="560" alt="GitHub のリポジトリ作成フォーム: 名前 ai-chats（1）、Private（2）、Create repository（3）">
 
-ファイル形式、複数端末での同期ルール、長いチャットの全文取り込み（init）、3 種類のウィジェットの詳細は [仕組み](docs/how-it-works.ja.md) を参照してください。
+<img src="src/options/img/github-token-access.png" width="560" alt="トークン作成フォームの Repository access: Only select repositories（1）、リポジトリを選択（2）">
+
+<img src="src/options/img/github-token-permissions.png" width="560" alt="トークン作成フォームの Permissions: Contents の Read and write（1）、Metadata の Read-only（2）、Generate token（3）">
+
+</details>
+
+詳しい手順は [はじめに](docs/getting-started.ja.md)、うまくいかないときは [トラブルシューティング](docs/troubleshooting.ja.md) をご覧ください。
+
+## リポジトリに保存されるもの
+
+```text
+ai-chats/
+├── chatgpt/
+│   └── 2026-11-09-state-management-design--1a2b3c4d.md
+├── claude/
+│   ├── 2026-11-08-fourier-intuition--9f8e7d6c.md
+│   └── 2026-11-08-fourier-intuition--9f8e7d6c.assets/
+│       └── chart-1f2e.html
+└── gemini/
+    └── 2026-11-07-kyoto-trip--5a6b7c8d.md
+```
+
+```markdown
+---
+gitchat: 1
+service: chatgpt
+id: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
+url: "https://chatgpt.com/c/1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
+title: "状態管理の設計"
+created: 2026-11-09T09:12:00.000Z
+captured: 2026-11-09T10:40:00.000Z
+messages: 6
+---
+
+# 状態管理の設計
+
+## User
+<!-- gitchat:message id="…" length="…" -->
+
+React の状態管理、どう設計するのがいい？
+
+## Assistant
+<!-- gitchat:message id="…" length="…" -->
+
+サーバーのデータが多いなら、まず **サーバー状態** と **UI 状態** を分けるのがおすすめです。…
+```
+
+見出しの下の隠しコメントがメッセージの ID を保持しているので、別の PC でも同じファイルの続きから保存できます。詳しくは [仕組み](docs/how-it-works.ja.md) をご覧ください。
 
 ## プライバシー
 
@@ -89,6 +172,7 @@ Node.js 22.12 以降が必要です（ウィジェットのプレイグラウン
 | `npm run typecheck` | TypeScript で `src/` と `tests/` の型チェックを実行 |
 | `npm run zip` | ビルドして `dist/` を `gitchat-<version>.zip` にパッケージング |
 | `npm run playground` | `http://localhost:5180/playground/` でウィジェット単体のプレイグラウンドを起動 |
+| `npm run icons` | `src/shared/creature-art.js` から拡張機能のアイコンと README のロゴを生成（インストール済みの Google Chrome を使用。場所が違う場合は `CHROME_PATH` を指定） |
 
 ### ディレクトリ構成
 

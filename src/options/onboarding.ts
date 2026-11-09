@@ -76,7 +76,7 @@ export function createOnboarding(opts: { preview: WidgetPreview; onFinish: () =>
     switch (step) {
       case 'welcome':
         body.append(
-          h('div', { class: 'hero' }, createMark(64)),
+          h('div', { class: 'hero' }, createMark(96)),
           title('obWelcomeTitle'),
           lead('obWelcomeBody'),
           h('ul', { class: 'points' }, ...['obPoint1', 'obPoint2', 'obPoint3'].map((k) => h('li', null, icon('check'), h('span', null, t(k))))),
@@ -142,7 +142,7 @@ export function createOnboarding(opts: { preview: WidgetPreview; onFinish: () =>
       }
       case 'done':
         body.append(
-          h('div', { class: 'hero' }, createMark(56)),
+          h('div', { class: 'hero' }, createMark(80)),
           title('obDoneTitle'),
           lead('obDoneBody'),
           h(

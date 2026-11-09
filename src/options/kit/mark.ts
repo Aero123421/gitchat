@@ -1,27 +1,20 @@
-// The gitchat mark: the creature as a dark glass bead. Its eyes follow the pointer a little and
-// blink now and then — quiet signs of life, nothing more.
+// The gitchat mark: the creature as a frosted-glass bead, the same as the on-page widget and the
+// extension icon, in the page's light or dark theme. Its eyes follow the pointer a little and blink
+// now and then — quiet signs of life, nothing more.
 
 import { Spring, onFrame, clamp } from '../../content/ui/core/spring.js';
-import { s } from './dom';
+import { CREATURE_VARS, creatureSVG } from '../../shared/creature-art.js';
 
 export function createMark(size = 56, live = true): SVGSVGElement {
-  const eyeL = s('rect', { x: -9.5, y: -6.5, width: 5, height: 13, rx: 2.5, fill: '#f5f5f7' });
-  const eyeR = s('rect', { x: 4.5, y: -6.5, width: 5, height: 13, rx: 2.5, fill: '#f5f5f7' });
-  const face = s('g', {}, eyeL, eyeR);
-  const svg = s(
-    'svg',
-    { class: 'mark', viewBox: '-32 -32 64 64', width: size, height: size, 'aria-hidden': 'true' },
-    s('defs', {}, s('radialGradient', { id: 'mk-g', cx: '.32', cy: '.22', r: '.9' },
-      s('stop', { offset: '0', 'stop-color': '#3a3a40' }),
-      s('stop', { offset: '.55', 'stop-color': '#1b1b1f' }),
-      s('stop', { offset: '1', 'stop-color': '#121214' }))),
-    s('circle', { r: 29, fill: 'url(#mk-g)' }),
-    s('circle', { r: 28.6, fill: 'none', stroke: 'rgba(255,255,255,.22)', 'stroke-width': 0.8 }),
-    s('path', { d: 'M-17 -19a24 24 0 0 1 22 -6', stroke: 'rgba(255,255,255,.35)', 'stroke-width': 2, 'stroke-linecap': 'round', fill: 'none' }),
-    face,
-    s('circle', { cx: 15.5, cy: 16, r: 3.4, fill: '#0a84ff' }),
-  );
+  const markup = creatureSVG({ colors: CREATURE_VARS, detail: size <= 32 ? 'small' : 'full', size, className: 'mark' });
+  const svg = new DOMParser().parseFromString(markup, 'image/svg+xml').documentElement as unknown as SVGSVGElement;
   if (!live) return svg;
+
+  const face = svg.querySelector<SVGGElement>('.cr-face');
+  const eyes = Array.from(svg.querySelectorAll<SVGRectElement>('.cr-eye'));
+  if (!face || !eyes.length) return svg;
+  const eyeH = Number(eyes[0]!.getAttribute('height'));
+  const [fx, fy] = (face.getAttribute('transform')?.match(/-?[\d.]+/g) ?? ['32', '27']).map(Number) as [number, number];
 
   const lx = new Spring(0, { stiffness: 260, damping: 26 });
   const ly = new Spring(0, { stiffness: 260, damping: 26 });
@@ -48,8 +41,8 @@ export function createMark(size = 56, live = true): SVGSVGElement {
       const dy = py - (r.top + r.height / 2);
       const d = Math.hypot(dx, dy) || 1;
       const k = Math.min(1, d / 160);
-      lx.set((dx / d) * k * 3.2);
-      ly.set((dy / d) * k * 2.6);
+      lx.set((dx / d) * k * 2.4);
+      ly.set((dy / d) * k * 2);
     }
     const now = performance.now();
     if (now > nextBlink) {
@@ -60,12 +53,12 @@ export function createMark(size = 56, live = true): SVGSVGElement {
     lx.step(dt);
     ly.step(dt);
     lid.step(dt);
-    const hgt = 13 * clamp(lid.value, 0.06, 1);
-    for (const e of [eyeL, eyeR]) {
+    const hgt = eyeH * clamp(lid.value, 0.06, 1);
+    for (const e of eyes) {
       e.setAttribute('height', hgt.toFixed(2));
       e.setAttribute('y', (-hgt / 2).toFixed(2));
     }
-    face.setAttribute('transform', `translate(${lx.value.toFixed(2)} ${ly.value.toFixed(2)})`);
+    face.setAttribute('transform', `translate(${(fx + lx.value).toFixed(2)} ${(fy + ly.value).toFixed(2)})`);
   });
   return svg;
 }

@@ -1,32 +1,67 @@
-# gitchat
+<p align="center">
+  <img src="docs/images/gitchat.png" width="112" alt="">
+</p>
 
-[日本語](README.ja.md)
+<h1 align="center">gitchat</h1>
 
-**gitchat** is an open-source Chrome extension that saves your conversations from ChatGPT, Claude, and Gemini to your own GitHub repository as Markdown files — one file per conversation, organized in `chatgpt/`, `claude/`, and `gemini/`. It is built for handing a complete conversation to another chat or to an AI coding agent such as Claude Code without copy-pasting, using GitHub as a durable place to keep and share your history. New messages in a tracked chat stage automatically when the AI finishes answering, and you commit and push when ready (or turn on auto-commit and auto-push).
+<p align="center">
+  Save your ChatGPT, Claude and Gemini chats to your own GitHub repository,<br>
+  one Markdown file per chat, with a git-like <b>stage → commit → push</b>.
+</p>
+
+<p align="center">
+  <a href="https://github.com/Aero123421/gitchat/releases/latest"><img src="https://img.shields.io/github/v/release/Aero123421/gitchat?color=111113" alt="Latest release"></a>
+  <a href="https://github.com/Aero123421/gitchat/actions/workflows/ci.yml"><img src="https://github.com/Aero123421/gitchat/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/Aero123421/gitchat?color=111113" alt="MIT license"></a>
+  <img src="https://img.shields.io/badge/Chrome-120%2B-0a84ff" alt="Chrome 120 or later">
+</p>
+
+<p align="center"><b>English</b> · <a href="README.ja.md">日本語</a></p>
+
+<p align="center">
+  <img src="docs/images/demo-en.gif" width="760" alt="A question is sent in a chat and the AI answers. The answer appears as a droplet beside the gitchat creature at the right edge of the page; hovering the creature shows Commit and Push, and the droplet merges into it, then rises away to GitHub.">
+</p>
+
+## Why gitchat
+
+A good AI conversation is worth keeping, and worth handing to the next tool. gitchat turns each chat into a Markdown file in a GitHub repository you own. Give Claude Code, another agent or a colleague one link instead of copy-pasting, and keep a history that survives across browsers and computers.
+
+## How it feels
+
+A small widget sits at the right edge of the chat page.
+
+- **Stage**: when the AI finishes an answer, the new messages appear as droplets next to it. Nothing is saved yet.
+- **Commit**: hover the widget and press Commit. The droplets merge in and become blue dots, one per commit not yet on GitHub.
+- **Push**: press Push and the dots rise away: the chat file is in your repository.
+- **Panel**: click the widget for the chat's commit graph (oldest at the top; the dotted line marks what is already on GitHub), a button to copy the file's GitHub link, and the **Auto commit** and **Auto push** switches. While a switch is on, its button is hidden.
+
+<p align="center">
+  <img src="docs/images/styles-en.png" width="470" alt="The three widget styles: Creature, Line and Dot">
+  &nbsp;
+  <img src="docs/images/panel.png" width="300" alt="The panel: commit graph with an origin line, Commit, Push, copy link, settings, and the auto commit and auto push switches">
+</p>
+
+Three styles, all monochrome glass with one blue accent: **Creature** (the default; it watches the AI think and reacts to what you do), **Line** and **Dot**.
 
 ## Features
 
-- **One chat, one Markdown file**: each conversation is saved to `<service>/<date>-<title-slug>--<id8>.md` with YAML front matter (`gitchat`, `service`, `id`, `url`, `title`, `created`, `captured`, `messages`) followed by `## User` and `## Assistant` sections. The file name is fixed once created.
-- **Selective tracking ("init")**: conversations are untracked until you choose to save them. Starting tracking scrolls to the top of the conversation, waits while the site loads older messages, reads the full history from top to bottom, and restores your scroll position. Progress is shown as a loaded message count and then a reading percentage, and can be cancelled at any time. Temporary chats (ChatGPT temporary chat) are never saved.
-- **Fidelity for technical chats**: preserves headings, lists, links, blockquotes, tables (with column alignment where the site keeps it), fenced code blocks with language identifiers, and math restored to its original TeX (`$...$` and `$$...$$`).
-- **Interactive visualizations**: Claude artifacts, ChatGPT inline visualizations, and Gemini Canvas previews that are on screen at capture time are saved as rendered HTML files next to the chat (`<chat>.assets/<name>.html`) and linked from the Markdown.
-- **Git-like workflow**: answers stage automatically when finished. Commit locally (stored in IndexedDB) and push to GitHub on demand, or enable **Auto commit** and **Auto push**. Pressing **Push** commits any staged messages in the current chat first so work is never left behind.
-- **Multi-device sync without manual conflict resolution**: pushes are always fast-forward (`force: false`). If another computer pushed first, gitchat replays local commits on top of the remote branch; if the same chat changed on two devices, the changes from both are merged message by message (the newer capture wins only where both changed the same message).
-- **Three on-page widget styles**: choose between **Creature** (default), **Line**, and **Dot**, or use the toolbar popup. Hovering the widget reveals action buttons; clicking opens a panel with the commit graph, a one-click button to copy the GitHub file URL, auto switches, and settings.
-- **Direct to your repository**: gitchat has no servers of its own, no analytics, and no telemetry. Chat content travels only from the chat page in your browser to your GitHub repository through the GitHub API.
+- **One chat, one Markdown file** in `chatgpt/`, `claude/` and `gemini/`, named `<date>-<title>--<id>.md`, with YAML front matter and `## User` / `## Assistant` sections.
+- **Faithful for technical chats**: headings, lists, links, tables, code blocks with their language, math restored to TeX (`$…$`, `$$…$$`), and interactive visualizations (Claude artifacts, ChatGPT visualizations, Gemini Canvas) saved as HTML files next to the chat.
+- **Whole history on demand**: a chat is saved once you press **Start saving this chat**. gitchat scrolls to the top, waits while the site loads older messages, reads everything and puts your scroll position back. Temporary chats are never saved.
+- **Several computers, no conflicts to resolve**: pushes are fast-forward only. If another computer pushed first, gitchat replays on top; if both changed the same chat, the two are merged message by message.
+- **Edits and regenerated answers** replace the old branch of the conversation; when the page no longer matches what was saved, gitchat reads the whole chat again on its own.
+- **Your data stays yours**: no servers, no analytics. Chats go from your browser straight to your repository through the GitHub API.
 
 ## Install
 
-gitchat requires Chrome 120 or later. It is not on the Chrome Web Store yet; install it from a release archive or build it from source.
+gitchat requires Chrome 120 or later. It is not on the Chrome Web Store yet.
 
-### From GitHub Releases
+1. Download `gitchat-<version>.zip` from the [latest release](https://github.com/Aero123421/gitchat/releases/latest) and unzip it to a folder you keep.
+2. Open `chrome://extensions` and turn on **Developer mode** (top right).
+3. Click **Load unpacked** and select the unzipped folder.
 
-1. Download the latest `gitchat-<version>.zip` from [Releases](https://github.com/Aero123421/gitchat/releases) and unzip it.
-2. Open `chrome://extensions` in Chrome.
-3. Enable **Developer mode** in the top-right corner.
-4. Click **Load unpacked** and select the unzipped folder.
-
-### From source
+<details>
+<summary>Build from source instead</summary>
 
 Requires Node.js 22.12 or later:
 
@@ -37,26 +72,74 @@ npm install
 npm run build
 ```
 
-Then open `chrome://extensions`, enable **Developer mode**, click **Load unpacked**, and select the `dist/` folder.
+Then load the `dist/` folder with **Load unpacked**.
 
-## Getting started
+</details>
 
-When you install gitchat, the setup wizard opens automatically:
+## Set up (about 3 minutes)
 
-1. **Connect GitHub**: sign in with GitHub (OAuth device flow, when an OAuth client ID is configured) or create a fine-grained personal access token scoped to your chat repository with **Contents: Read and write** and **Metadata: Read**.
-2. **Choose a repository**: let gitchat create a new private repository (default name `ai-chats`), or pick an existing empty or gitchat-managed repository. gitchat refuses non-empty repositories it did not create.
-3. **Pick how it looks and works**: choose a widget style (**Creature**, **Line**, or **Dot**) using the live preview on the right edge, and optionally turn on **Auto commit** and **Auto push**.
-4. **Start saving a chat**: open a conversation on ChatGPT, Claude, or Gemini, hover the widget on the right edge of the page, and click **Start saving this chat**.
+The setup page opens by itself after installing (or click the gitchat icon in the toolbar, then **Set up**).
 
-See [Getting started](docs/getting-started.md) for the complete setup guide and [Troubleshooting](docs/troubleshooting.md) if you run into an issue.
+1. **Create a private repository for your chats.** The setup page opens GitHub's form with the name `ai-chats` and **Private** already chosen; press **Create repository**.
+2. **Create a fine-grained token for that repository only.** The setup page opens GitHub's form with the name and the **Contents: Read and write** permission filled in. Under **Repository access**, choose **Only select repositories** and pick the repository, then **Generate token** and copy it.
+3. **Paste the token** into the setup page. It is stored only on this computer.
+4. **Pick the repository and a widget style**, and optionally turn on Auto commit / Auto push.
+5. **Open a chat** on ChatGPT, Claude or Gemini, hover the widget at the right edge, and press **Start saving this chat**.
 
-## How it works
+<details>
+<summary>What the GitHub pages look like</summary>
+<br>
 
-1. **Stage**: when you track a chat, gitchat captures the full conversation. Afterwards, whenever the AI finishes an answer, gitchat diffs the messages against the last commit by message ID and content hash and stages any new or updated messages automatically.
-2. **Commit**: clicking **Commit** (or enabling **Auto commit**) records a snapshot of the chat file and its assets as a local commit in IndexedDB. Auto-commit runs only after an answer finishes, so a question and its answer are never split across commits.
-3. **Push**: clicking **Push** (or enabling **Auto push**) commits any staged changes for the current chat and writes all pending commits to your GitHub repository via the GitHub Git Data API. Turning **Auto push** on also turns **Auto commit** on; turning **Auto commit** off also turns **Auto push** off. When an automatic action is on, its manual button is hidden from the widget.
+<img src="src/options/img/github-new-repo.png" width="560" alt="GitHub's new repository form: name ai-chats (1), Private (2), Create repository (3)">
 
-For details on the file format, multi-device conflict resolution, init on long virtualized chats, and the three widget styles, see [How it works](docs/how-it-works.md).
+<img src="src/options/img/github-token-access.png" width="560" alt="Token form, Repository access: Only select repositories (1), then select the repository (2)">
+
+<img src="src/options/img/github-token-permissions.png" width="560" alt="Token form, Permissions: Contents Read and write (1), Metadata Read-only (2), Generate token (3)">
+
+</details>
+
+The [Getting started](docs/getting-started.md) guide walks through every step; [Troubleshooting](docs/troubleshooting.md) helps when something does not work.
+
+## What ends up in your repository
+
+```text
+ai-chats/
+├── chatgpt/
+│   └── 2026-11-09-state-management-design--1a2b3c4d.md
+├── claude/
+│   ├── 2026-11-08-fourier-intuition--9f8e7d6c.md
+│   └── 2026-11-08-fourier-intuition--9f8e7d6c.assets/
+│       └── chart-1f2e.html
+└── gemini/
+    └── 2026-11-07-kyoto-trip--5a6b7c8d.md
+```
+
+```markdown
+---
+gitchat: 1
+service: chatgpt
+id: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
+url: "https://chatgpt.com/c/1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
+title: "State management design"
+created: 2026-11-09T09:12:00.000Z
+captured: 2026-11-09T10:40:00.000Z
+messages: 6
+---
+
+# State management design
+
+## User
+<!-- gitchat:message id="…" length="…" -->
+
+How should I structure state in a mid-size React app?
+
+## Assistant
+<!-- gitchat:message id="…" length="…" -->
+
+With mostly server data, separate **server state** from **UI state** first. …
+```
+
+The hidden comment under each heading keeps the message's identity, so another computer can continue the same file. See [How it works](docs/how-it-works.md) for the details.
 
 ## Privacy
 
@@ -89,6 +172,7 @@ Requires Node.js 22.12+ (and Python 3 for the widget playground).
 | `npm run typecheck` | Type-check `src/` and `tests/` with TypeScript |
 | `npm run zip` | Build and package `dist/` into `gitchat-<version>.zip` |
 | `npm run playground` | Serve the widget playground at `http://localhost:5180/playground/` |
+| `npm run icons` | Render the extension icons and the README logo from `src/shared/creature-art.js` (uses your installed Google Chrome; set `CHROME_PATH` if needed) |
 
 ### Code layout
 

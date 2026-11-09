@@ -45,6 +45,7 @@ async function copyStatic() {
   }
   await cp(src('_locales'), out('_locales'), { recursive: true });
   await cp(src('icons'), out('icons'), { recursive: true });
+  await cp(src('options/img'), out('img'), { recursive: true });
 }
 
 await rm(out(), { recursive: true, force: true });

@@ -38,8 +38,18 @@ GitHub との接続には 2 つの方法があります。
 
 - **個人アクセストークン（推奨: 1 つのリポジトリだけに権限を限定できます）**。gitchat に 3 つの手順が表示されます（サインインボタンが表示されている場合は、先に **トークンを使う** をクリックします）。
   1. **GitHub でリポジトリを作成** をクリックすると、名前 `ai-chats` と **Private** が入力された状態で GitHub のリポジトリ作成画面が開きます。README・`.gitignore`・ライセンスは追加せず、空のまま作成してください。1 つのリポジトリに限定したトークンではリポジトリを作成できないため、先にリポジトリを用意します。
-  2. **GitHub でトークンを作成** をクリックすると、名前と **Contents: Read and write** の権限が入力された状態で fine-grained トークンの作成画面が開きます（**Metadata: Read** は自動で付きます）。**Repository access** で **Only select repositories** を選び、手順 1 のリポジトリを指定します。
-  3. トークンを発行し、`github_pat_...` で始まる文字列を gitchat に貼り付けて **接続** をクリックします。
+
+     <img src="../src/options/img/github-new-repo.png" width="520" alt="GitHub のリポジトリ作成フォーム: 名前 ai-chats（1）、Private（2）、Create repository（3）">
+
+  2. **GitHub でトークンを作成** をクリックすると、名前と **Contents: Read and write** の権限が入力された状態で fine-grained トークンの作成画面が開きます（**Metadata: Read-only** は自動で付きます）。有効期限はそのままでも変更しても構いません。期限が切れたら、新しいトークンを作って貼り直してください。**Repository access** で **Only select repositories** を選び、手順 1 のリポジトリを指定します。
+
+     <img src="images/github-token-name.png" width="420" alt="トークン作成フォーム: 名前と説明は入力済み、有効期限（1）">
+
+     <img src="../src/options/img/github-token-access.png" width="520" alt="トークン作成フォームの Repository access: Only select repositories（1）、リポジトリを選択（2）">
+
+     <img src="../src/options/img/github-token-permissions.png" width="520" alt="トークン作成フォームの Permissions: Contents の Read and write（1）、Metadata の Read-only（2）、Generate token（3）">
+
+  3. **Generate token** を押し、一度だけ表示される `github_pat_...` で始まる文字列をコピーして gitchat に貼り付け、**接続** をクリックします。
 - **GitHub でサインイン（OAuth Device Flow）**:
   - ビルドに OAuth クライアント ID が組み込まれている場合、または **設定 → 詳細 → GitHub OAuth クライアント ID** が設定されている場合に利用できます。
   - **GitHub でサインイン** をクリックし、画面に表示されたコードをコピーして **GitHub を開く** を押し、GitHub 上で承認すると自動的に接続が完了します。

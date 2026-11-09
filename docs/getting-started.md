@@ -38,8 +38,18 @@ gitchat supports two ways to authenticate with GitHub:
 
 - **Personal access token (recommended: access to one repository only)**. gitchat shows three steps (click **Use a token instead** first if the sign-in button is shown):
   1. **Create a repository on GitHub** opens GitHub's new-repository form, pre-filled with the name `ai-chats` and **Private**. Create it empty (no README, `.gitignore` or license). A token limited to one repository cannot create repositories itself, so the repository comes first.
-  2. **Create a token on GitHub** opens GitHub's fine-grained token form with the name and the **Contents: Read and write** permission pre-filled (**Metadata: Read** is added automatically). Under **Repository access**, choose **Only select repositories** and pick the repository from step 1.
-  3. Generate the token, paste the `github_pat_...` string into gitchat, and click **Connect**.
+
+     <img src="../src/options/img/github-new-repo.png" width="520" alt="GitHub's new repository form: name ai-chats (1), Private (2), Create repository (3)">
+
+  2. **Create a token on GitHub** opens GitHub's fine-grained token form with the name and the **Contents: Read and write** permission pre-filled (**Metadata: Read-only** is added automatically). Keep or change the expiration; when it expires, create a new token and paste it again. Under **Repository access**, choose **Only select repositories** and pick the repository from step 1.
+
+     <img src="images/github-token-name.png" width="420" alt="Token form: name and description filled in, expiration (1)">
+
+     <img src="../src/options/img/github-token-access.png" width="520" alt="Token form, Repository access: Only select repositories (1), then select the repository (2)">
+
+     <img src="../src/options/img/github-token-permissions.png" width="520" alt="Token form, Permissions: Contents Read and write (1), Metadata Read-only (2), Generate token (3)">
+
+  3. Click **Generate token**, copy the `github_pat_...` string GitHub shows (only once), paste it into gitchat, and click **Connect**.
 - **Sign in with GitHub (OAuth device flow)**:
   - Available when an OAuth client ID is configured in the build or under **Settings → Advanced → GitHub OAuth client ID**.
   - Click **Sign in with GitHub**, copy the one-time device code shown on screen, click **Open GitHub**, and authorize the request. gitchat finishes signing in automatically once approved.

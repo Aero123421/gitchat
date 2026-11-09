@@ -100,6 +100,10 @@ main { padding: 34px 20px 140px; }
 }
 .howto > li > * { grid-column: 2; margin: 0; }
 .howto > li > .btn { justify-self: start; }
+.shot { display: flex; flex-direction: column; gap: 6px; }
+.shot a { display: block; border-radius: 16px; cursor: zoom-in; }
+.shot img { display: block; width: 100%; height: auto; border-radius: 16px; box-shadow: 0 1px 3px var(--shadow); }
+.shot figcaption { font-size: 11.5px; line-height: 1.45; color: var(--ink-2); }
 .connect .btn.ghost.small, .repo-chooser .btn.ghost.small { align-self: flex-start; }
 .connect .btn.ghost.small.mid { align-self: center; }
 

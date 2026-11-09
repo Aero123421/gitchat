@@ -466,5 +466,20 @@
   },
   "errInitCoverage": {
     "message": "Some messages could not be read, so nothing was saved. Try again."
+  },
+  "shotRepo": {
+    "message": "① Name (filled in) · ② Private · ③ Create repository",
+    "description": "Caption of the GitHub new-repository screenshot"
+  },
+  "shotAccess": {
+    "message": "① Only select repositories · ② pick the repository you just created",
+    "description": "Caption of the token repository-access screenshot"
+  },
+  "shotPermissions": {
+    "message": "① Contents: Read and write and ② Metadata: Read-only are filled in · ③ Generate token, then copy the token",
+    "description": "Caption of the token permissions screenshot"
+  },
+  "openFullSize": {
+    "message": "Open full size"
   }
 }

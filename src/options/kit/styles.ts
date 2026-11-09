@@ -18,6 +18,8 @@ const LIGHT = `
   --accent: #0a84ff; --accent-soft: rgba(10,132,255,.12); --err: #e5484d; --err-soft: rgba(229,72,77,.1);
   --dot: #bcbcc1; --track: rgba(120,120,128,.22); --thumb: #fff; --field: rgba(255,255,255,.62);
   --solid: #111113; --on-solid: #fff;
+  --cr-body: #f3f3f6; --cr-edge: rgba(0,0,0,.17); --cr-rim: rgba(255,255,255,.9); --cr-shadow: rgba(0,0,0,.13);
+  --cr-ink: #111113; --cr-accent: #0a84ff; --cr-hi: #ffffff; --cr-lo: #e2e2e7;
 `;
 
 const DARK = `
@@ -30,6 +32,8 @@ const DARK = `
   --accent: #0a84ff; --accent-soft: rgba(10,132,255,.2); --err: #ff6369; --err-soft: rgba(229,72,77,.16);
   --dot: #5c5c62; --track: rgba(120,120,128,.38); --thumb: #f2f2f4; --field: rgba(255,255,255,.045);
   --solid: #ececee; --on-solid: #111113;
+  --cr-body: #3d3d43; --cr-edge: rgba(0,0,0,.55); --cr-rim: rgba(255,255,255,.28); --cr-shadow: rgba(0,0,0,.5);
+  --cr-ink: #ececee; --cr-accent: #0a84ff; --cr-hi: #55555c; --cr-lo: #303035;
 `;
 
 export const kitCSS = `

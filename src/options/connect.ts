@@ -144,6 +144,14 @@ export function createConnect(onDone: (login: string) => void): HTMLElement {
     queueMicrotask(() => input.focus());
     const link = (href: string, label: string) =>
       h('a', { class: 'btn small', href, target: '_blank', rel: 'noopener noreferrer' }, h('span', null, label), icon('external'));
+    // what the GitHub page looks like, with the fields to check numbered as in the caption
+    const shot = (file: string, caption: string) =>
+      h(
+        'figure',
+        { class: 'shot' },
+        h('a', { href: `img/${file}`, target: '_blank', rel: 'noopener', title: t('openFullSize') }, h('img', { src: `img/${file}`, alt: caption, loading: 'lazy', decoding: 'async' })),
+        h('figcaption', null, caption),
+      );
     // The repository comes first: a token limited to one repository can only be pointed at one that exists.
     return h(
       'div',
@@ -152,8 +160,15 @@ export function createConnect(onDone: (login: string) => void): HTMLElement {
       h(
         'ol',
         { class: 'howto' },
-        h('li', null, h('p', null, t('tokenStepRepo')), link(NEW_REPO_URL, t('createRepoOnGitHub'))),
-        h('li', null, h('p', null, t('tokenStepToken')), link(PAT_URL, t('createToken'))),
+        h('li', null, h('p', null, t('tokenStepRepo')), link(NEW_REPO_URL, t('createRepoOnGitHub')), shot('github-new-repo.png', t('shotRepo'))),
+        h(
+          'li',
+          null,
+          h('p', null, t('tokenStepToken')),
+          link(PAT_URL, t('createToken')),
+          shot('github-token-access.png', t('shotAccess')),
+          shot('github-token-permissions.png', t('shotPermissions')),
+        ),
         h(
           'li',
           null,
