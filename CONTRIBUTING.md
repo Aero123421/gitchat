@@ -14,7 +14,7 @@ For security vulnerabilities, do **not** open a public issue; follow [SECURITY.m
 
 ### Prerequisites
 
-- **Node.js 20** or later
+- **Node.js 22.12** or later
 - **Google Chrome 120** or later
 - **Python 3** (used only by `npm run playground` to serve the local widget playground)
 

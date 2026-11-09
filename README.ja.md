@@ -28,7 +28,7 @@ Chrome 120 以降が必要です。現在は Chrome ウェブストア公開前�
 
 ### ソースコードからビルド
 
-Node.js 20 以降が必要です。
+Node.js 22.12 以降が必要です。
 
 ```sh
 git clone https://github.com/Aero123421/gitchat.git
@@ -78,7 +78,7 @@ npm run build
 
 ## 開発
 
-Node.js 20 以降が必要です（ウィジェットのプレイグラウンドを開く場合は Python 3 も使用します）。
+Node.js 22.12 以降が必要です（ウィジェットのプレイグラウンドを開く場合は Python 3 も使用します）。
 
 | コマンド | 内容 |
 | --- | --- |

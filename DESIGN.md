@@ -40,9 +40,26 @@ chat page DOM ──adapter──► CapturedMessage[] ──► ChatSnapshot �
   message) that shows unknown ids after a known one is an edit or a regenerated answer: it is
   authoritative from its first known message, and the turns that vanished are dropped. Only init
   snapshots (`complete: true`) replace the whole list; an empty or answer-less one is refused.
+- **Page reads**: per message, the chat record keeps what this device last read on the page
+  (`pageReads`: content hash, when it was first read, the page views that read it). A message the page
+  still shows exactly as read before keeps the stored version, which may hold another device's edit
+  merged since. Each live snapshot names its page view (`view`: a random id per tab document and
+  visit of the chat, and when the visit started); it may only drop messages that view could have
+  shown — read on this device before the visit started, or by the view itself. Messages from another
+  device's copy, or read later by another tab, are never dropped by their absence.
+- **Ambiguous captures**: a live snapshot that shares no message with a chat that has some (the first
+  question was edited), or that reaches the end but stops before messages its view read there (the
+  end got shorter), is not applied. When it was a settled read of the end, the reply carries
+  `fullRead` and the tab reads the whole chat again (an automatic rescan, at most once a minute per
+  visit), which settles it with a complete capture.
 - **Capture order**: `capturedAt` is the time the page was read (before any async enrichment). The
   content script sends captures in read order, and the background ignores one older than the last it
   applied for that chat.
+- **Right chat, right turn**: after a navigation, a read that still contains any of the previous
+  chat's message ids is ignored (the page, or a hidden copy of it, still shows the old chat; at most
+  30 s). An `answered` capture re-checks the site's "AI is working" signal right before reading, so it
+  never takes the next turn's beginning. Before Commit/Push, the popup needs the tab's explicit
+  `{ok: true}` to its refresh (no reply, a timeout of 8 s or a malformed reply stop the action).
 - **Snapshot reasons**: the content script sends `sent` when the AI starts working (the user's
   message appears in the widget right away), `answered` when the answer is finished, `manual`
   otherwise. Auto-commit runs only for `answered`, so a commit never splits a question from its answer.
@@ -52,7 +69,10 @@ chat page DOM ──adapter──► CapturedMessage[] ──► ChatSnapshot �
   name is `<title slug>-<key fingerprint>.html`, so recapturing one message never renames another's
   asset. Message Markdown links to them as `gitchat-asset:<name>`, which the background rewrites to
   `<file>.assets/<name>`. A later capture that cannot reach the frame (panel closed) keeps the saved
-  link and file.
+  link and file. A preview panel is only serialized when its owning message is known — the card
+  marked current (Claude) or the card the user clicked — never by title alone, which is ambiguous on
+  a virtualized list; otherwise it is skipped and the saved copy kept. ChatGPT Work-mode commentary
+  (`[data-local-conversation-item-target-ids]`) is never a message; the final answer is.
 - **Commit**: renders the chat file (front matter + messages) and stores a local commit for the
   current repository (`owner/name@branch`). The commit record, its sequence number and the chat's
   committed refs are written in one IndexedDB transaction; the document payload lives in its own
@@ -126,13 +146,16 @@ headings outside code fences.
   dropped. A local commit whose content the remote copy already has is skipped ("superseded"). The
   chat is then rebased on the result, with the pushed batch as the base, so commits made during the
   push and unstaged work survive, and a later push cannot delete what only the other device had.
-- A live capture can only prune messages this device has seen in a capture; messages that arrived
-  by merge or adoption stay until a local capture has seen them.
+- A live capture can only prune messages its page view could have shown (see Page reads); messages
+  that arrived by merge or adoption stay until a capture on this device has read them.
 - Reading a chat file from the repository also downloads its asset files, so a chat always carries
-  its visualizations and can move to another repository.
+  its visualizations and can move to another repository. Only a file the repository does not have
+  loses its link; a failed download fails the read (adoption is tried again on the next visit, a push
+  is retried), so a temporary GitHub error never removes a link.
 - Starting to track (or rescanning) a chat whose file already exists reads that file: if it is
   newer, the two are combined; otherwise the new capture replaces it (removed messages show as staged
-  removals). Edits made while an init runs are kept over the older capture.
+  removals). Either way a message keeps the other copy's saved visualization when the winning copy
+  only has a plain card for it. Edits made while an init runs are kept over the older capture.
 - An empty repository initialized by two devices at once: the loser continues from the winner's
   first commit.
 - Commits, paths and baselines belong to one repository. Switching repository drops the old
@@ -173,4 +196,7 @@ Progress is reported as: loading older messages (count) → reading (0–100%). 
 
 An init session is owned by one tab: `chat/init/start` returns an `initId` that progress, done and
 cancel must carry. A second tab gets `busy`; a session whose tab goes away (port closed, or no
-progress for 2 minutes) ends, and a late `done` gets `stale-init`.
+progress for 2 minutes) ends, and a late `done` gets `stale-init`. `done` does its network work
+(looking for the chat's file in the repository) first; then the session check and the change are one
+step in the chat queue, and cancel runs in the same queue, so whichever comes first wins and a
+cancelled init can never be tracked or committed afterwards.

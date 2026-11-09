@@ -19,11 +19,13 @@ Shared helpers live in [`src/content/adapters/define.ts`](../src/content/adapter
 4. **Never write HTML into the host page**:
    Gemini enforces Trusted Types on the main document. Content capture only reads from the page DOM, and the widget renders inside an isolated `<gitchat-ui>` Shadow DOM.
 5. **Account for virtualized lists, hidden panes, and `content-visibility: auto`**:
-   - **ChatGPT** can leave a stale `0×0` copy of `.thread-scroll-container` in the DOM after navigation; `visiblePane()` checks `getBoundingClientRect().height > 0` so only the visible transcript is read and observed.
+   - **ChatGPT** can leave a stale `0×0` copy of `.thread-scroll-container` in the DOM after navigation; `transcript()` reads only the visible pane (`getBoundingClientRect().height > 0`), and nothing at all while panes exist but none is visible. The controller adds a site-independent guard: after a navigation, a read that still contains any of the previous chat's message ids is not a read of the new chat (for at most 30 s).
    - **Gemini** uses `content-visibility: auto` on off-screen turns, which causes `element.innerText` to return an empty string. Always read text through `textContent` and structural DOM walks (`userText()` in `src/content/capture/snapshot.ts` and `toMarkdown()` in `src/content/capture/markdown.ts`).
    - **ChatGPT** `fallback-turn-N` keys are window-relative in virtualized lists and shift as the user scrolls; never use them as stable message identity.
 6. **Validate captures before staging**:
-   `mergeSnapshot()` (`src/background/stage.ts`) refuses empty complete captures (`complete: true`) and treats live captures (`complete: false`) as upserts by message ID so a broken selector or unloaded virtualized rows never overwrite previously captured messages.
+   `mergeSnapshot()` (`src/background/stage.ts`) refuses empty complete captures (`complete: true`) and treats live captures (`complete: false`) as upserts by message ID so a broken selector or unloaded virtualized rows never overwrite previously captured messages. A live capture that cannot be placed safely is refused and answered with `fullRead`, and the tab reads the whole chat again.
+7. **Tie a preview to its message only on evidence**:
+   A preview panel (Claude artifact, ChatGPT file preview) belongs to the card that is marked current (`aria-current="true"` on Claude) or to the card the user clicked (`ctx.opened()`). A title match is not enough on a virtualized list: the owning card may be unmounted while another card with the same title is on screen. Without evidence the preview is skipped and the saved copy is kept.
 
 ## Current site hooks
 

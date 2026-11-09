@@ -17,7 +17,7 @@ gitchat の動作には Chrome 120 以降が必要です。Chrome ウェブス�
 
 ### 方法 B: ソースコードからビルドする
 
-Node.js 20 以降が必要です。
+Node.js 22.12 以降が必要です。
 
 ```sh
 git clone https://github.com/Aero123421/gitchat.git

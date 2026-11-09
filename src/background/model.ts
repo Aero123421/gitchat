@@ -36,9 +36,11 @@ export interface ChatRecord {
   /** DOM-read time of the newest capture this device applied; older captures are refused. */
   seenAt?: string;
   /**
-   * Ids of messages a capture on this device has seen on the page. Messages that only came from
+   * What captures on this device read on the page, per message id. Messages that only came from
    * another device's copy are not in it, so a capture of this page cannot prune them as a branch.
    */
+  pageReads?: Record<string, PageRead>;
+  /** Before `pageReads`: ids of the messages a capture on this device had seen on the page. */
   seen?: string[];
   /**
    * False while the last applied capture was taken mid-turn ('sent'); automatic commits wait until a
@@ -50,6 +52,16 @@ export interface ChatRecord {
   /** Messages as of the last local commit. */
   committed: CommittedRef[];
   updatedAt: number;
+}
+
+/** One message as captures on this device last read it on the page. */
+export interface PageRead {
+  /** Hash of the latest reading ('' when unknown). */
+  h: string;
+  /** When this device first read it (epoch ms; 0 when unknown). */
+  at: number;
+  /** The page views that read it, most recent first (a few). */
+  v?: string[];
 }
 
 /** What a commit contains. Rendered to files at push time, once the final path is known. */

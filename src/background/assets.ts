@@ -68,8 +68,9 @@ const REPO_LINK = /(!?)\[((?:\\.|[^\]\\])*)\]\(([^()\s/]+\.assets\/([^()\s]+))\)
 /**
  * Turns a message read from the repository back into live form: every linked asset gets its bytes
  * (`fetch` by file name) and a `gitchat-asset:` link, so the message can be written to any
- * repository later. An asset that cannot be fetched loses its link (a card becomes a plain card,
- * a link its label) rather than pointing at a file that may not exist.
+ * repository later. `fetch` returns null only when the repository has no such file: then the link
+ * goes (a card becomes a plain card, a link its label) rather than pointing at nothing. A failed
+ * download rejects, and so does this: a message is never read without assets it still has.
  */
 export async function materializeAssets(
   m: CapturedMessage,
@@ -81,7 +82,7 @@ export async function materializeAssets(
   for (const [, , , , raw = ''] of m.markdown.matchAll(REPO_LINK)) {
     const name = decode(raw);
     if (found.has(name)) continue;
-    const got = await fetch(name).catch(() => null);
+    const got = await fetch(name);
     found.set(name, !!got);
     if (got && !assets.some((a) => a.name === name)) {
       const ext = name.slice(name.lastIndexOf('.') + 1).toLowerCase();

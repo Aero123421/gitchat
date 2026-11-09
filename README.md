@@ -28,7 +28,7 @@ gitchat requires Chrome 120 or later. It is not on the Chrome Web Store yet; ins
 
 ### From source
 
-Requires Node.js 20 or later:
+Requires Node.js 22.12 or later:
 
 ```sh
 git clone https://github.com/Aero123421/gitchat.git
@@ -78,7 +78,7 @@ Verified on 34–40-turn conversations across all three services (full-history i
 
 ## Development
 
-Requires Node.js 20+ (and Python 3 for the widget playground).
+Requires Node.js 22.12+ (and Python 3 for the widget playground).
 
 | Command | Description |
 | --- | --- |

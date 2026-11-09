@@ -63,6 +63,11 @@ function snapshot(v: unknown): ServiceId {
   iso(s.capturedAt, 'capture time');
   bool(s.complete, 'complete');
   if (s.atEnd !== undefined) bool(s.atEnd, 'atEnd');
+  if (s.view !== undefined) {
+    const view = obj(s.view, 'view');
+    str(view.id, 'view id', 64, 1);
+    if (typeof view.since !== 'number' || !Number.isFinite(view.since)) fail('view');
+  }
   if (!Array.isArray(s.messages) || s.messages.length > LIMITS.messages) fail('messages');
   let size = 0;
   for (const raw of s.messages) {

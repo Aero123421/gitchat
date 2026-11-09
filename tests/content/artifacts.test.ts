@@ -20,6 +20,11 @@ const load = (dir: string, name: string) => {
   document.body.innerHTML = readFileSync(path.resolve('tests/fixtures', dir, name), 'utf8');
 };
 const a = (id: string, markdown: string): CapturedMessage => ({ id, role: 'assistant', markdown });
+/** The test DOM has no layout: give ChatGPT's transcript panes a size (only a visible pane is read). */
+const showPanes = () => {
+  for (const pane of Array.from(document.querySelectorAll<HTMLElement>('.thread-scroll-container')))
+    pane.getBoundingClientRect = () => ({ top: 0, bottom: 600, height: 600, left: 0, right: 800, width: 800, x: 0, y: 0, toJSON() {} }) as DOMRect;
+};
 /** The test DOM does not load frames: give them a window to talk to. */
 const withWindows = (frames: Iterable<HTMLIFrameElement>) => {
   for (const f of frames) Object.defineProperty(f, 'contentWindow', { get: () => window, configurable: true });
@@ -76,7 +81,7 @@ describe('chatgpt fallbacks', () => {
     expect(msg?.kinds).toContain('code');
   });
 
-  it('turns a generated-file card into a marker and asks for its open preview', async () => {
+  it('turns a generated-file card into a marker; an open preview nobody clicked here has no known owner', async () => {
     document.body.innerHTML = `
       <div class="thread-scroll-container"><div data-turn-key="t1">
         <div data-chatgpt-search-unit-key="x:2:assistant" data-chatgpt-search-message-ids="m-1">
@@ -86,19 +91,18 @@ describe('chatgpt fallbacks', () => {
           </div>
         </div></div></div>
       <aside data-app-shell-focus-area="right-panel"><iframe title="report.html" src="https://codex-inline-visualization-cd.web-sandbox.oaiusercontent.com/"></iframe></aside>`;
+    showPanes();
     withWindows(document.querySelectorAll('iframe'));
     const [msg] = captureVisible(chatgpt, document);
     expect(msg?.markdown).toContain('> **File:** report.html');
     expect(msg?.markdown).toContain('> **Artifact:** Bars');
+    // the only matching card in a virtualized list does not prove it opened the preview (c-services H4)
     const arts = await chatgpt.artifacts!(document);
-    expect(arts.map((x) => [x.key, x.messageId, x.title])).toEqual([
-      ['m-1:viz1', 'm-1', 'Bars'],
-      ['m-1:file:report.html', 'm-1', 'report.html'],
-    ]);
+    expect(arts.map((x) => [x.key, x.messageId, x.title])).toEqual([['m-1:viz1', 'm-1', 'Bars']]);
     // already collected frames are not asked for again
-    expect(await chatgpt.artifacts!(document, { skip: new Set(['m-1:viz1', 'm-1:file:report.html']) })).toEqual([]);
+    expect(await chatgpt.artifacts!(document, { skip: new Set(['m-1:viz1']) })).toEqual([]);
     const linked = attachArtifacts([msg!], arts);
-    expect(linked[0]?.assets?.map((x) => x.name)).toHaveLength(2);
+    expect(linked[0]?.assets?.map((x) => x.name)).toHaveLength(1);
   });
 });
 
@@ -180,6 +184,46 @@ describe('preview ownership (N11)', () => {
   });
 });
 
+describe('preview ownership in virtualized lists (c-services H4)', () => {
+  it('skips a restored Claude panel when the one mounted card with its title is not marked current', async () => {
+    // an older "Plot" was open; its card was virtualized away, a newer "Plot" card is mounted
+    document.body.innerHTML = `
+      <div data-testid="assistant-message" data-turn-key="new"><span role="button" data-testid="frame-card-open">Plot</span></div>
+      <iframe title="Plot" src="https://claude.ai/code/artifact/OLD"></iframe>`;
+    const outer = document.querySelector<HTMLIFrameElement>('iframe')!;
+    const inner = document.createElement('iframe');
+    withWindows([inner]);
+    Object.defineProperty(outer, 'contentDocument', { get: () => ({ querySelector: () => inner }) });
+    expect(await claude.artifacts!(document)).toEqual([]);
+    // marked current by the site: that card owns the panel
+    document.querySelector('[data-testid="frame-card-open"]')!.setAttribute('aria-current', 'true');
+    expect((await claude.artifacts!(document)).map((x) => [x.key, x.messageId])).toEqual([['artifact:OLD', 'new']]);
+  });
+});
+
+describe('chatgpt transcript panes (c-services H1)', () => {
+  const pane = (id: string) =>
+    `<div class="thread-scroll-container"><div data-turn-key="${id}"><div data-chatgpt-search-unit-key="x:0:user" data-chatgpt-search-message-ids="${id}-u"><div data-user-message-bubble>${id} question</div></div></div></div>`;
+
+  it('reads nothing while the only transcript pane is a hidden stale copy', () => {
+    document.body.innerHTML = pane('old');
+    expect(captureVisible(chatgpt, document)).toEqual([]);
+    expect(chatgpt.hasTurn!(document, 'old')).toBe(false);
+  });
+
+  it('reads the visible pane, never the hidden copy next to it', () => {
+    document.body.innerHTML = pane('old') + pane('new');
+    const panes = document.querySelectorAll<HTMLElement>('.thread-scroll-container');
+    panes[1]!.getBoundingClientRect = () => ({ top: 0, bottom: 600, height: 600, left: 0, right: 800, width: 800, x: 0, y: 0, toJSON() {} }) as DOMRect;
+    expect(captureVisible(chatgpt, document).map((m) => m.id)).toEqual(['new-u']);
+  });
+
+  it('keeps reading the whole document in the classic UI (no panes)', () => {
+    load('chatgpt', 'basic.html');
+    expect(captureVisible(chatgpt, document)).toHaveLength(2);
+  });
+});
+
 describe('chatgpt Work mode (N15)', () => {
   it('captures only the final answer, not commentary units of the work log', () => {
     load('chatgpt', 'work.html');
@@ -193,6 +237,19 @@ describe('chatgpt Work mode (N15)', () => {
     const msgs = captureVisible(chatgpt, document);
     expect(msgs.filter((m) => m.role === 'assistant').map((m) => m.id)).toEqual(['ASSISTANT_MESSAGE_UUID']);
     expect(msgs.map((m) => m.markdown).join('\n')).not.toContain('Checking the slider ranges');
+  });
+
+  it('leaves work-log commentary out also before the final answer exists', () => {
+    document.body.innerHTML = `<div data-turn-key="U">
+      <div data-chatgpt-search-unit-key="turn:0:user" data-chatgpt-search-message-ids="U"><div data-user-message-bubble>Question</div></div>
+      <div data-local-conversation-item-target-ids="worklog"><div data-chatgpt-search-unit-key="turn:1:assistant" data-chatgpt-search-message-ids="C">
+        <div data-markdown-text-style="assistant-message"><p>Provisional Work commentary</p></div></div></div></div>`;
+    expect(captureVisible(chatgpt, document).map((m) => m.id)).toEqual(['U']);
+    document.querySelector('[data-turn-key]')!.insertAdjacentHTML(
+      'beforeend',
+      '<div data-local-conversation-final-assistant="true"><div data-chatgpt-search-unit-key="turn:2:assistant" data-chatgpt-search-message-ids="F"><div data-markdown-text-style="assistant-message"><p>Final answer</p></div></div></div>',
+    );
+    expect(captureVisible(chatgpt, document).map((m) => m.id)).toEqual(['U', 'F']);
   });
 
   it('keeps ordinary chat turns unchanged', () => {

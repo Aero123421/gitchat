@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { materializeAssets } from '../../src/background/assets';
-import { diffStaged, hashesOf, keepArtifacts, keepChangesSince, mergeSnapshot, messageHash, refsOf, threeWayMerge, unionMessages } from '../../src/background/stage';
+import { diffStaged, hashesOf, keepArtifacts, keepChangesSince, mergeSnapshot, messageHash, recordReads, refsOf, threeWayMerge, unionMessages } from '../../src/background/stage';
+import type { PageRead } from '../../src/background/model';
 import type { CapturedMessage, ChatSnapshot } from '../../src/shared/types';
 
 const msg = (id: string, text = id, role: CapturedMessage['role'] = 'user', kinds?: string[]): CapturedMessage => ({ id, role, markdown: text, ...(kinds ? { kinds } : {}) });
@@ -17,6 +18,9 @@ const snap = (messages: CapturedMessage[], complete = false, atEnd?: boolean): C
   ...(atEnd === undefined ? {} : { atEnd }),
 });
 const ids = (r: ReturnType<typeof mergeSnapshot>) => (r.ok ? r.messages.map((m) => m.id) : r.code);
+/** Page reads: every message read at `at` (epoch ms) by `view`, as it is now. */
+const readsOf = (messages: CapturedMessage[], at = 0, view?: string) =>
+  new Map<string, PageRead>(messages.map((m) => [m.id, { h: messageHash(m), at, ...(view ? { v: [view] } : {}) }]));
 
 describe('mergeSnapshot', () => {
   it('upserts a live capture: updates known ids, appends new ones, keeps the rest', () => {
@@ -64,9 +68,20 @@ describe('mergeSnapshot', () => {
       expect(ids(mergeSnapshot(chat, snap([u('u3'), a('a3b')], false, true)))).toEqual(['u1', 'a1', 'u2', 'a2', 'u3', 'a3b']);
     });
 
-    it('drops nothing for a window in the middle or a shorter capture of the end', () => {
+    it('drops nothing for a window in the middle; a shorter end needs a complete read', () => {
       expect(ids(mergeSnapshot(chat, snap([a('a1'), u('u2'), a('a2')], false, false)))).toEqual(ids({ ok: true, messages: chat }));
-      expect(ids(mergeSnapshot(chat, snap([u('u1'), a('a1'), u('u2')], false, true)))).toEqual(chat.map((m) => m.id));
+      // the end got shorter: a branch switch back, or a page still loading. Only a complete read can tell.
+      expect(ids(mergeSnapshot(chat, snap([u('u1'), a('a1'), u('u2')], false, true)))).toBe('ambiguous');
+      // ...unless what follows was never read on this page (another device's copy)
+      expect(ids(mergeSnapshot(chat, snap([u('u1'), a('a1'), u('u2')], false, true), readsOf(chat.slice(0, 3))))).toEqual(chat.map((m) => m.id));
+    });
+
+    it('asks for a complete read when an edit of the first question leaves nothing in common', () => {
+      expect(ids(mergeSnapshot(chat, snap([u('u1b'), a('a1b')], false, true)))).toBe('ambiguous');
+      expect(ids(mergeSnapshot(chat, snap([u('u1b')], false, false)))).toBe('ambiguous');
+      // a new chat (nothing saved yet) takes it as it is; an empty capture changes nothing
+      expect(ids(mergeSnapshot([], snap([u('u1'), a('a1')], false, true)))).toEqual(['u1', 'a1']);
+      expect(ids(mergeSnapshot(chat, snap([], false, true)))).toEqual(chat.map((m) => m.id));
     });
 
     it('leaves a branch seen mid-window for a capture of the end to settle', () => {
@@ -82,11 +97,47 @@ describe('mergeSnapshot', () => {
 
     it('never prunes messages this device did not see on the page (they came from another device)', () => {
       const merged = [u('u1'), a('a1'), u('u2'), a('a2'), u('u9'), a('a9')];
-      const seen = new Set(['u1', 'a1']); // u2..a9 arrived with another device's copy
+      const seen = readsOf(merged.slice(0, 2)); // u2..a9 arrived with another device's copy
       expect(ids(mergeSnapshot(merged, snap([a('a1'), u('u3'), a('a3')], false, true), seen))).toEqual(['u1', 'a1', 'u2', 'a2', 'u9', 'a9', 'u3', 'a3']);
       // seen ones the page no longer shows are still a branch change
-      const seen2 = new Set(['u1', 'a1', 'u2', 'a2']);
+      const seen2 = readsOf(merged.slice(0, 4));
       expect(ids(mergeSnapshot(merged, snap([a('a1'), u('u3'), a('a3')], false, true), seen2))).toEqual(['u1', 'a1', 'u9', 'a9', 'u3', 'a3']);
+    });
+
+    it('lets a page view prune only what it could have shown', () => {
+      const merged = [u('u1'), a('a1'), u('u2'), a('a2'), u('u9'), a('a9')];
+      // u1..a2 were read before view T1 started; u9, a9 only later, by another tab T2
+      const reads = new Map([...readsOf(merged.slice(0, 4), 100), ...readsOf(merged.slice(4), 500, 'T2')]);
+      const stale = (view: { id: string; since: number }) => ({ ...snap([a('a1'), u('u3'), a('a3')], false, true), view });
+      expect(ids(mergeSnapshot(merged, stale({ id: 'T1', since: 200 }), reads))).toEqual(['u1', 'a1', 'u9', 'a9', 'u3', 'a3']);
+      // a view started after they were read (e.g. the page was reloaded) could have shown them
+      expect(ids(mergeSnapshot(merged, stale({ id: 'T3', since: 600 }), reads))).toEqual(['u1', 'a1', 'u3', 'a3']);
+      // and so could the view that read them
+      expect(ids(mergeSnapshot(merged, stale({ id: 'T2', since: 400 }), reads))).toEqual(['u1', 'a1', 'u3', 'a3']);
+    });
+  });
+
+  describe('readings that did not change', () => {
+    it('keeps a merged edit from another device while the page still shows what it showed', () => {
+      const pageVersion = [u('u1'), a('a1', 'ORIGINAL')];
+      const reads = readsOf(pageVersion);
+      const merged = [u('u1'), a('a1', 'EDITED ON B')];
+      const r = mergeSnapshot(merged, snap([u('u1'), a('a1', 'ORIGINAL'), u('u2'), a('a2')], false, true), reads);
+      expect(r.ok && r.messages.map((m) => m.markdown)).toEqual(['u1', 'EDITED ON B', 'u2', 'a2']);
+      // a complete read too
+      const full = mergeSnapshot(merged, snap(pageVersion, true), reads);
+      expect(full.ok && full.messages[1]!.markdown).toBe('EDITED ON B');
+      // a reading that did change on the page wins
+      const changed = mergeSnapshot(merged, snap([u('u1'), a('a1', 'CHANGED HERE')], false, true), reads);
+      expect(changed.ok && changed.messages[1]!.markdown).toBe('CHANGED HERE');
+    });
+
+    it('records each reading, keeping when a message was first read and by which views', () => {
+      const before = new Map<string, PageRead>([['u1', { h: 'x', at: 5, v: ['T1'] }]]);
+      const out = recordReads(before, [u('u1'), a('a1')], [u('u1'), a('a1')], { id: 'T2' }, 9);
+      expect(out).toEqual({ u1: { h: messageHash(u('u1')), at: 5, v: ['T2', 'T1'] }, a1: { h: messageHash(a('a1')), at: 9, v: ['T2'] } });
+      // messages the chat no longer has are forgotten
+      expect(Object.keys(recordReads(before, [a('a1')], [a('a1')], undefined, 9))).toEqual(['a1']);
     });
   });
 });
@@ -135,6 +186,11 @@ describe('visualizations', () => {
     expect(messageHash(live)).toBe(messageHash({ ...saved, assets: [{ ...asset('chart.html', '<b>1</b>'), sha: 'abc' }], markdown: 'Here.\n\n> **Artifact:** [Chart](gitchat-asset:chart.html)\n\nand data' }));
     const lost = await materializeAssets(a('a1', '> **Artifact:** [Chart](x--c1.assets/chart.html)'), async () => null);
     expect(lost.markdown).toBe('> **Artifact:** Chart');
+  });
+
+  it('fails instead of dropping a link when the download fails', async () => {
+    const fromRepo = a('a1', '> **Artifact:** [Chart](x--c1.assets/chart.html)');
+    await expect(materializeAssets(fromRepo, async () => Promise.reject(new Error('HTTP 503')))).rejects.toThrow('HTTP 503');
   });
 });
 

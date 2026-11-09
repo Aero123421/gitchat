@@ -5,8 +5,12 @@
 // whenever the chat changes, the page identity (id, URL, title, time) is frozen at the DOM read, and
 // a result whose generation changed while it was being enriched is dropped. Captures run one at a
 // time, in the order they were read, so an older read can never arrive after a newer one.
+//
+// After a navigation the page may still show the previous chat for a moment (or keep a hidden copy
+// of it). The previous chat's message ids are remembered, and a read that still contains any of
+// them is not a read of the new chat: it waits until the new chat's messages are on the page.
 
-import { chatKey, type ChatKey, type ChatStatus, type Settings } from '../shared/types';
+import { chatKey, type ChatKey, type ChatSnapshot, type ChatStatus, type Settings } from '../shared/types';
 import { EVENTS_PORT, request, type BackgroundEvent, type ContentCurrent, type RefreshResult, type SnapshotReason, type ToContent } from '../shared/protocol';
 import { log } from '../shared/log';
 import { t } from '../shared/i18n';
@@ -22,6 +26,14 @@ import { captureFullHistory, InitIncompleteError, type InitProgress } from './ca
 const STREAM_PACE_MS = 8000;
 /** How long to wait for a freshly opened tracked chat to settle before reading it. */
 const READY_TIMEOUT_MS = 20_000;
+/** How often the ids on the page are noted while a chat is shown (to recognise it after navigating). */
+const SAMPLE_MS = 1500;
+/** How long the previous chat's ids mark a read as stale at most (e.g. a chat branched from it shares them). */
+const STALE_MS = 30_000;
+/** At most one automatic full read per visit of a chat in this period. */
+const AUTO_RESCAN_MS = 60_000;
+/** Abort reason when the tab moves to another chat: unlike Cancel, it does not undo a finished capture. */
+const NAVIGATED = 'gitchat:navigated';
 
 /** The conversation a piece of work belongs to. */
 interface Route {
@@ -42,6 +54,8 @@ const STRENGTH: Record<SnapshotReason, number> = { manual: 0, sent: 1, answered:
 const stronger = (a: SnapshotReason | null, b: SnapshotReason): SnapshotReason => (a && STRENGTH[a] >= STRENGTH[b] ? a : b);
 const isAbort = (e: unknown) => e instanceof DOMException && e.name === 'AbortError';
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+const newView = (): NonNullable<ChatSnapshot['view']> => ({ id: crypto.randomUUID(), since: Date.now() });
+const byUser = (signal: AbortSignal) => !(signal.reason instanceof DOMException && signal.reason.message === NAVIGATED);
 
 export class Controller {
   private settings!: Settings;
@@ -62,6 +76,14 @@ export class Controller {
   private suppressed: SnapshotReason | null = null;
   /** Route generation of a running "read the chat once it is ready" job. */
   private reconciling = -1;
+  /** This tab's visit to the current chat, sent with every capture (see ChatSnapshot.view). */
+  private view = newView();
+  /** Service message ids last seen on the page while the current chat was shown. */
+  private sample: { chatId: string; ids: Set<string>; at: number } | null = null;
+  /** The previous chat's ids, until the new chat's own messages are on the page. */
+  private stale: { ids: Set<string>; until: number } | null = null;
+  /** The last automatic full read: route generation and time. */
+  private autoRescan = { gen: -1, at: -Infinity };
 
   constructor(private readonly adapter: Adapter) {
     this.store = new UiStore({
@@ -199,15 +221,24 @@ export class Controller {
 
   private async checkRoute(force = false): Promise<void> {
     const href = location.href;
-    if (!force && href === this.lastUrl) return;
+    if (!force && href === this.lastUrl) {
+      this.sampleIds();
+      return;
+    }
     this.lastUrl = href;
     const chatId = this.settings.services[this.adapter.service] ? this.adapter.chatId(new URL(href)) : null;
     if (!force && chatId === this.chatId) return;
 
     if (chatId !== this.chatId) {
       this.gen++;
-      // the old chat's init cleans up on its own and no longer touches this tab's UI
-      this.abort?.abort();
+      this.view = newView();
+      // until the new chat's messages show, the previous chat's still on the page are not its own
+      const prev = this.chatId && this.sample?.chatId === this.chatId ? this.sample.ids : null;
+      this.stale = prev && chatId ? { ids: prev, until: performance.now() + STALE_MS } : null;
+      this.sample = null;
+      // the old chat's init cleans up on its own and no longer touches this tab's UI (a capture it
+      // already finished is still saved: only Cancel takes that back)
+      this.abort?.abort(new DOMException(NAVIGATED, 'AbortError'));
       this.abort = null;
       this.suppressed = null;
       this.observer.reset();
@@ -238,6 +269,43 @@ export class Controller {
       log.warn('could not open chat', e);
       if (this.live(route)) this.store.switchTo(key, null);
     }
+  }
+
+  /** The service's own ids of the messages on the page (content-derived ids could repeat across chats). */
+  private pageIds(): string[] {
+    return this.adapter.messages(document).flatMap((n) => (n.id ? [n.id] : []));
+  }
+
+  /** Notes which messages the current chat shows (at most every SAMPLE_MS), for after a navigation. */
+  private sampleIds(ids?: string[]): void {
+    const chatId = this.chatId;
+    if (!chatId) return;
+    const now = performance.now();
+    if (!ids && this.sample?.chatId === chatId && now - this.sample.at < SAMPLE_MS) return;
+    const list = ids ?? this.pageIds();
+    if (list.length && !this.showsPrevious(list)) this.sample = { chatId, ids: new Set(list), at: now };
+  }
+
+  /**
+   * True while the page still shows the previous chat: a read with any of its ids. The guard ends
+   * once a read shows messages and none of them (the new chat is on the page), or after STALE_MS.
+   */
+  private showsPrevious(ids: readonly string[]): boolean {
+    const st = this.stale;
+    if (!st) return false;
+    if (performance.now() > st.until) {
+      this.stale = null;
+      return false;
+    }
+    if (ids.some((id) => st.ids.has(id))) return true;
+    if (ids.length) this.stale = null;
+    return false;
+  }
+
+  /** The site's "AI is working" signal right now (the observer only looks every so often). */
+  private aiBusy(): boolean {
+    const phase = this.adapter.aiPhase(document);
+    return phase ? phase !== 'idle' : this.adapter.isGenerating(document);
   }
 
   // ---- staging
@@ -271,15 +339,33 @@ export class Controller {
       void this.checkRoute();
       return;
     }
+    // the observer may not have seen the next turn start yet: ask the page itself, right before reading
+    const busy = this.aiBusy();
+    if (reason === 'answered' && busy) return;
     // one synchronous read: messages and the page's identity at the same moment
     const read = readPage(this.adapter, document);
-    if (!read.messages.length) return;
+    if (!read.messages.length || this.showsPrevious(read.messages.map((m) => m.id))) return;
+    const view = this.view;
     // only a settled capture may drop turns that vanished (a 'sent' one is taken mid-change)
-    const atEnd = reason !== 'sent' && this.observer.settled && isAtEnd(this.adapter, document);
+    const atEnd = reason !== 'sent' && !busy && this.observer.settled && isAtEnd(this.adapter, document);
     const messages = await this.withArtifacts(read.messages);
     if (!this.live(route) || this.abort) return;
-    const status = await request('chat/snapshot', { snapshot: makeSnapshot(this.adapter, route.chatId, read, messages, false, atEnd), reason });
-    if (this.live(route)) this.store.applyStatus(status);
+    const { fullRead, ...status } = await request('chat/snapshot', { snapshot: makeSnapshot(this.adapter, route.chatId, read, messages, false, atEnd, view), reason });
+    if (!this.live(route)) return;
+    this.store.applyStatus(status);
+    if (fullRead) this.readAgain(route);
+  }
+
+  /**
+   * The background could not place a capture safely (e.g. the first question was edited, so no
+   * message is shared with what was saved): read the whole chat again. At most once a minute per visit;
+   * if it fails, the error shows and "Read the whole chat again" in the popup stays available.
+   */
+  private readAgain(route: Route): void {
+    const now = performance.now();
+    if (this.abort || !this.live(route) || (this.autoRescan.gen === route.gen && now - this.autoRescan.at < AUTO_RESCAN_MS)) return;
+    this.autoRescan = { gen: route.gen, at: now };
+    void this.init({ rescan: true });
   }
 
   /** Read a freshly opened tracked chat once it has settled, so answers missed while away are staged. */
@@ -301,8 +387,12 @@ export class Controller {
     while (performance.now() - start < maxMs) {
       if (!this.live(route) || !this.onPage(route) || this.abort) return false;
       const msgs = this.adapter.messages(document);
+      const ids = msgs.flatMap((n) => (n.id ? [n.id] : []));
+      // the previous chat still on the page is not this chat's history
+      const own = !this.showsPrevious(ids);
+      if (own) this.sampleIds(ids);
       const last = msgs[msgs.length - 1];
-      const now = msgs.length ? `${msgs.length}:${last ? (this.adapter.body(last).textContent ?? '').length : 0}` : '';
+      const now = msgs.length && own ? `${msgs.length}:${last ? (this.adapter.body(last).textContent ?? '').length : 0}` : '';
       if (now !== sig) {
         sig = now;
         since = performance.now();
@@ -376,12 +466,34 @@ export class Controller {
       if (!messages.length) throw new InitIncompleteError('empty');
       // a history without a single answer means the answers were not found: never save that as complete
       if (!messages.some((m) => m.role === 'assistant')) throw new InitIncompleteError('one-sided');
+      // the previous chat's messages are not this chat's history
+      if (this.showsPrevious(messages.map((m) => m.id))) throw new InitIncompleteError('stale');
       const read: PageRead = { messages, url: location.href.split('#')[0] ?? location.href, title: this.adapter.title(document), capturedAt: result.readAt };
-      const status = await request('chat/init/done', { snapshot: makeSnapshot(this.adapter, route.chatId, read, messages, true), initId });
+      const snapshot = makeSnapshot(this.adapter, route.chatId, read, messages, true, false, this.view);
+      // Cancel pressed while the background saves the capture is passed on. The background takes
+      // them in order: a cancel that arrives first refuses the save; one that arrives after it
+      // finds the chat saved. Either way the status of the later one is what stands.
+      const id = initId;
+      let cancelling: Promise<ChatStatus | null> | null = null;
+      const forward = () => {
+        if (byUser(abort.signal)) cancelling = request('chat/init/cancel', { key: route.key, initId: id }).catch(() => null);
+      };
+      abort.signal.addEventListener('abort', forward, { once: true });
+      let status: ChatStatus | null = null;
+      let saved = false;
+      try {
+        status = await request('chat/init/done', { snapshot, initId: id });
+        saved = true;
+      } catch (e) {
+        if (!cancelling) throw e; // a failure, not the cancel winning
+      } finally {
+        abort.signal.removeEventListener('abort', forward);
+      }
+      if (cancelling) status = (await cancelling) ?? status;
       if (this.live(route)) {
         this.store.setCapture(null);
-        this.store.applyStatus(status);
-        if (rescan) this.store.captureDone(true);
+        if (status) this.store.applyStatus(status);
+        if (rescan) this.store.captureDone(saved);
       }
     } catch (e) {
       // after a navigation the widget belongs to another chat: leave it alone

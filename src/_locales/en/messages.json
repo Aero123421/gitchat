@@ -453,7 +453,10 @@
     }
   },
   "errRefresh": {
-    "message": "Couldn't read the chat, so nothing was committed or pushed."
+    "message": "Couldn't read the chat, so nothing was committed or pushed. Wait for the answer to finish (or reload the tab) and try again."
+  },
+  "aiStalled": {
+    "message": "The answer seems stuck. It will be saved once it finishes."
   },
   "rescan": {
     "message": "Read the whole chat again"

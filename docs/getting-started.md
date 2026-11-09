@@ -17,7 +17,7 @@ gitchat requires Chrome 120 or later. Until it is listed on the Chrome Web Store
 
 ### Option B: Build from source
 
-Requires Node.js 20 or later:
+Requires Node.js 22.12 or later:
 
 ```sh
 git clone https://github.com/Aero123421/gitchat.git

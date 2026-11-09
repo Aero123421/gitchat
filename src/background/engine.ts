@@ -7,12 +7,12 @@ import { log } from '../shared/log';
 import { toGitchatError } from './errors';
 import { RateLimitError, type GitHub } from './github/client';
 import { gitBlobSha } from './hash';
-import type { ChatDoc, ChatRecord, CommitWithDoc, LocalCommit, SyncMeta } from './model';
+import type { ChatDoc, ChatRecord, CommitWithDoc, LocalCommit, PageRead, SyncMeta } from './model';
 import { chatPath, encodePath, repoId } from './paths';
 import { chatTitle } from './render';
-import { diffStaged, hashesOf, keepChangesSince, mergeSnapshot, messageHash, refsOf, threeWayMerge, unionMessages, uniqueIds } from './stage';
+import { diffStaged, hashesOf, keepArtifacts, keepChangesSince, mergeSnapshot, messageHash, recordReads, refsOf, threeWayMerge, unionMessages, uniqueIds } from './stage';
 import type { Db } from './store/db';
-import { findRemoteChat, oursIsNewer, pushCommits, type PushOutcome } from './sync';
+import { findRemoteChat, oursIsNewer, pushCommits, type PushOutcome, type RemoteCopy } from './sync';
 
 export interface Emitter {
   status(status: ChatStatus): void;
@@ -211,7 +211,7 @@ export class Engine {
               capturedAt: found.front.captured || at,
               messages: found.messages,
               committed: refsOf(found.messages),
-              seen: [],
+              pageReads: {},
               settled: true,
               updatedAt: this.now(),
             });
@@ -231,24 +231,28 @@ export class Engine {
   /**
    * Applies a capture of a tracked chat. A capture read from the page before one we already applied
    * is ignored (captures can arrive out of order). Auto-commit only runs once the AI finished answering.
+   * A capture that cannot be placed safely changes nothing; when it was a settled read of the chat's
+   * end, the reply asks the page to read the whole chat again (`fullRead`).
    */
   async snapshot(snap: ChatSnapshot, reason: SnapshotReason = 'answered'): Promise<ChatStatus> {
     const key = chatKey(snap.service, snap.chatId);
     await this.ensureRepo();
     const messages = uniqueIds(await withAssetShas(snap.messages));
+    let fullRead = false;
     const committed = await this.exclusive(async () => {
       const rec = await this.deps.db.getChat(key);
       if (!rec?.tracked || isOlder(snap.capturedAt, rec.seenAt)) return false;
-      const seen = new Set(rec.seen ?? rec.messages.map((m) => m.id));
-      const merged = mergeSnapshot(rec.messages, { ...snap, messages }, seen);
+      const reads = pageReadsOf(rec);
+      const merged = mergeSnapshot(rec.messages, { ...snap, messages }, reads);
       if (!merged.ok) {
-        this.chatErrors.set(key, merged.message);
+        if (merged.code === 'ambiguous') fullRead = !!snap.atEnd && reason !== 'sent';
+        else this.chatErrors.set(key, merged.message);
         return false;
       }
       this.chatErrors.delete(key);
-      for (const m of messages) seen.add(m.id);
       rec.messages = merged.messages;
-      rec.seen = merged.messages.filter((m) => seen.has(m.id)).map((m) => m.id);
+      rec.pageReads = recordReads(reads, messages, merged.messages, snap.view, this.now());
+      delete rec.seen;
       rec.settled = reason !== 'sent';
       rec.capturedAt = snap.capturedAt || this.iso();
       rec.seenAt = rec.capturedAt;
@@ -259,7 +263,8 @@ export class Engine {
       return reason === 'answered' && (await this.autoCommit(rec));
     });
     if (committed) this.afterCommit();
-    return this.emitStatus(key);
+    const status = await this.emitStatus(key);
+    return fullRead ? { ...status, fullRead: true } : status;
   }
 
   // ---- init (tracking a chat, or rescanning a tracked one: one complete capture of its history)
@@ -344,8 +349,10 @@ export class Engine {
 
   /**
    * A complete capture: the chat becomes tracked (or is replaced, for a rescan) and the differences
-   * are staged. The session is checked again right before the change is applied, in order with
-   * cancellation and every other change; changes applied since the init started are kept.
+   * are staged. Network work (has another device saved this chat?) happens first; then, in order
+   * with cancellation and every other change, the session is checked and the change applied in one
+   * step, so a cancel either wins entirely or comes too late. Changes applied since the init started
+   * are kept.
    */
   async initDone(snap: ChatSnapshot, initId: string, owner?: InitOwner): Promise<ChatStatus> {
     const key = chatKey(snap.service, snap.chatId);
@@ -353,11 +360,13 @@ export class Engine {
     this.ownSession(key, initId, owner);
     await this.ensureRepo();
     const messages = uniqueIds(await withAssetShas(snap.messages));
+    const lookup = (await this.deps.db.getChat(key))?.path ? null : await this.lookupRemote(snap.service, snap.chatId);
     try {
       const committed = await this.exclusive(async () => {
         const session = this.ownSession(key, initId, owner);
         const existing = await this.deps.db.getChat(key);
-        const merged = mergeSnapshot(existing?.messages ?? [], { ...snap, messages, complete: true });
+        const reads = existing ? pageReadsOf(existing) : new Map<string, PageRead>();
+        const merged = mergeSnapshot(existing?.messages ?? [], { ...snap, messages, complete: true }, reads);
         if (!merged.ok) {
           this.chatErrors.set(key, merged.message);
           return false;
@@ -378,18 +387,23 @@ export class Engine {
           committed: [],
           updatedAt: this.now(),
         };
-        const seen = new Set([...messages.map((m) => m.id), ...(existing?.seen ?? [])]);
         rec.tracked = true;
         rec.messages = list;
-        rec.seen = list.filter((m) => seen.has(m.id)).map((m) => m.id);
+        rec.pageReads = recordReads(reads, messages, list, snap.view, this.now());
+        delete rec.seen;
         rec.settled = true;
         rec.capturedAt = later(at, rec.capturedAt);
         rec.seenAt = rec.seenAt ? later(at, rec.seenAt) : at;
         rec.url = snap.url || rec.url;
         rec.title = snap.title || rec.title;
         rec.updatedAt = this.now();
-        if (!rec.path) await this.assignPath(rec);
+        if (!rec.path) {
+          const repo = await this.currentRepo();
+          placeChat(rec, repo, lookup && lookup.repo === repo ? lookup.found : null);
+        }
         this.chatErrors.delete(key);
+        // the session ends with the change, in the same step: a cancel queued behind it finds nothing
+        this.endInit(key, initId);
         await this.deps.db.putChat(rec);
         return this.autoCommit(rec);
       });
@@ -400,21 +414,29 @@ export class Engine {
     return this.emitStatus(key);
   }
 
-  /** Ends an init. Without an id (the user pressed Cancel anywhere), whichever init runs is ended. */
+  /**
+   * Ends an init. Without an id (the user pressed Cancel anywhere), whichever init runs is ended. It
+   * runs in order with the init's completion: whichever comes first wins.
+   */
   async initCancel(key: ChatKey, initId?: string): Promise<ChatStatus> {
     await this.loadInits();
-    this.endInit(key, initId);
+    await this.exclusive(async () => this.endInit(key, initId));
     return this.emitStatus(key);
   }
 
   /** A tab closed or navigated away: the inits it was running end with it. */
   async ownerGone(tabId: number): Promise<void> {
     await this.loadInits();
-    for (const [key, s] of [...this.inits]) {
-      if (s.owner?.tabId !== tabId) continue;
-      this.endInit(key, s.id);
-      await this.emitStatus(key);
-    }
+    const gone = await this.exclusive(async () => {
+      const keys: ChatKey[] = [];
+      for (const [key, s] of [...this.inits]) {
+        if (s.owner?.tabId !== tabId) continue;
+        this.endInit(key, s.id);
+        keys.push(key);
+      }
+      return keys;
+    });
+    for (const key of gone) await this.emitStatus(key);
   }
 
   async untrack(key: ChatKey): Promise<ChatStatus> {
@@ -425,36 +447,25 @@ export class Engine {
         rec.updatedAt = this.now();
         await this.deps.db.putChat(rec);
       }
+      this.endInit(key);
     });
-    this.endInit(key);
     this.chatErrors.delete(key);
     return this.emitStatus(key);
   }
 
   /**
-   * File name of a newly tracked chat. When another device already saved it, continue from that
-   * copy: the newer capture wins for what both have, and nothing only the repository has is lost
-   * unless our capture is newer (then it shows as removed in staging).
+   * Whether another device already saved this chat in the chosen repository (network, so done
+   * before taking the chat queue). Null when it could not be checked (offline, signed out, a failed
+   * download): the push checks again.
    */
-  private async assignPath(rec: ChatRecord): Promise<void> {
-    rec.path = chatPath(rec.service, rec.title, rec.chatId, rec.createdAt);
-    rec.pathConfirmed = false;
+  private async lookupRemote(service: ServiceId, chatId: string): Promise<{ repo: string | null; found: RemoteCopy | null } | null> {
     try {
       const { repo } = await this.deps.settings.get();
-      rec.repo = repoId(repo);
-      if (!repo) return;
-      const found = await findRemoteChat(await this.deps.github(), repo, rec.service, rec.chatId);
-      if (!found) return; // the push picks a free name then
-      rec.path = found.path;
-      rec.pathConfirmed = true;
-      rec.remoteBlob = found.sha;
-      rec.baseRefs = refsOf(found.messages);
-      rec.createdAt = found.front.created || rec.createdAt;
-      if (!oursIsNewer(rec, found.front)) rec.messages = unionMessages(found.messages, rec.messages);
-      rec.committed = refsOf(found.messages);
+      if (!repo) return { repo: null, found: null };
+      return { repo: repoId(repo), found: await findRemoteChat(await this.deps.github(), repo, service, chatId) };
     } catch (e) {
-      // Offline or signed out: the path is checked when pushing.
       log.debug('path lookup failed', e);
+      return null;
     }
   }
 
@@ -855,6 +866,41 @@ export class Engine {
 
 function toInfo(c: LocalCommit): CommitInfo {
   return c.sha ? { id: c.id, n: c.n, t: c.createdAt, pushed: c.pushed, sha: c.sha } : { id: c.id, n: c.n, t: c.createdAt, pushed: c.pushed };
+}
+
+/** Page reads of a chat; records from before `pageReads` know only which ids were read, not when. */
+function pageReadsOf(rec: ChatRecord): Map<string, PageRead> {
+  if (rec.pageReads) return new Map(Object.entries(rec.pageReads));
+  return new Map((rec.seen ?? rec.messages.map((m) => m.id)).map((id) => [id, { h: '', at: 0 }]));
+}
+
+/**
+ * File name of a newly tracked chat. When another device already saved it (`found`), continue from
+ * that copy: the newer capture wins for what both have, and nothing only the repository has is lost
+ * unless our capture is newer (then it shows as removed in staging). Either way, a message keeps the
+ * other copy's saved visualization when the winning one only has a plain card for it.
+ */
+function placeChat(rec: ChatRecord, repo: string | null, found: RemoteCopy | null): void {
+  rec.path = chatPath(rec.service, rec.title, rec.chatId, rec.createdAt);
+  rec.pathConfirmed = false;
+  rec.repo = repo;
+  if (!found) return; // the push checks the path again and picks a free name if needed
+  rec.path = found.path;
+  rec.pathConfirmed = true;
+  rec.remoteBlob = found.sha;
+  rec.baseRefs = refsOf(found.messages);
+  rec.createdAt = found.front.created || rec.createdAt;
+  const theirs = new Map(found.messages.map((m) => [m.id, m]));
+  const ours = new Map(rec.messages.map((m) => [m.id, m]));
+  if (oursIsNewer(rec, found.front)) {
+    rec.messages = rec.messages.map((m) => (theirs.has(m.id) ? keepArtifacts(theirs.get(m.id)!, m) : m));
+  } else {
+    rec.messages = unionMessages(
+      found.messages.map((m) => (ours.has(m.id) ? keepArtifacts(ours.get(m.id)!, m) : m)),
+      rec.messages,
+    );
+  }
+  rec.committed = refsOf(found.messages);
 }
 
 function sameOwner(a: InitOwner | undefined, b: InitOwner | undefined): boolean {

@@ -330,6 +330,112 @@ describe('Controller', () => {
     expect(events).toContain('captured');
   });
 
+  it('does not read the previous chat as the new one while it is still on the page (c-services H1)', async () => {
+    const c = await open(makeAdapter());
+    sent.length = 0;
+    history.replaceState(null, '', '/chat/b'); // the URL moved on, the page still shows chat a
+    await c.checkRoute();
+    await vi.advanceTimersByTimeAsync(5000);
+    void c.snapshot('answered');
+    await vi.advanceTimersByTimeAsync(100);
+    expect(snapshots()).toEqual([]);
+    showChat('b'); // chat b renders
+    await vi.advanceTimersByTimeAsync(3000);
+    const [snap] = snapshots();
+    expect(snap?.chatId).toBe('b');
+    expect(snap?.messages.map((m) => m.id)).toEqual(['b-0', 'b-1']);
+  });
+
+  it('stamps every capture with this visit of the chat, and a new visit after navigating', async () => {
+    const c = await open(makeAdapter());
+    void c.snapshot('manual');
+    await vi.advanceTimersByTimeAsync(100);
+    const [first, second] = snapshots();
+    expect(first?.view?.id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(second?.view).toEqual(first?.view);
+    showChat('b');
+    await c.checkRoute();
+    await vi.advanceTimersByTimeAsync(3000);
+    const b = snapshots().find((x) => x.chatId === 'b');
+    expect(b?.view?.id).not.toBe(first?.view?.id);
+    expect(b!.view!.since).toBeGreaterThanOrEqual(first!.view!.since);
+  });
+
+  it('drops a queued "answered" capture when the page shows the next turn before the observer looks (a-extension M1)', async () => {
+    let phase: 'idle' | 'streaming' = 'idle';
+    let release!: (v: CapturedArtifact[]) => void;
+    let calls = 0;
+    const adapter = makeAdapter({ aiPhase: () => phase, artifacts: () => (++calls === 2 ? new Promise((r) => (release = r)) : Promise.resolve([])) });
+    const c = await open(adapter); // the observer is not running: it has not seen the new turn
+    sent.length = 0;
+    void c.snapshot('manual');
+    await vi.advanceTimersByTimeAsync(5);
+    void c.snapshot('answered');
+    phase = 'streaming';
+    release([]);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(snapshots().map((x) => x.reason)).toEqual(['manual']);
+    expect(snapshots()[0]?.atEnd).toBe(true); // read before the next turn started
+  });
+
+  it('reads the whole chat again when the background could not place a capture, at most once a minute', async () => {
+    handlers['chat/snapshot'] = (p) => ({ ...status(`claude:${(p.snapshot as ChatSnapshot).chatId}`), fullRead: true });
+    handlers['chat/init/start'] = (p) => ({ status: status(p.key as string, { phase: 'capturing' }), initId: 'auto' });
+    handlers['chat/init/done'] = (p) => status(`claude:${(p.snapshot as ChatSnapshot).chatId}`);
+    const c = await open(makeAdapter()); // its first read already asks for a full read
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(sent.filter((x) => x.type === 'chat/init/start')).toHaveLength(1);
+    expect(sent.find((x) => x.type === 'chat/init/done')?.payload.initId).toBe('auto');
+    void c.snapshot('answered');
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(sent.filter((x) => x.type === 'chat/init/start')).toHaveLength(1); // not again within a minute
+    expect(c.store.state.phase).not.toBe('error');
+    await vi.advanceTimersByTimeAsync(60_000);
+    void c.snapshot('answered');
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(sent.filter((x) => x.type === 'chat/init/start')).toHaveLength(2);
+  });
+
+  it('passes Cancel on while the background saves the capture; the cancel that wins leaves the chat untracked', async () => {
+    handlers['chat/open'] = (p) => status(`claude:${p.chatId as string}`, { tracked: false });
+    handlers['chat/init/start'] = (p) => ({ status: status(p.key as string, { tracked: false, phase: 'capturing' }), initId: 'i9' });
+    let refuse!: () => void;
+    handlers['chat/init/done'] = () =>
+      new Promise((_r, reject) => {
+        refuse = () => reject(new Error('This capture was cancelled or replaced. Start again.'));
+      });
+    handlers['chat/init/cancel'] = (p) => status(p.key as string, { tracked: false });
+    const c = await open(makeAdapter());
+    sent.length = 0;
+    void c.init();
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(sent.some((x) => x.type === 'chat/init/done')).toBe(true);
+    c.store.cancelInit(); // pressed while the save is on its way
+    await vi.advanceTimersByTimeAsync(10);
+    expect(sent.find((x) => x.type === 'chat/init/cancel')?.payload.initId).toBe('i9');
+    refuse(); // the background took the cancel first and refused the save
+    await vi.advanceTimersByTimeAsync(10);
+    expect(c.store.state.tracked).toBe(false);
+    expect(c.store.state.phase).not.toBe('error');
+    expect(c.abort).toBeNull();
+  });
+
+  it('keeps a finished capture when the user only navigates away while it is being saved', async () => {
+    handlers['chat/open'] = (p) => status(`claude:${p.chatId as string}`, { tracked: false });
+    handlers['chat/init/start'] = (p) => ({ status: status(p.key as string, { tracked: false, phase: 'capturing' }), initId: 'i10' });
+    let finish!: () => void;
+    handlers['chat/init/done'] = (p) => new Promise((r) => (finish = () => r(status(`claude:${(p.snapshot as ChatSnapshot).chatId}`))));
+    const c = await open(makeAdapter());
+    sent.length = 0;
+    void c.init();
+    await vi.advanceTimersByTimeAsync(20_000);
+    showChat('b');
+    await c.checkRoute();
+    finish();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(sent.some((x) => x.type === 'chat/init/cancel')).toBe(false);
+  });
+
   it('does not rescan an untracked chat or start tracking through rescan', async () => {
     handlers['chat/open'] = (p) => status(`claude:${p.chatId as string}`, { tracked: false });
     const c = await open(makeAdapter());

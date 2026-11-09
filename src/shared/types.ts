@@ -57,6 +57,12 @@ export interface ChatSnapshot {
    * regenerated answer) are dropped instead of kept.
    */
   atEnd?: boolean;
+  /**
+   * Live captures: the page view that read it (one tab document's visit to this chat, a random id)
+   * and when that visit started (epoch ms). A capture may only drop messages its view could have
+   * shown: ones this device read before the visit started, or ones this view read itself.
+   */
+  view?: { id: string; since: number };
 }
 
 /** Key that identifies a chat across the extension: `${service}:${chatId}`. */
@@ -98,6 +104,11 @@ export interface ChatStatus {
   error?: string;
   /** Web URL of the file on GitHub when the repo is configured. */
   webUrl?: string;
+  /**
+   * Only in the reply to a live capture: it could not be placed safely (e.g. the first turn was
+   * edited, or the end of the chat got shorter), so it was not applied. Read the whole chat again.
+   */
+  fullRead?: boolean;
 }
 
 export interface StagedItem {

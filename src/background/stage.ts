@@ -3,7 +3,7 @@
 import type { CapturedAsset, CapturedMessage, ChatSnapshot, StagedItem } from '../shared/types';
 import { MARKER_LINE, assetNameOf, markerLine, markers, parseMarker, type Marker } from './assets';
 import { hash53 } from './hash';
-import type { CommittedRef } from './model';
+import type { CommittedRef, PageRead } from './model';
 
 /** CRLF → LF and no blank lines around the body; whitespace inside it (hard breaks, indents) counts. */
 export function canonicalMarkdown(md: string): string {
@@ -74,32 +74,42 @@ export function diffStaged(current: CapturedMessage[], committed: CommittedRef[]
   return staged;
 }
 
-export type MergeResult = { ok: true; messages: CapturedMessage[] } | { ok: false; code: 'empty' | 'invalid'; message: string };
+export type MergeResult = { ok: true; messages: CapturedMessage[] } | { ok: false; code: 'empty' | 'invalid' | 'ambiguous'; message: string };
+
+const AMBIGUOUS: MergeResult = { ok: false, code: 'ambiguous', message: 'The capture could not be placed in the saved chat; the whole chat has to be read again.' };
 
 /**
- * Applies a capture to the messages we already have.
+ * Applies a capture to the messages we already have. `reads` is what captures on this device read on
+ * the page before (see ChatRecord.pageReads); without it every known message counts as read.
  *
  * - A complete capture (init) is the whole conversation: it replaces the list and may remove
  *   messages. An empty capture, or one with questions but no answers at all, is refused.
  * - A live capture may hold only the part of a long chat that is in the DOM, so it is an upsert:
  *   known ids are updated in place and messages absent from it are kept. New ids after the last
  *   known one are appended; new ids between known ones are left for a later capture to place.
- * - Except when a live capture reaches the end of the chat (`atEnd`) and disagrees with what this
- *   device saw on the page after its first known message — a new id in the middle, seen messages
- *   skipped over, or new messages where seen ones followed. That is an edited or regenerated branch:
- *   the capture is authoritative from that message on, and the turns the page no longer shows are
- *   dropped. Only messages this device saw on the page (`seen`) can be dropped this way: messages
- *   that came from another device's copy were never on this page, so their absence proves nothing.
+ * - Except when a live capture reaches the end of the chat (`atEnd`) and disagrees with what was read
+ *   on the page after its first known message — a new id in the middle, read messages skipped over,
+ *   or new messages where read ones followed. That is an edited or regenerated branch: the capture
+ *   is authoritative from that message on, and the turns the page no longer shows are dropped.
+ *   Only messages the capturing page view could have shown can be dropped this way: ones this device
+ *   read before the view started, or ones the view read itself. Messages that came from another
+ *   device's copy, or that another tab read later, prove nothing by their absence.
+ * - A live capture that cannot be placed safely is refused as 'ambiguous': it shares no message with
+ *   a chat that has some (e.g. the first question was edited), or it reaches the end but stops before
+ *   messages the view read there (the end got shorter). Only a complete capture can tell.
  *
- * Messages keep their saved visualizations when the new capture could not read them (see
- * keepArtifacts).
+ * A message the page still shows exactly as this device read it last keeps the version we have: it
+ * may hold another device's edit, merged since. Messages keep their saved visualizations when the
+ * new capture could not read them (see keepArtifacts).
  */
-export function mergeSnapshot(known: CapturedMessage[], snap: ChatSnapshot, seen?: ReadonlySet<string>): MergeResult {
+export function mergeSnapshot(known: CapturedMessage[], snap: ChatSnapshot, reads?: ReadonlyMap<string, PageRead>): MergeResult {
   const incoming = uniqueIds(snap.messages);
   const byId = new Map(known.map((m) => [m.id, m]));
-  const withKept = (m: CapturedMessage) => {
+  const place = (m: CapturedMessage) => {
     const old = byId.get(m.id);
-    return old ? keepArtifacts(old, m) : m;
+    if (!old) return m;
+    if (reads?.get(m.id)?.h === messageHash(m)) return old;
+    return keepArtifacts(old, m);
   };
 
   if (snap.complete) {
@@ -108,23 +118,35 @@ export function mergeSnapshot(known: CapturedMessage[], snap: ChatSnapshot, seen
     if (users >= 2 && users === incoming.length) {
       return { ok: false, code: 'invalid', message: 'The capture looked incomplete, so nothing was changed.' };
     }
-    return { ok: true, messages: incoming.map(withKept) };
+    return { ok: true, messages: incoming.map(place) };
   }
 
-  const observed = (m: CapturedMessage) => !seen || seen.has(m.id);
+  if (!incoming.length) return { ok: true, messages: known };
+  const view = snap.view;
+  const observed = (m: CapturedMessage) => {
+    if (!reads) return true;
+    const r = reads.get(m.id);
+    return !!r && (!view || r.at <= view.since || !!r.v?.includes(view.id));
+  };
   const index = new Map(known.map((m, i) => [m.id, i]));
   const firstKnown = incoming.findIndex((m) => index.has(m.id));
-  if (firstKnown < 0) return { ok: true, messages: [...known, ...incoming] };
+  if (firstKnown < 0) return known.length ? AMBIGUOUS : { ok: true, messages: incoming };
 
   if (snap.atEnd && branchChanged(incoming, firstKnown, known, index, observed)) {
     const anchorAt = index.get(incoming[firstKnown]!.id)!;
     const captured = new Set(incoming.map((m) => m.id));
-    let out = [...known.slice(0, anchorAt).filter((m) => !captured.has(m.id)), ...incoming.map(withKept)];
+    let out = [...known.slice(0, anchorAt).filter((m) => !captured.has(m.id)), ...incoming.map(place)];
     if (known.slice(anchorAt).some((m) => !captured.has(m.id) && !observed(m))) {
       const kept = new Set(out.map((m) => m.id));
       out = unionMessages(out, known.filter((m) => kept.has(m.id) || !observed(m)));
     }
     return { ok: true, messages: out };
+  }
+
+  if (snap.atEnd) {
+    const lastAt = index.get(incoming.at(-1)!.id);
+    const captured = new Set(incoming.map((m) => m.id));
+    if (lastAt !== undefined && known.slice(lastAt + 1).some((m) => !captured.has(m.id) && observed(m))) return AMBIGUOUS;
   }
 
   let lastKnown = firstKnown;
@@ -134,7 +156,7 @@ export function mergeSnapshot(known: CapturedMessage[], snap: ChatSnapshot, seen
   const out = [...known];
   incoming.forEach((m, i) => {
     const at = index.get(m.id);
-    if (at !== undefined) out[at] = withKept(m);
+    if (at !== undefined) out[at] = place(m);
     else if (i > lastKnown) {
       index.set(m.id, out.length);
       out.push(m);
@@ -144,9 +166,9 @@ export function mergeSnapshot(known: CapturedMessage[], snap: ChatSnapshot, seen
 }
 
 /**
- * After the first known message, a capture of the chat's end should repeat what this device saw, in
- * order, and then add new messages. A new id followed by a known one, seen messages skipped between
- * two captured ones, or new messages where seen ones still followed, means another branch.
+ * After the first known message, a capture of the chat's end should repeat what was read, in order,
+ * and then add new messages. A new id followed by a known one, read messages skipped between two
+ * captured ones, or new messages where read ones still followed, means another branch.
  */
 function branchChanged(
   incoming: CapturedMessage[],
@@ -168,6 +190,31 @@ function branchChanged(
     expected = at + 1;
   }
   return sawNew && skipsSeen(expected, known.length);
+}
+
+/**
+ * The page reads after a capture: every captured message's latest reading (first-read time kept,
+ * the capturing view added), for the messages the chat still has.
+ */
+export function recordReads(
+  reads: ReadonlyMap<string, PageRead>,
+  captured: CapturedMessage[],
+  chat: CapturedMessage[],
+  view: { id: string } | undefined,
+  now: number,
+): Record<string, PageRead> {
+  const next = new Map(reads);
+  for (const m of captured) {
+    const prev = reads.get(m.id);
+    const v = view ? [view.id, ...(prev?.v ?? []).filter((x) => x !== view.id)].slice(0, 4) : prev?.v;
+    next.set(m.id, { h: messageHash(m), at: prev ? prev.at : now, ...(v?.length ? { v } : {}) });
+  }
+  const out: Record<string, PageRead> = {};
+  for (const m of chat) {
+    const r = next.get(m.id);
+    if (r) out[m.id] = r;
+  }
+  return out;
 }
 
 /** Repeated ids within one capture get a deterministic suffix, so the same capture maps the same way. */

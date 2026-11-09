@@ -12,8 +12,9 @@ chrome.alarms.onAlarm.addListener(app.onAlarm);
 chrome.runtime.onStartup.addListener(app.onStartup);
 chrome.runtime.onInstalled.addListener(app.onInstalled);
 // The previous value comes along: after a worker restart, it is what the change is compared against.
+// The first save has none: compare against the defaults it replaced.
 chrome.storage.onChanged.addListener((changes, area) => {
   const c = changes.settings;
-  if (area === 'sync' && c) app.onSettingsStored(c.oldValue === undefined ? undefined : normalizeSettings(c.oldValue));
+  if (area === 'sync' && c) app.onSettingsStored(normalizeSettings(c.oldValue));
 });
 app.start();

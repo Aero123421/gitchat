@@ -2,6 +2,7 @@ import 'fake-indexeddb/auto';
 import { describe, expect, it, vi } from 'vitest';
 import { Engine, type StoredInit } from '../../src/background/engine';
 import { GitHub } from '../../src/background/github/client';
+import { gitBlobSha } from '../../src/background/hash';
 import { renderChat } from '../../src/background/render';
 import { openDb } from '../../src/background/store/db';
 import { GitchatError } from '../../src/shared/protocol';
@@ -98,7 +99,7 @@ describe('engine: commit and push', () => {
     const t = await setup();
     const path = await trackAndPush(t);
     const before = t.fake.commitCount(t.repo);
-    await t.engine.snapshot(snap([user('u2'), bot('a2')]), 'answered');
+    await t.engine.snapshot(snap([bot('a1'), user('u2'), bot('a2')]), 'answered');
     expect((await t.engine.status(KEY)).staged.map((x) => x.id)).toEqual(['u2', 'a2']);
     await t.engine.push(KEY);
     expect(t.fake.commitCount(t.repo)).toBe(before + 1);
@@ -125,7 +126,7 @@ describe('engine: commit and push', () => {
     const path = await trackAndPush(t, '2026-11-09T10:00:00.000Z');
     const theirs = remoteFile(path, [user('u1'), bot('a1'), user('u2'), bot('a2'), user('u9'), bot('a9')], '2026-11-09T12:00:00.000Z');
     await t.fake.commitFiles(t.repo, { [path]: theirs });
-    await t.engine.snapshot(snap([user('u2'), bot('a2')], { capturedAt: '2026-11-09T11:00:00.000Z' }), 'answered');
+    await t.engine.snapshot(snap([bot('a1'), user('u2'), bot('a2')], { capturedAt: '2026-11-09T11:00:00.000Z' }), 'answered');
     await t.engine.commit(KEY);
     await t.engine.push();
     expect(t.fake.fileAt(t.repo, path)).toBe(theirs);
@@ -138,7 +139,7 @@ describe('engine: commit and push', () => {
     const t = await setup();
     const path = await trackAndPush(t, '2026-11-09T10:00:00.000Z');
     await t.fake.commitFiles(t.repo, { [path]: remoteFile(path, [user('u1'), bot('a1'), user('u9'), bot('a9')], '2026-11-09T12:00:00.000Z') });
-    await t.engine.snapshot(snap([user('u2'), bot('a2')], { capturedAt: '2026-11-09T11:00:00.000Z' }), 'answered');
+    await t.engine.snapshot(snap([bot('a1'), user('u2'), bot('a2')], { capturedAt: '2026-11-09T11:00:00.000Z' }), 'answered');
     await t.engine.push(KEY);
     const file = t.fake.fileAt(t.repo, path)!;
     for (const text of ['answer a1', 'answer a9', 'answer a2']) expect(file).toContain(text);
@@ -213,11 +214,11 @@ describe('engine: automation', () => {
     await vi.waitFor(() => expect(t.fake.paths(t.repo).some((p) => p.startsWith('claude/'))).toBe(true));
     const path = (await t.engine.status(KEY)).path!;
 
-    let s = await t.engine.snapshot(snap([user('u2')]), 'sent');
+    let s = await t.engine.snapshot(snap([bot('a1'), user('u2')]), 'sent');
     expect(s.staged.map((x) => x.id)).toEqual(['u2']);
     expect(s.commits.filter((c) => !c.pushed)).toEqual([]);
 
-    s = await t.engine.snapshot(snap([user('u2'), bot('a2')]), 'answered');
+    s = await t.engine.snapshot(snap([bot('a1'), user('u2'), bot('a2')]), 'answered');
     expect(s.staged).toEqual([]);
     await vi.waitFor(() => expect(t.fake.fileAt(t.repo, path)).toContain('answer a2'));
   });
@@ -238,7 +239,7 @@ describe('engine: automation', () => {
     t.setSettings({ autoCommit: true });
     await t.engine.settingsChanged(prev, { ...prev, autoCommit: true });
     expect((await t.engine.status(KEY)).commits).toHaveLength(0);
-    await t.engine.snapshot(snap([user('u2'), bot('a2')]), 'answered');
+    await t.engine.snapshot(snap([bot('a1'), user('u2'), bot('a2')]), 'answered');
     expect((await t.engine.status(KEY)).commits).toHaveLength(1);
   });
 
@@ -276,7 +277,7 @@ describe('engine: repositories', () => {
     const t = await setup();
     const repoB = t.fake.addRepo('public', { private: false });
     await trackAndPush(t);
-    await t.engine.snapshot(snap([user('u2'), bot('a2')]), 'answered');
+    await t.engine.snapshot(snap([bot('a1'), user('u2'), bot('a2')]), 'answered');
     await t.engine.commit(KEY); // queued for A
     const prev = { ...DEFAULT_SETTINGS, repo: A };
     t.setSettings({ repo: B });
@@ -345,7 +346,7 @@ describe('engine: repositories', () => {
     await track(t, [user('u1'), bot('a1')]);
     await t.engine.commit(KEY);
     await t.engine.push();
-    await t.engine.snapshot(snap([user('u2'), bot('a2')]), 'answered');
+    await t.engine.snapshot(snap([bot('a1'), user('u2'), bot('a2')]), 'answered');
     t.fake.inject((r) => r.method === 'PATCH' && r.url.pathname.includes('/git/refs/'), () => new Response(JSON.stringify({ message: 'Reference update failed' }), { status: 409 }));
     await t.engine.push(KEY);
     expect(t.fake.fileAt(t.repo, (await t.engine.status(KEY)).path!)).toContain('answer a2');
@@ -367,8 +368,8 @@ describe('engine: captures and init', () => {
   it('ignores a capture read before one it already applied', async () => {
     const t = await setup();
     await track(t, [user('u1'), bot('a1')], { capturedAt: '2026-11-09T10:00:00.000Z' });
-    await t.engine.snapshot(snap([user('u2'), bot('a2', 'the full answer')], { capturedAt: '2026-11-09T10:05:00.000Z' }), 'answered');
-    await t.engine.snapshot(snap([user('u2'), bot('a2', 'the fu')], { capturedAt: '2026-11-09T10:04:00.000Z' }), 'sent');
+    await t.engine.snapshot(snap([bot('a1'), user('u2'), bot('a2', 'the full answer')], { capturedAt: '2026-11-09T10:05:00.000Z' }), 'answered');
+    await t.engine.snapshot(snap([bot('a1'), user('u2'), bot('a2', 'the fu')], { capturedAt: '2026-11-09T10:04:00.000Z' }), 'sent');
     const s = await t.engine.status(KEY);
     await t.engine.commit(KEY);
     expect(s.staged.map((x) => x.id)).toEqual(['u1', 'a1', 'u2', 'a2']);
@@ -527,7 +528,7 @@ describe('engine: conflicts and pushes in flight', () => {
     await t.engine.push();
     expect(t.fake.fileAt(t.repo, path)).toContain('LOCAL-13');
     // an unrelated capture later must not bring an older version back
-    await t.engine.snapshot(snap([user('u2'), bot('a2')], { capturedAt: at(14) }), 'answered');
+    await t.engine.snapshot(snap([bot('a1', 'LOCAL-13'), user('u2'), bot('a2')], { capturedAt: at(14) }), 'answered');
     await t.engine.push(KEY);
     s = await t.engine.status(KEY);
     expect(t.fake.fileAt(t.repo, path)).toContain('LOCAL-13');
@@ -555,7 +556,7 @@ describe('engine: conflicts and pushes in flight', () => {
     const pushing = t.engine.push(); // a manual push is running...
     await hold.reached;
     t.setSettings({ autoPush: true });
-    await t.engine.snapshot(snap([user('u3'), bot('a3')], { capturedAt: at(12) }), 'answered'); // ...a new commit is made...
+    await t.engine.snapshot(snap([bot('a1'), user('u3'), bot('a3')], { capturedAt: at(12) }), 'answered'); // ...a new commit is made...
     const queued = t.engine.retry(); // ...and an automatic push asks to run after it
     const prev = { ...DEFAULT_SETTINGS, autoCommit: true, autoPush: true, repo: { owner: 'octo', name: 'chats', branch: 'main' } };
     t.setSettings({ autoPush: false });
@@ -571,7 +572,8 @@ describe('engine: conflicts and pushes in flight', () => {
     const t = await setup();
     t.fake.addRepo('other');
     const path = 'claude/2026-11-01-shared--c1.md';
-    await t.fake.commitFiles(t.repo, { [path]: remoteFile(path, [user('u1'), bot('a1')], at(9)) });
+    // unique content: blob texts are cached by SHA, and the pause below waits for a blob download
+    await t.fake.commitFiles(t.repo, { [path]: remoteFile(path, [user('u1', `question ${crypto.randomUUID()}`), bot('a1')], at(9)) });
     const hold = t.fake.pause((r) => r.method === 'GET' && r.url.pathname.includes('/git/blobs/'));
     await t.engine.open({ service: 'claude', chatId: 'c1', url: 'https://claude.ai/chat/c1', title: 'Shared' });
     await hold.reached;
@@ -611,5 +613,95 @@ describe('engine: conflicts and pushes in flight', () => {
     expect(inB).toContain('claude/2026-11-01-shared--c1.assets/chart.html');
     expect(t.fake.fileAt(repoB, 'claude/2026-11-01-shared--c1.assets/chart.html')).toBe('<b>chart</b>');
     expect(t.fake.fileAt(repoB, path)).toContain('(2026-11-01-shared--c1.assets/chart.html)');
+  });
+});
+
+describe('engine: round-3 cases', () => {
+  const at = (h: number) => `2026-11-09T${String(h).padStart(2, '0')}:00:00.000Z`;
+  const chart = { name: 'chart.html', mime: 'text/html', data: '<b>chart</b>', encoding: 'utf8' as const };
+  const withChart = (id: string) => ({ ...bot(id, '> **Artifact:** [Chart](gitchat-asset:chart.html)'), assets: [chart] });
+  const chatFiles = (path: string, messages: CapturedMessage[], capturedAt: string) =>
+    Object.fromEntries(renderChat({ service: 'claude', chatId: 'c1', url: 'u', title: 'T', createdAt: at(9), capturedAt, messages }, path).map((f) => [f.path, f.content]));
+  const failChartDownloads = async (t: T, times = 3) => {
+    const sha = await gitBlobSha(chart.data);
+    t.fake.inject((r) => r.method === 'GET' && r.url.pathname.endsWith(`/git/blobs/${sha}`), () => new Response('unavailable', { status: 503 }), times);
+  };
+
+  it("keeps another device's merged edit when this page is read again unchanged", async () => {
+    const t = await setup();
+    const path = await trackAndPush(t, at(10));
+    await t.fake.commitFiles(t.repo, { [path]: remoteFile(path, [user('u1'), bot('a1', 'EDITED ON B')], at(12)) });
+    await t.engine.snapshot(snap([bot('a1'), user('u2'), bot('a2')], { capturedAt: at(13), atEnd: true }), 'answered');
+    await t.engine.push(KEY);
+    expect(t.fake.fileAt(t.repo, path)).toContain('EDITED ON B');
+    // the page still shows a1 as it was read here: that is no edit
+    await t.engine.snapshot(snap([user('u1'), bot('a1'), user('u2'), bot('a2'), user('u3'), bot('a3')], { capturedAt: at(14), atEnd: true }), 'answered');
+    await t.engine.push(KEY);
+    const file = t.fake.fileAt(t.repo, path)!;
+    expect(file).toContain('EDITED ON B');
+    expect(file).toContain('answer a3');
+    expect(file).not.toContain('answer a1');
+  });
+
+  it('asks for a complete read when the first question was edited, and changes nothing until then', async () => {
+    const t = await setup();
+    await trackAndPush(t, at(10));
+    const s = await t.engine.snapshot(snap([user('u1b'), bot('a1b')], { capturedAt: at(11), atEnd: true }), 'answered');
+    expect(s.fullRead).toBe(true);
+    expect(s.staged).toEqual([]);
+    // a capture taken mid-turn is just not applied
+    expect((await t.engine.snapshot(snap([user('u1b')], { capturedAt: at(11) }), 'sent')).fullRead).toBeUndefined();
+    const full = await track(t, [user('u1b'), bot('a1b')], { capturedAt: at(12) });
+    expect(full.staged.map((x) => `${x.id}:${x.kind}`)).toEqual(['u1b:text', 'a1b:text', 'u1:removed', 'a1:removed']);
+  });
+
+  it('lets a cancel that arrives during the repository lookup win: nothing is tracked or committed', async () => {
+    const t = await setup({ autoCommit: true });
+    const { initId } = await t.engine.initStart(KEY);
+    const hold = t.fake.pause((r) => r.method === 'GET' && r.url.pathname.endsWith('/git/ref/heads/main'));
+    const done = t.engine.initDone(snap([user('u1'), bot('a1')], { complete: true }), initId);
+    await hold.reached;
+    const cancelled = await t.engine.initCancel(KEY, initId);
+    expect(cancelled).toMatchObject({ tracked: false, phase: 'idle' });
+    hold.release();
+    await expect(done).rejects.toMatchObject({ code: 'stale-init' });
+    expect(await t.engine.status(KEY)).toMatchObject({ tracked: false, aheadTotal: 0 });
+  });
+
+  it('does not adopt a chat while a visualization file cannot be downloaded, and does once it can', async () => {
+    const t = await setup();
+    const path = 'claude/2026-11-01-shared--c1.md';
+    await t.fake.commitFiles(t.repo, chatFiles(path, [user('u1'), withChart('a1')], at(9)));
+    await failChartDownloads(t);
+    await t.engine.open({ service: 'claude', chatId: 'c1', url: 'https://claude.ai/chat/c1', title: 'T' });
+    await new Promise((r) => setTimeout(r, 50));
+    expect((await t.engine.status(KEY)).tracked).toBe(false);
+    await t.engine.open({ service: 'claude', chatId: 'c1', url: 'https://claude.ai/chat/c1', title: 'T' });
+    await vi.waitFor(async () => expect((await t.engine.status(KEY)).tracked).toBe(true));
+    expect((await t.engine.status(KEY)).staged).toEqual([]);
+  });
+
+  it('fails a push instead of dropping a link whose file could not be downloaded', async () => {
+    const t = await setup();
+    const path = await trackAndPush(t, at(10));
+    await t.fake.commitFiles(t.repo, chatFiles(path, [user('u1'), withChart('a1')], at(12)));
+    await t.engine.snapshot(snap([bot('a1'), user('u2'), bot('a2')], { capturedAt: at(13), atEnd: true }), 'answered');
+    await failChartDownloads(t);
+    await expect(t.engine.push(KEY)).rejects.toBeTruthy();
+    expect(t.fake.fileAt(t.repo, path)).toContain('.assets/chart.html)');
+    await t.engine.push(KEY);
+    const file = t.fake.fileAt(t.repo, path)!;
+    expect(file).toContain('.assets/chart.html)');
+    expect(file).toContain('answer a2');
+  });
+
+  it("keeps the repository copy's saved visualization when a newer init only sees a closed card", async () => {
+    const t = await setup();
+    const path = 'claude/2026-11-01-shared--c1.md';
+    await t.fake.commitFiles(t.repo, chatFiles(path, [user('u1'), withChart('a1')], at(9)));
+    const s = await track(t, [user('u1'), bot('a1', '> **Artifact:** Chart')], { capturedAt: at(12) });
+    expect(s.staged).toEqual([]);
+    await t.engine.push(KEY);
+    expect(t.fake.fileAt(t.repo, path)).toContain('(2026-11-01-shared--c1.assets/chart.html)');
   });
 });

@@ -125,7 +125,7 @@ ChatGPT and Gemini do not put web-search citation URLs into the message DOM (the
 
 ### Edited messages or regenerated answers
 
-When a conversation has multiple branches from editing a message or regenerating a response, only the branch currently displayed on screen is captured. Edits and regenerated answers are picked up automatically. After switching to another branch, or editing the very first message, click **Read the whole chat again** (↻) in the toolbar popup.
+When a conversation has multiple branches from editing a message or regenerating a response, only the branch currently displayed on screen is captured. Edits and regenerated answers are picked up automatically, and when the page no longer matches what was saved (for example after editing the very first prompt), gitchat reads the whole chat again on its own (the widget shows progress). If the saved copy still looks wrong after switching branches, click **Read the whole chat again** (↻) in the toolbar popup.
 
 ## Pushing and multi-device sync
 

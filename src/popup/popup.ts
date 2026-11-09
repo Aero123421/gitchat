@@ -1,6 +1,6 @@
 // Toolbar popup: the current chat's git status and quick actions, or a way into setup.
 
-import { request, type ContentCurrent, type RefreshResult, type ResOf, type SyncStatus, type ToContent } from '../shared/protocol';
+import { request, type ContentCurrent, type ResOf, type SyncStatus, type ToContent } from '../shared/protocol';
 import { t } from '../shared/i18n';
 import { chatKey, type ChatStatus, type ServiceId, type Settings } from '../shared/types';
 import { h, icon, midTrunc, mount, spinner } from '../options/kit/dom';
@@ -11,6 +11,7 @@ import { graphCSS, renderGraph } from '../options/kit/graph';
 import { createMark } from '../options/kit/mark';
 import { injectKitStyles } from '../options/kit/styles';
 import { copy, SERVICE_LINKS } from '../options/kit/util';
+import { refreshPage } from './refresh';
 
 const GRAPH_W = 284;
 const SERVICE_NAME: Record<ServiceId, string> = { chatgpt: 'ChatGPT', claude: 'Claude', gemini: 'Gemini' };
@@ -33,19 +34,6 @@ async function contentCurrent(tabId: number): Promise<ContentCurrent | null> {
   } catch {
     return null;
   }
-}
-
-/**
- * Ask the chat tab to read the page once more, so a commit/push includes answers that finished while
- * nothing was watching. Bounded: a busy or orphaned tab must not block the button.
- */
-async function refreshPage(tabId: number): Promise<RefreshResult | null> {
-  const msg: ToContent = { gitchat: 1, type: 'content/refresh' };
-  const reply = await Promise.race([
-    chrome.tabs.sendMessage(tabId, msg).catch(() => null) as Promise<RefreshResult | null>,
-    new Promise<null>((r) => setTimeout(() => r(null), 4000)),
-  ]);
-  return reply && typeof reply === 'object' && 'ok' in reply ? reply : null;
 }
 
 function card(...children: (Node | null)[]): HTMLElement {
@@ -149,9 +137,9 @@ function chatView(tabId: number, cur: ContentCurrent & { chatId: string }, setti
     error = '';
     render();
     try {
-      // stage what the page shows now; if it can't be read, committing would save stale data
+      // stage what the page shows now; unless the tab confirms it did, committing could save stale data
       const read = await refreshPage(tabId);
-      if (read && !read.ok) {
+      if (!read.ok) {
         error = read.error || t('errRefresh');
         return;
       }

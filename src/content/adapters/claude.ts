@@ -61,24 +61,27 @@ export const claude = defineAdapter({
   // card of the open artifact carries aria-current="true", which ties the panel to its message.
   async artifacts(doc, ctx) {
     const requests: FrameRequest[] = [];
-    const cards = Array.from(doc.querySelectorAll(CARD));
-    const current = cards.filter((c) => c.getAttribute('aria-current') === 'true').pop() ?? null;
-    /** Owner of the open panel: the current card, else the card the user clicked, else the only card with that title. */
-    const ownerOf = (panelTitle: string): { messageId: string | null; title: string } | null => {
-      const owner = (title: string, messageId: string | null) =>
-        // without a message id the title has to point at exactly one card
-        messageId || cards.filter((c) => cardTitle(c) === title).length === 1 ? { messageId, title } : null;
-      if (current) return owner(cardTitle(current), ctx.ownerId(current));
+    const current = Array.from(doc.querySelectorAll(CARD))
+      .filter((c) => c.getAttribute('aria-current') === 'true')
+      .pop();
+    /**
+     * Owner of the open panel: the card marked current, else the card the user clicked in this tab.
+     * A title alone proves nothing (the list is virtualized: the one matching card in the DOM may not
+     * be the one that was opened), so without either the panel is skipped and the saved copy stays.
+     */
+    const ownerOf = (panelTitle: string): { messageId: string; title: string } | null => {
+      if (current) {
+        const messageId = ctx.ownerId(current);
+        return messageId ? { messageId, title: cardTitle(current) } : null;
+      }
       const opened = ctx.opened();
-      if (opened && opened.title === panelTitle) return owner(opened.title, opened.messageId);
-      const same = cards.filter((c) => cardTitle(c) === panelTitle);
-      return same.length === 1 ? owner(panelTitle, ctx.ownerId(same[0]!)) : null;
+      return opened?.messageId && opened.title === panelTitle ? { messageId: opened.messageId, title: opened.title } : null;
     };
     for (const outer of Array.from(doc.querySelectorAll<HTMLIFrameElement>('iframe[src*="/code/artifact/"]'))) {
       const id = /\/code\/artifact\/([^/?#]+)/.exec(outer.getAttribute('src') ?? '')?.[1];
       const owner = ownerOf((outer.getAttribute('title') ?? '').trim());
       if (!owner) continue; // can't tell which message opened it: don't guess
-      const key = id ? `artifact:${id}` : `${owner.messageId ?? owner.title}:artifact`;
+      const key = id ? `artifact:${id}` : `${owner.messageId}:artifact`;
       if (ctx.skip(key)) continue;
       let inner: HTMLIFrameElement | null = null;
       try {

@@ -53,7 +53,8 @@ export interface InitResult {
 
 /** The history could not be loaded completely; nothing partial is ever reported as complete. */
 export class InitIncompleteError extends Error {
-  constructor(readonly reason: 'timeout' | 'busy' | 'no-scroller' | 'empty' | 'one-sided' | 'coverage') {
+  /** `stale`: the page still showed the previous chat's messages (the new one had not rendered). */
+  constructor(readonly reason: 'timeout' | 'busy' | 'no-scroller' | 'empty' | 'one-sided' | 'coverage' | 'stale') {
     super(`init incomplete: ${reason}`);
     this.name = 'InitIncompleteError';
   }

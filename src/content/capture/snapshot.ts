@@ -156,7 +156,16 @@ export function attachArtifacts(messages: CapturedMessage[], artifacts: Captured
   return out;
 }
 
-export function makeSnapshot(adapter: Adapter, chatId: string, read: PageRead, messages: CapturedMessage[], complete: boolean, atEnd = false): ChatSnapshot {
+/** `view`: the tab's visit to the chat that read the page (see ChatSnapshot.view). */
+export function makeSnapshot(
+  adapter: Adapter,
+  chatId: string,
+  read: PageRead,
+  messages: CapturedMessage[],
+  complete: boolean,
+  atEnd = false,
+  view?: ChatSnapshot['view'],
+): ChatSnapshot {
   return {
     service: adapter.service,
     chatId,
@@ -166,5 +175,6 @@ export function makeSnapshot(adapter: Adapter, chatId: string, read: PageRead, m
     capturedAt: read.capturedAt,
     complete,
     ...(complete ? {} : { atEnd }),
+    ...(view ? { view } : {}),
   };
 }

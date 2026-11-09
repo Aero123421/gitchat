@@ -68,6 +68,7 @@ export const panelCSS = `
 .panel .sp { flex: 1; }
 .panel .msg { display: none; margin: 4px 2px 0; font-size: 11px; line-height: 1.4; color: var(--err); }
 .panel.error .msg { display: block; }
+.panel.stalled:not(.error) .msg { display: block; color: var(--ink-3); }
 .sw { all: unset; display: flex; align-items: center; gap: 4px; height: 30px; padding: 0 4px; border-radius: 8px; cursor: pointer; color: var(--ink-3); transition: color .2s; }
 .sw:hover { background: var(--hover); }
 .sw svg.i { width: 12px; height: 12px; stroke-width: 1.7; }
@@ -371,9 +372,11 @@ export function createPanel(root, store, { onRequestClose, openSettings, label =
     el.classList.toggle('capturing', st.phase === 'capturing');
     el.classList.toggle('pushing', st.phase === 'pushing');
     el.classList.toggle('error', st.phase === 'error');
+    // a turn without progress for a long time: not finished, so nothing was saved yet
+    el.classList.toggle('stalled', !!st.stalled && st.phase !== 'error');
     el.classList.toggle('auto-commit', !!st.settings.autoCommit);
     el.classList.toggle('auto-push', !!st.settings.autoPush);
-    $('.msg').textContent = st.phase === 'error' ? st.error || '' : '';
+    $('.msg').textContent = st.phase === 'error' ? st.error || '' : st.stalled ? label('aiStalled') : '';
     btnCommit.classList.toggle('dim', !st.staged.length);
     // push also commits staged work first, so it is useful whenever anything is pending
     btnPush.classList.toggle('dim', !st.staged.length && !store.ahead && st.phase !== 'error');
