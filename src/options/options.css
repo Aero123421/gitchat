@@ -109,6 +109,9 @@ main { padding: 34px 20px 140px; }
 
 /* repository */
 .repo-chooser { display: flex; flex-direction: column; gap: 14px; }
+.repo-chooser > .btn { align-self: flex-start; }
+.token-hint { align-items: flex-start; }
+.token-hint .note { align-self: stretch; }
 .seg { display: inline-flex; padding: 3px; gap: 2px; border-radius: 11px; background: var(--hover); align-self: flex-start; max-width: 100%; }
 .seg button {
   border: 0; background: transparent; padding: 6px 12px; border-radius: 8px; cursor: pointer; font-size: 12px; font-weight: 500; color: var(--ink-2);

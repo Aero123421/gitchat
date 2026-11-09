@@ -3,8 +3,10 @@
 // is the accent ring, the rest are hollow.
 
 import { t } from '../shared/i18n';
+import { request } from '../shared/protocol';
 import { createConnect } from './connect';
 import { h, icon, mount } from './kit/dom';
+import { errorText } from './kit/errors';
 import { glass } from './kit/glass';
 import { createMark } from './kit/mark';
 import { SERVICE_LINKS } from './kit/util';
@@ -27,6 +29,9 @@ export function createOnboarding(opts: { preview: WidgetPreview; onFinish: () =>
   root.append(steps, card);
   let step: Step = app.auth ? (app.settings.repo ? 'prefs' : 'repo') : 'welcome';
   let error = '';
+  // After signing out of a personal access token, the connect step opens the paste form.
+  let tokenFirst = false;
+  let replacing = false;
 
   function go(next: Step): void {
     step = next;
@@ -68,6 +73,26 @@ export function createOnboarding(opts: { preview: WidgetPreview; onFinish: () =>
       icon('arrow'),
     );
 
+  // auth/signout clears only the token. Settings, including a repository already chosen, stay.
+  async function replaceSignIn(): Promise<void> {
+    if (replacing) return;
+    replacing = true;
+    const pasteToken = app.auth?.method === 'pat';
+    try {
+      await request('auth/signout', {});
+      await refreshAuth();
+      tokenFirst = pasteToken;
+      replacing = false;
+      go('connect');
+    } catch (e) {
+      replacing = false;
+      error = errorText(e);
+      render();
+    }
+  }
+
+  const replaceLabel = () => (app.auth?.method === 'device' ? t('signInDifferentAccount') : t('useDifferentToken'));
+
   function render(): void {
     renderSteps();
     if (step === 'prefs' || step === 'done') opts.preview.show(app.settings.widget);
@@ -88,14 +113,19 @@ export function createOnboarding(opts: { preview: WidgetPreview; onFinish: () =>
         if (app.auth) {
           body.append(
             h('div', { class: 'note ok' }, icon('check'), h('span', null, t('signedInAs', app.auth.login))),
+            h('button', { class: 'btn ghost', type: 'button', onClick: () => void replaceSignIn() }, replaceLabel()),
+            ...(error ? [errNote()!] : []),
             nav('welcome', next(t('continue'), 'repo')),
           );
         } else {
           body.append(
-            createConnect(async () => {
-              await refreshAuth().catch(() => undefined);
-              go(app.settings.repo ? 'prefs' : 'repo');
-            }),
+            createConnect(
+              async () => {
+                await refreshAuth().catch(() => undefined);
+                go(app.settings.repo ? 'prefs' : 'repo');
+              },
+              tokenFirst ? { tokenFirst: true } : undefined,
+            ),
             nav('welcome', null),
           );
         }
@@ -110,13 +140,18 @@ export function createOnboarding(opts: { preview: WidgetPreview; onFinish: () =>
           );
         } else {
           body.append(
-            createRepoChooser(async (repo) => {
-              await refreshSettings().catch(() => undefined);
-              // Make sure the choice is persisted even if the worker did not save it itself.
-              if (!app.settings.repo) await patchSettings({ repo }).catch(() => undefined);
-              void refreshSync();
-              go('prefs');
-            }),
+            createRepoChooser(
+              async (repo) => {
+                await refreshSettings().catch(() => undefined);
+                // Make sure the choice is persisted even if the worker did not save it itself.
+                if (!app.settings.repo) await patchSettings({ repo }).catch(() => undefined);
+                void refreshSync();
+                go('prefs');
+              },
+              // Settings already has Sign out; only the wizard needs a way back to the token form.
+              { onReplaceSignIn: () => void replaceSignIn() },
+            ),
+            ...(error ? [errNote()!] : []),
             nav('connect', null),
           );
         }

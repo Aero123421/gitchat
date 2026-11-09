@@ -16,9 +16,10 @@ export const NEW_REPO_URL =
 
 type View = 'choose' | 'code' | 'token';
 
-export function createConnect(onDone: (login: string) => void): HTMLElement {
+export function createConnect(onDone: (login: string) => void, opts?: { tokenFirst?: boolean }): HTMLElement {
   const root = h('div', { class: 'connect' });
-  let view: View = 'choose';
+  // Replacing a personal access token lands on the paste form, not the GitHub button.
+  let view: View = opts?.tokenFirst ? 'token' : 'choose';
   let deviceUnavailable = false;
   let code: DeviceCode | null = null;
   let deadline = 0;

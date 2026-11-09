@@ -22,6 +22,8 @@ Check the following on [GitHub's personal access tokens page](https://github.com
 3. Under **Repository access**, the archive repository is included.
 4. Under **Repository permissions**, **Contents** is set to **Read and write** and **Metadata** is set to **Read**.
 
+You can go back and use a different token without removing the extension: **Wrong token? Use a different one** on the repository step, or **Use a different token** on the GitHub step.
+
 ### "The code expired. Try again."
 
 OAuth device codes expire after 15 minutes. Start the sign-in again and approve the new code on GitHub before the countdown finishes.

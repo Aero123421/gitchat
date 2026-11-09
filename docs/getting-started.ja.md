@@ -67,7 +67,7 @@ GitHub との接続には 2 つの方法があります。
 
      <img src="../src/options/img/github-token-permissions.png" width="520" alt="トークン作成フォームの Permissions: Contents の Read and write（1）、Metadata の Read-only（2）、Generate token（3）">
 
-  3. **Generate token** を押し、一度だけ表示される `github_pat_...` で始まる文字列をコピーして gitchat に貼り付け、**接続** をクリックします。
+  3. **Generate token** を押し、一度だけ表示される `github_pat_...` で始まる文字列をコピーして gitchat に貼り付け、**接続** をクリックします。対象のリポジトリが違うときは、戻って別のトークンを使えます（GitHub のステップの **別のトークンを使う**、またはリポジトリのステップの **トークンが違いますか？別のトークンを使う**）。
 - **GitHub でサインイン（OAuth Device Flow）**:
   - ビルドに OAuth クライアント ID が組み込まれている場合、または **設定 → 詳細 → GitHub OAuth クライアント ID** が設定されている場合に利用できます。
   - **GitHub でサインイン** をクリックし、画面に表示されたコードをコピーして **GitHub を開く** を押し、GitHub 上で承認すると自動的に接続が完了します。

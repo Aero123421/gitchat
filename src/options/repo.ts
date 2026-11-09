@@ -4,7 +4,7 @@ import { request, type RepoSummary } from '../shared/protocol';
 import { t } from '../shared/i18n';
 import type { RepoRef } from '../shared/types';
 import { h, icon, mount, spinner } from './kit/dom';
-import { errorText } from './kit/errors';
+import { errorCode, errorText } from './kit/errors';
 import { createSwitch } from './kit/switch';
 import { NEW_REPO_URL } from './connect';
 import { app } from './state';
@@ -13,22 +13,51 @@ type Mode = 'create' | 'existing';
 const NAME_RE = /^[A-Za-z0-9._-]{1,100}$/;
 const FULL_NAME_RE = /^([A-Za-z0-9-]{1,39})\/([A-Za-z0-9._-]{1,100})$/;
 
-export function createRepoChooser(onDone: (repo: RepoRef) => void): HTMLElement {
+/** `onReplaceSignIn` is the setup wizard's way back to the token form. Settings already has Sign out. */
+export function createRepoChooser(onDone: (repo: RepoRef) => void, opts?: { onReplaceSignIn?: () => void }): HTMLElement {
   const root = h('div', { class: 'repo-chooser' });
   // A personal access token is usually limited to one repository that already exists, and such a
   // token can't create repositories: start on the list instead.
   const limitedToken = app.auth?.method === 'pat';
+  const replaceSignIn = opts?.onReplaceSignIn;
   let mode: Mode = limitedToken ? 'existing' : 'create';
   let name = 'ai-chats';
   let priv = true;
   let busy = false;
   let error = '';
+  let errorKind = '';
   let repos: RepoSummary[] | null = null;
   let loading = false;
   let listError = '';
+  let listKind = '';
   let filter = '';
   let selected: RepoSummary | null = null;
   const body = h('div', { class: 'stack' });
+
+  // Quiet control under the chooser. A forbidden/auth error shows the same action beside that error instead.
+  const escapeBtn = replaceSignIn
+    ? h('button', { class: 'btn ghost small', type: 'button', onClick: () => replaceSignIn() }, t('wrongTokenUseDifferent'))
+    : null;
+
+  function escapeButton(): HTMLButtonElement {
+    return h('button', { class: 'btn small', type: 'button', onClick: () => void replaceSignIn?.() }, t('wrongTokenUseDifferent'));
+  }
+
+  // These codes mean the token is accepted but cannot write here (wrong repository, or no Contents write).
+  function accessHint(code: string): HTMLElement | null {
+    if (!replaceSignIn || (code !== 'forbidden' && code !== 'auth')) return null;
+    return h(
+      'div',
+      { class: 'token-hint stack' },
+      h('div', { class: 'note' }, icon('key'), h('span', null, t('tokenLacksAccess'))),
+      escapeButton(),
+    );
+  }
+
+  function syncEscape(): void {
+    if (!escapeBtn) return;
+    escapeBtn.hidden = !!root.querySelector('.token-hint');
+  }
 
   const seg = h(
     'div',
@@ -48,6 +77,7 @@ export function createRepoChooser(onDone: (repo: RepoRef) => void): HTMLElement 
         onClick: () => {
           mode = m;
           error = '';
+          errorKind = '';
           for (const b of seg.querySelectorAll('button')) b.setAttribute('aria-selected', String(b.dataset.mode === mode));
           render();
           if (m === 'existing' && !repos && !loading) void loadRepos();
@@ -57,12 +87,19 @@ export function createRepoChooser(onDone: (repo: RepoRef) => void): HTMLElement 
     );
   }
 
-  const note = (msg: string) => (msg ? h('div', { class: 'note err', role: 'alert' }, icon('alert'), h('span', null, msg)) : null);
+  const note = (msg: string, code = '') => {
+    if (!msg) return null;
+    const err = h('div', { class: 'note err', role: 'alert' }, icon('alert'), h('span', null, msg));
+    const hint = accessHint(code);
+    // Leave ordinary errors as they were. Only a forbidden/auth failure gains the note beside it.
+    return hint ? h('div', { class: 'stack' }, err, hint) : err;
+  };
   const githubLink = () =>
     h('a', { class: 'btn small', href: NEW_REPO_URL, target: '_blank', rel: 'noopener noreferrer' }, h('span', null, t('createRepoOnGitHub')), icon('external'));
 
   function render(): void {
     mount(body, mode === 'create' ? renderCreate() : renderExisting());
+    syncEscape();
   }
 
   function renderCreate(): HTMLElement {
@@ -90,12 +127,14 @@ export function createRepoChooser(onDone: (repo: RepoRef) => void): HTMLElement 
       if (!valid() || busy) return;
       busy = true;
       error = '';
+      errorKind = '';
       render();
       try {
         const repo = await request('repo/create', { name, private: priv });
         onDone(repo);
       } catch (e) {
         error = errorText(e);
+        errorKind = errorCode(e);
         busy = false;
         render();
       }
@@ -121,7 +160,7 @@ export function createRepoChooser(onDone: (repo: RepoRef) => void): HTMLElement 
       h('div', null, h('label', { class: 'lbl', for: 'gc-repo-name' }, t('repoName')), h('div', { class: 'inline' }, input, createBtn)),
       h('div', { class: 'row tight' }, h('div', { class: 'text' }, h('div', { class: 'title' }, icon('lock'), t('repoPrivateLabel'))), privSwitch.el),
       priv ? null : h('div', { class: 'note err' }, icon('alert'), h('span', null, t('repoPublicWarn'))),
-      note(error),
+      note(error, errorKind),
     );
   }
 
@@ -131,7 +170,7 @@ export function createRepoChooser(onDone: (repo: RepoRef) => void): HTMLElement 
       return h(
         'div',
         { class: 'stack' },
-        note(listError || t('errGeneric')),
+        note(listError || t('errGeneric'), listError ? listKind : ''),
         h('button', { class: 'btn small', type: 'button', onClick: () => void loadRepos() }, icon('refresh'), h('span', null, t('retry'))),
       );
     const search = h('input', {
@@ -152,6 +191,7 @@ export function createRepoChooser(onDone: (repo: RepoRef) => void): HTMLElement 
       const listed = m && repos!.some((r) => `${r.owner}/${r.name}`.toLowerCase() === filter.trim().toLowerCase());
       if (!m || listed) {
         mount(typed);
+        syncEscape();
         return;
       }
       const [, owner, name] = m as unknown as [string, string, string];
@@ -165,6 +205,7 @@ export function createRepoChooser(onDone: (repo: RepoRef) => void): HTMLElement 
           onClick: async () => {
             busy = true;
             error = '';
+            errorKind = '';
             btn.setAttribute('disabled', '');
             btn.replaceChildren(spinner(), h('span', null, t('lookUpTyped', `${owner}/${name}`)));
             try {
@@ -178,6 +219,7 @@ export function createRepoChooser(onDone: (repo: RepoRef) => void): HTMLElement 
               select(known ?? info);
             } catch (e) {
               error = errorText(e);
+              errorKind = errorCode(e);
               busy = false;
               fillTyped();
             }
@@ -185,7 +227,8 @@ export function createRepoChooser(onDone: (repo: RepoRef) => void): HTMLElement 
         },
         h('span', null, t('lookUpTyped', `${owner}/${name}`)),
       );
-      mount(typed, h('div', null, btn), selected ? null : note(error));
+      mount(typed, h('div', null, btn), selected ? null : note(error, errorKind));
+      syncEscape();
     };
 
     const fill = () => {
@@ -224,6 +267,7 @@ export function createRepoChooser(onDone: (repo: RepoRef) => void): HTMLElement 
     const renderDetail = () => {
       if (!selected) {
         mount(detail);
+        syncEscape();
         return;
       }
       const r = selected;
@@ -239,6 +283,7 @@ export function createRepoChooser(onDone: (repo: RepoRef) => void): HTMLElement 
           onClick: async () => {
             busy = true;
             error = '';
+            errorKind = '';
             useBtn.setAttribute('disabled', '');
             useBtn.replaceChildren(spinner(), h('span', null, t('use')));
             try {
@@ -246,6 +291,7 @@ export function createRepoChooser(onDone: (repo: RepoRef) => void): HTMLElement 
               onDone(repo);
             } catch (e) {
               error = errorText(e);
+              errorKind = errorCode(e);
               busy = false;
               renderDetail();
             }
@@ -258,8 +304,9 @@ export function createRepoChooser(onDone: (repo: RepoRef) => void): HTMLElement 
         detail,
         warn.map((w) => h('div', { class: 'note' }, icon('alert'), h('span', null, w))),
         h('div', null, useBtn),
-        note(error),
+        note(error, errorKind),
       );
+      syncEscape();
     };
 
     search.addEventListener('input', () => {
@@ -294,6 +341,7 @@ export function createRepoChooser(onDone: (repo: RepoRef) => void): HTMLElement 
   async function loadRepos(): Promise<void> {
     loading = true;
     listError = '';
+    listKind = '';
     render();
     try {
       repos = await request('repo/list', {});
@@ -301,6 +349,7 @@ export function createRepoChooser(onDone: (repo: RepoRef) => void): HTMLElement 
       repos.sort((a, b) => Number(b.managed) - Number(a.managed) || Number(b.empty) - Number(a.empty) || a.name.localeCompare(b.name));
     } catch (e) {
       listError = errorText(e);
+      listKind = errorCode(e);
     } finally {
       loading = false;
       if (mode === 'existing') render();
@@ -308,6 +357,7 @@ export function createRepoChooser(onDone: (repo: RepoRef) => void): HTMLElement 
   }
 
   root.append(seg, body);
+  if (escapeBtn) root.append(escapeBtn);
   render();
   if (mode === 'existing') void loadRepos();
   return root;

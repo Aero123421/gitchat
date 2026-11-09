@@ -502,5 +502,17 @@
   },
   "reloadExtensionHint": {
     "message": "拡張機能のファイルを読み込み直します（git pull で更新したあとなど）。開いているチャットのタブは、そのあと再読み込みしてください。"
+  },
+  "useDifferentToken": {
+    "message": "別のトークンを使う"
+  },
+  "signInDifferentAccount": {
+    "message": "別のアカウントでサインイン"
+  },
+  "wrongTokenUseDifferent": {
+    "message": "トークンが違いますか？別のトークンを使う"
+  },
+  "tokenLacksAccess": {
+    "message": "このトークンでは、このリポジトリに書き込めないようです（対象のリポジトリと Contents の読み書き権限を確認してください）"
   }
 }
