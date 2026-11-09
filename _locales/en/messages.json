@@ -499,5 +499,11 @@
   },
   "errInitPrevChat": {
     "message": "The page still showed the previous chat, so nothing was saved. Wait until this chat has loaded and try again."
+  },
+  "reloadExtension": {
+    "message": "Reload"
+  },
+  "reloadExtensionHint": {
+    "message": "Loads the extension’s files again, for example after updating them with git pull. Reload open chat tabs afterwards."
   }
 }
