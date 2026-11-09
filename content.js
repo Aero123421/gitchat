@@ -88,6 +88,21 @@
       return spec.keep ? all.filter((n) => spec.keep(n.el, n.role)) : all;
     };
     let opened = null;
+    let openedFor = null;
+    const chatNow = () => {
+      try {
+        return spec.chatId(new URL(location.href));
+      } catch {
+        return null;
+      }
+    };
+    const currentOpened = () => {
+      if (opened && openedFor !== chatNow()) {
+        opened = null;
+        openedFor = null;
+      }
+      return opened;
+    };
     const watched = /* @__PURE__ */ new WeakSet();
     const ownerId = (el) => {
       for (const role of ["assistant", "user"]) {
@@ -116,7 +131,10 @@
           "click",
           (e) => {
             const card = e.target instanceof Element ? spec.cardOf(e.target) : null;
-            if (card) opened = { messageId: ownerId(card), title: spec.cardTitle?.(card) ?? (card.textContent ?? "").trim() };
+            if (card) {
+              opened = { messageId: ownerId(card), title: spec.cardTitle?.(card) ?? (card.textContent ?? "").trim() };
+              openedFor = chatNow();
+            }
           },
           true
         );
@@ -127,6 +145,8 @@
       ...spec.doneQuietMs ? { doneQuietMs: spec.doneQuietMs } : {},
       ...spec.topQuietMs ? { topQuietMs: spec.topQuietMs } : {},
       chatId: (url) => spec.chatId(url),
+      canonicalUrl: (url) => spec.canonicalUrl?.(url) ?? `${url.origin}${url.pathname}`,
+      ...spec.pageChatId ? { pageChatId: (doc) => spec.pageChatId(doc) } : {},
       title(doc) {
         const el = s.title ? pick(doc, s.title) : null;
         const fromEl = el?.textContent?.trim();
@@ -166,7 +186,7 @@
       aiPhase: (doc) => spec.aiPhase?.(doc) ?? null,
       composer: (doc) => pick(doc, s.composer),
       ...spec.artifacts ? {
-        artifacts: (doc, opts) => spec.artifacts(doc, { ownerId, skip: (key) => opts?.skip?.has(key) ?? false, opened: () => opened })
+        artifacts: (doc, opts) => spec.artifacts(doc, { ownerId, skip: (key) => opts?.skip?.has(key) ?? false, opened: currentOpened })
       } : {},
       theme: (doc) => s.dark && exists(doc, s.dark) ? "dark" : s.dark ? "light" : themeFromBackground(doc)
     };
@@ -189,7 +209,7 @@
   function idFromPath(url, ...patterns) {
     for (const re of patterns) {
       const m = re.exec(url.pathname);
-      if (m?.[1]) return m[1];
+      if (m?.[1]) return m[1].toLowerCase();
     }
     return null;
   }
@@ -624,6 +644,11 @@ ${body}
     const panes = Array.from(doc.querySelectorAll(".thread-scroll-container"));
     return panes.find((p) => p.getBoundingClientRect().height > 0) ?? null;
   }
+  function conversationAttr(root) {
+    const el = root.querySelector("[data-chatgpt-conversation-selection-target], [data-chatgpt-selection-conversation-id]");
+    if (!el) return null;
+    return el.getAttribute("data-chatgpt-conversation-selection-target") ?? el.getAttribute("data-chatgpt-selection-conversation-id");
+  }
   function transcript(doc) {
     const pane = visiblePane(doc);
     if (pane) return pane;
@@ -686,6 +711,16 @@ ${fencedCode(raw.replace(/\n$/, ""), codeLanguage(el))}
     // `/c/local-chatgpt:<uuid>` is a transient id right after the first send: wait for the real one.
     // Temporary chats are meant to disappear, so gitchat never saves them.
     chatId: (url) => url.searchParams.get("temporary-chat") === "true" ? null : idFromPath(url, /\/c\/([0-9a-f]{8}-[0-9a-f-]{27,})/i),
+    // The page names its conversation even when the URL has not caught up (a branch, or another account).
+    pageChatId(doc) {
+      const panes = doc.querySelectorAll(".thread-scroll-container");
+      const pane = panes.length ? visiblePane(doc) : doc.documentElement;
+      if (!pane) return null;
+      const raw = conversationAttr(pane);
+      if (!raw) return null;
+      const id = raw.replace(/^local-chatgpt:/i, "").trim();
+      return id ? id.toLowerCase() : null;
+    },
     root: transcript,
     // ~11 turns in the DOM at a time
     virtualized: true,
@@ -884,6 +919,12 @@ ${fencedCode(raw.replace(/\n$/, ""), codeLanguage(el))}
       }
       return serializeFrames(requests);
     },
+    // The streaming answer's turn. The observer keeps it, so unmounting that row is not "done".
+    activeTurnId(doc) {
+      const streaming = Array.from(doc.querySelectorAll('[data-testid="assistant-message"][data-is-streaming="true"]')).pop();
+      return streaming?.getAttribute("data-turn-key") ?? null;
+    },
+    hasTurn: (doc, id) => !!doc.querySelector(`[data-turn-key="${CSS.escape(id)}"]`),
     aiPhase(doc) {
       const msgs = doc.querySelectorAll('[data-testid="assistant-message"]');
       const last2 = msgs[msgs.length - 1];
@@ -941,7 +982,13 @@ ${fencedCode(raw.replace(/\n$/, ""), codeLanguage(el))}
   var gemini = defineAdapter({
     service: "gemini",
     siteNames: ["Google Gemini", "Gemini"],
-    chatId: (url) => idFromPath(url, /^\/app\/([0-9a-f]{12,})/i, /^\/gem\/[^/]+\/([0-9a-f]{12,})/i),
+    // A second signed-in Google account adds /u/<n> in front: /u/1/app/<id>
+    chatId: (url) => idFromPath(url, /^(?:\/u\/\d+)?\/app\/([0-9a-f]{12,})/i, /^(?:\/u\/\d+)?\/gem\/[^/]+\/([0-9a-f]{12,})/i),
+    // The slot is this profile's sign-in order, and the query is account/language chrome. Neither belongs in a saved link.
+    canonicalUrl(url) {
+      const path = url.pathname.replace(/^\/u\/\d+/, "") || "/";
+      return `${url.origin}${path}`;
+    },
     // loaded turns stay in the DOM (off-screen ones use content-visibility:auto)
     virtualized: false,
     selectors: {
@@ -1016,10 +1063,10 @@ ${fencedCode(raw.replace(/\n$/, ""), codeLanguage(el))}
   // src/content/adapters/registry.ts
   var BY_HOST = {
     "chatgpt.com": chatgpt,
-    "chat.openai.com": chatgpt,
     "claude.ai": claude,
     "gemini.google.com": gemini
   };
+  var ADAPTER_HOSTS = Object.keys(BY_HOST);
   function adapterFor(hostname) {
     return BY_HOST[hostname] ?? null;
   }
@@ -3886,8 +3933,8 @@ button { font: inherit; }
   var MAX_SETTLE_MS = 2e4;
   var WATCHED = ["data-is-streaming", "disabled", "aria-busy", "data-state"];
   var AiObserver = class {
-    constructor(adapter2, doc, on, opts = {}) {
-      this.adapter = adapter2;
+    constructor(adapter, doc, on, opts = {}) {
+      this.adapter = adapter;
       this.doc = doc;
       this.on = on;
       this.stallMs = opts.stallMs ?? STALL_MS;
@@ -4091,10 +4138,10 @@ button { font: inherit; }
     walk(body);
     return out.replace(/\r\n?/g, "\n").split("\n").map((l) => l.replace(/[ \t]+$/g, "")).join("\n").replace(/\n{3,}/g, "\n\n").trim();
   }
-  function captureMessage(adapter2, node) {
-    const body = adapter2.body(node);
+  function captureMessage(adapter, node) {
+    const body = adapter.body(node);
     if (node.role === "user") return { id: node.id, role: "user", markdown: userText(body), kinds: [] };
-    const { markdown, kinds } = toMarkdown(body, adapter2.markdown);
+    const { markdown, kinds } = toMarkdown(body, adapter.markdown);
     return { id: node.id, role: "assistant", markdown, kinds };
   }
   function assignIds(list2) {
@@ -4108,22 +4155,30 @@ ${m.markdown}`)}`;
       return { ...m, id: n ? `${base}-${n}` : base };
     });
   }
-  function captureVisible(adapter2, doc, nodes = adapter2.messages(doc)) {
-    return assignIds(nodes.map((n) => captureMessage(adapter2, n)).filter((m) => m.markdown || m.kinds?.length));
+  function captureVisible(adapter, doc, nodes = adapter.messages(doc)) {
+    return assignIds(nodes.map((n) => captureMessage(adapter, n)).filter((m) => m.markdown || m.kinds?.length));
   }
-  function readPage(adapter2, doc) {
-    const nodes = adapter2.messages(doc);
+  function canonicalPageUrl(adapter, href) {
+    try {
+      const url = new URL(href);
+      return adapter.canonicalUrl?.(url) ?? `${url.origin}${url.pathname}`;
+    } catch {
+      return href.split("#")[0] ?? href;
+    }
+  }
+  function readPage(adapter, doc) {
+    const nodes = adapter.messages(doc);
     return {
-      messages: captureVisible(adapter2, doc, nodes),
+      messages: captureVisible(adapter, doc, nodes),
       serviceIds: nodes.flatMap((n) => n.id ? [n.id] : []),
-      url: location.href.split("#")[0] ?? location.href,
-      title: adapter2.title(doc),
+      url: canonicalPageUrl(adapter, location.href),
+      title: adapter.title(doc),
       capturedAt: (/* @__PURE__ */ new Date()).toISOString()
     };
   }
-  function isAtEnd(adapter2, doc) {
-    if (!adapter2.virtualized) return true;
-    const sc = adapter2.scrollContainer(doc);
+  function isAtEnd(adapter, doc) {
+    if (!adapter.virtualized) return true;
+    const sc = adapter.scrollContainer(doc);
     if (!sc) return false;
     const remaining = sc.scrollHeight - sc.scrollTop - sc.clientHeight;
     return remaining <= Math.max(40, sc.clientHeight * 0.5);
@@ -4155,9 +4210,9 @@ ${m.markdown}`)}`;
     }
     return out;
   }
-  function makeSnapshot(adapter2, chatId, read, messages, complete, atEnd = false, view, startConfirmed = false) {
+  function makeSnapshot(adapter, chatId, read, messages, complete, atEnd = false, view, startConfirmed = false) {
     return {
-      service: adapter2.service,
+      service: adapter.service,
       chatId,
       url: read.url,
       title: read.title,
@@ -4293,18 +4348,19 @@ ${m.markdown}`)}`;
   function readStep(clientHeight) {
     return Math.max(1, Math.min(clientHeight - 24, Math.round(clientHeight * 0.7)));
   }
-  function rowsInView(adapter2, doc, scroller) {
+  function rowsInView(adapter, doc, scroller) {
+    if (!scroller.isConnected) return false;
     const box = scroller.getBoundingClientRect();
     if (box.height <= 0) return true;
-    return adapter2.messages(doc).some((n) => {
+    return adapter.messages(doc).some((n) => {
       const r = n.el.getBoundingClientRect();
       return r.height > 0 && r.bottom > box.top && r.top < box.bottom;
     });
   }
-  async function waitForRows(adapter2, doc, scroller, signal, maxMs) {
+  async function waitForRows(adapter, doc, scroller, signal, maxMs) {
     await settle(scroller, 120, 1200, signal);
     const start = performance.now();
-    while (!rowsInView(adapter2, doc, scroller) && performance.now() - start < maxMs) await settle(scroller, 80, 400, signal);
+    while (!rowsInView(adapter, doc, scroller) && performance.now() - start < maxMs) await settle(scroller, 80, 400, signal);
   }
   function missingRanges(seen, total) {
     const out = [];
@@ -4316,11 +4372,18 @@ ${m.markdown}`)}`;
     }
     return out;
   }
-  async function captureFullHistory(adapter2, doc, opts) {
+  async function captureFullHistory(adapter, doc, opts) {
     const { signal, onProgress } = opts;
     signal.throwIfAborted();
-    const scroller = adapter2.scrollContainer(doc);
-    if (!scroller) throw new InitIncompleteError("no-scroller");
+    const found = adapter.scrollContainer(doc);
+    if (!found?.isConnected) throw new InitIncompleteError("no-scroller");
+    let scroller = found;
+    const retarget = () => {
+      if (!scroller.isConnected) throw new InitIncompleteError("no-scroller");
+      const next = adapter.scrollContainer(doc);
+      if (!next?.isConnected) throw new InitIncompleteError("no-scroller");
+      scroller = next;
+    };
     const restoreTo = scroller.scrollTop;
     const fromBottom = scroller.scrollHeight - scroller.scrollTop;
     const maxLoadMs = opts.maxLoadMs ?? 10 * 6e4;
@@ -4340,7 +4403,7 @@ ${m.markdown}`)}`;
     const covered = () => /* @__PURE__ */ new Set([...readPos, ...[...otherPos].filter((p) => !emptyPos.has(p))]);
     const unread = () => [...emptyAt.keys()].filter((id) => !readIds.has(id));
     const read = () => {
-      const rows = adapter2.messages(doc).map((node) => ({ node, msg: captureMessage(adapter2, node), pos: adapter2.positionOf?.(node) ?? null }));
+      const rows = adapter.messages(doc).map((node) => ({ node, msg: captureMessage(adapter, node), pos: adapter.positionOf?.(node) ?? null }));
       const messagePos = /* @__PURE__ */ new Set();
       for (const r of rows) {
         if (r.pos) messagePos.add(r.pos);
@@ -4355,7 +4418,7 @@ ${m.markdown}`)}`;
           if (r.node.id && !emptyAt.has(r.node.id)) emptyAt.set(r.node.id, scroller.scrollTop);
         }
       }
-      for (const p of adapter2.rowPositions?.(doc) ?? []) if (!messagePos.has(p)) otherPos.add(p);
+      for (const p of adapter.rowPositions?.(doc) ?? []) if (!messagePos.has(p)) otherPos.add(p);
       const kept = rows.filter((r) => hasContent(r.msg));
       const msgs = assignIds(kept.map((r) => r.msg));
       kept.forEach((r, i) => {
@@ -4376,10 +4439,11 @@ ${m.markdown}`)}`;
       for (const a of await opts.artifacts(fresh ? /* @__PURE__ */ new Set() : new Set(arts.keys()))) if (fresh || !arts.has(a.key)) arts.set(a.key, a);
     };
     const scrollTo = async (y) => {
+      if (!scroller.isConnected) throw new InitIncompleteError("no-scroller");
       const max = scroller.scrollHeight - scroller.clientHeight;
       scroller.scrollTop = Math.max(0, Math.min(max, y));
       scroller.dispatchEvent(new Event("scroll"));
-      await waitForRows(adapter2, doc, scroller, signal, rowWaitMs);
+      await waitForRows(adapter, doc, scroller, signal, rowWaitMs);
     };
     const walk = async (step, report) => {
       let gapless = true;
@@ -4412,7 +4476,7 @@ ${m.markdown}`)}`;
     };
     const revisitUnread = async () => {
       for (let round = 0; round < 2 && unread().length; round++) {
-        if (!adapter2.virtualized) {
+        if (!adapter.virtualized) {
           await revisit();
           continue;
         }
@@ -4424,32 +4488,34 @@ ${m.markdown}`)}`;
     };
     try {
       const loadStart = performance.now();
-      const topQuietMs = adapter2.topQuietMs ?? 2500;
+      const topQuietMs = adapter.topQuietMs ?? 2500;
       let quietSince = 0;
       let stable = 0;
       let lastCount = -1;
       let lastHeight = -1;
       for (; ; ) {
         if (performance.now() - loadStart >= maxLoadMs) throw new InitIncompleteError("timeout");
+        retarget();
         scrollToTop(scroller);
         await settle(scroller, 450, 4e3, signal);
-        const count = adapter2.loadedCount(doc) ?? adapter2.messages(doc).length;
+        const count = adapter.loadedCount(doc) ?? adapter.messages(doc).length;
         const height = scroller.scrollHeight;
         const unchanged = count === lastCount && height === lastHeight && scroller.scrollTop <= 2;
-        stable = unchanged && !adapter2.isLoadingOlder(doc) ? stable + 1 : 0;
+        stable = unchanged && !adapter.isLoadingOlder(doc) ? stable + 1 : 0;
         if (stable === 1) quietSince = performance.now();
         lastCount = count;
         lastHeight = height;
         onProgress({ stage: "loading", count, progress: 0.25 * (1 - Math.exp(-count / 400)) });
         if (stable >= 2 && performance.now() - quietSince >= topQuietMs) break;
       }
-      const startConfirmed = scroller.scrollHeight <= scroller.clientHeight + 4 && adapter2.messages(doc).length > 0;
-      if (adapter2.virtualized) {
+      retarget();
+      const startConfirmed = scroller.scrollHeight <= scroller.clientHeight + 4 && adapter.messages(doc).length > 0;
+      if (adapter.virtualized) {
         const step = readStep(scroller.clientHeight);
         const gapless = await walk(step, true);
-        if (adapter2.positionOf) {
+        if (adapter.positionOf) {
           for (let attempt = 0; ; attempt++) {
-            const total = adapter2.loadedCount(doc);
+            const total = adapter.loadedCount(doc);
             const missing = total ? missingRanges(covered(), total) : [];
             if (!missing.length) break;
             if (attempt >= 3) {
@@ -4475,7 +4541,7 @@ ${m.markdown}`)}`;
           await revisitUnread();
         }
       } else {
-        await waitForRows(adapter2, doc, scroller, signal, rowWaitMs);
+        await waitForRows(adapter, doc, scroller, signal, rowWaitMs);
         harvest();
         await revisitUnread();
         onProgress({ stage: "reading", count: acc.size, progress: 0.9 });
@@ -4488,8 +4554,9 @@ ${m.markdown}`)}`;
           await sleep(400, signal);
         }
       }
-      if (adapter2.virtualized) await scrollTo(scroller.scrollHeight);
-      if (!rowsInView(adapter2, doc, scroller)) throw new InitIncompleteError("coverage");
+      if (adapter.virtualized) await scrollTo(scroller.scrollHeight);
+      retarget();
+      if (!rowsInView(adapter, doc, scroller)) throw new InitIncompleteError("coverage");
       harvest(true);
       await collectArtifacts(true);
       onProgress({ stage: "reading", count: acc.size, progress: 1 });
@@ -4509,6 +4576,7 @@ ${m.markdown}`)}`;
   var SAMPLE_MS = 1500;
   var OWN_PAGE_WAIT_MS = 1e4;
   var AUTO_RESCAN_MS = 6e4;
+  var SAME_CHAT_WATCH_MS = 4e3;
   var NAVIGATED = "gitchat:navigated";
   var STRENGTH = { manual: 0, sent: 1, answered: 2 };
   var stronger = (a, b) => a && STRENGTH[a] >= STRENGTH[b] ? a : b;
@@ -4517,8 +4585,8 @@ ${m.markdown}`)}`;
   var newView = () => ({ id: crypto.randomUUID(), since: Date.now() });
   var byUser = (signal) => !(signal.reason instanceof DOMException && signal.reason.message === NAVIGATED);
   var Controller = class {
-    constructor(adapter2) {
-      this.adapter = adapter2;
+    constructor(adapter) {
+      this.adapter = adapter;
       this.store = new UiStore({
         commit: () => void this.call("chat/commit"),
         push: () => void this.call("chat/push"),
@@ -4528,7 +4596,7 @@ ${m.markdown}`)}`;
       });
       this.widget = new Widget(this.store, () => void request("app/open-settings", {}).catch(() => {
       }));
-      this.observer = new AiObserver(adapter2, document, {
+      this.observer = new AiObserver(adapter, document, {
         phase: (p) => this.store.setAi(p, p === "streaming" ? STREAM_PACE_MS : void 0),
         sent: () => void this.snapshot("sent"),
         answered: () => void this.snapshot("answered"),
@@ -4558,8 +4626,17 @@ ${m.markdown}`)}`;
     view = newView();
     /** Service message ids last seen on the page while the current chat was shown. */
     sample = null;
+    /** Every service message id seen on this visit (a virtualized window is only the latest sample). */
+    visitIds = null;
+    /** The page shows a transcript that shares no message with this visit: do not write it into the chat. */
+    foreign = false;
+    /** Same-id URL change whose transcript has not been judged yet (see SAME_CHAT_WATCH_MS). */
+    hrefWatch = false;
+    watchUntil = 0;
     /** The previous chat's ids, until a message of the new chat is on the page. */
     stale = null;
+    /** The chat shown before this one in the tab, for the page-named-id check. */
+    prevChatId = null;
     /** Interval timers, cleared when the extension goes away under this script. */
     timers = [];
     watching = false;
@@ -4708,17 +4785,33 @@ ${m.markdown}`)}`;
     }
     async checkRoute(force = false) {
       const href = location.href;
-      if (!force && href === this.lastUrl) {
-        this.sampleIds();
+      const hrefChanged = href !== this.lastUrl;
+      if (!force && !hrefChanged) {
+        this.guardOtherChat();
+        if (this.foreign || this.hrefWatch) this.confirmSameChat();
+        else this.sampleIds();
         return;
       }
       this.lastUrl = href;
       const chatId = this.settings.services[this.adapter.service] ? this.adapter.chatId(new URL(href)) : null;
-      if (!force && chatId === this.chatId) return;
+      if (chatId === this.chatId) {
+        if (chatId && hrefChanged) {
+          this.hrefWatch = true;
+          this.watchUntil = performance.now() + SAME_CHAT_WATCH_MS;
+          this.confirmSameChat();
+          this.guardOtherChat();
+        }
+        if (!force || this.foreign || this.namesOtherChat()) return;
+      }
       if (chatId !== this.chatId) {
         this.gen++;
         this.view = newView();
+        this.foreign = false;
+        this.hrefWatch = false;
+        this.watchUntil = 0;
+        this.visitIds = null;
         const prev = this.chatId && this.sample?.chatId === this.chatId ? this.sample.ids : null;
+        this.prevChatId = this.chatId;
         this.stale = prev && chatId ? { ids: prev } : null;
         this.sample = null;
         this.abort?.abort(new DOMException(NAVIGATED, "AbortError"));
@@ -4742,7 +4835,7 @@ ${m.markdown}`)}`;
       const route = { gen: this.gen, key, chatId };
       this.widget.show(this.settings.widget, this.widgetTheme());
       try {
-        const status = await request("chat/open", { service: this.adapter.service, chatId, url: href, title: this.adapter.title(document) });
+        const status = await request("chat/open", { service: this.adapter.service, chatId, url: canonicalPageUrl(this.adapter, href), title: this.adapter.title(document) });
         if (!this.live(route)) return;
         if (this.abort) this.store.applyStatus(status);
         else this.store.switchTo(key, status);
@@ -4756,22 +4849,100 @@ ${m.markdown}`)}`;
     pageIds() {
       return this.adapter.messages(document).flatMap((n) => n.id ? [n.id] : []);
     }
+    /** Conversation id the page reports, compared case-insensitively with the URL id. Missing means unknown. */
+    pageConversationId() {
+      const raw = this.adapter.pageChatId?.(document);
+      if (!raw) return null;
+      const id = raw.trim().toLowerCase();
+      return id || null;
+    }
+    /** The page names the chat in the URL, so copied message ids are still this chat's. */
+    namesThisChat() {
+      const page = this.pageConversationId();
+      return !!this.chatId && page === this.chatId.toLowerCase();
+    }
+    /**
+     * The page still names the chat this tab showed before. Only that is a disagreement: right after a
+     * chat is created the page's id may lag behind the URL, and a missing id says nothing.
+     */
+    namesOtherChat() {
+      const page = this.pageConversationId();
+      const prev = this.prevChatId?.toLowerCase();
+      return !!this.chatId && !!page && !!prev && page === prev && page !== this.chatId.toLowerCase();
+    }
+    /** Stop writing into the open chat: another conversation is on the page, or this visit shares no message. */
+    refuseCapture() {
+      return this.foreign || this.namesOtherChat();
+    }
+    /** A running init must not finish into this chat once the page names a different one. */
+    guardOtherChat() {
+      if (!this.namesOtherChat() || !this.abort) return;
+      this.suppressed = null;
+      this.abort.abort(new DOMException(NAVIGATED, "AbortError"));
+      this.abort = null;
+    }
+    /**
+     * Same chat id, new href. Overlap with this visit (or the page naming this chat) carries on.
+     * A non-empty sample that shares nothing is another transcript under the same id: refuse until
+     * the ids overlap again or the route changes. An empty read decides nothing.
+     */
+    confirmSameChat() {
+      const visible = this.pageIds();
+      if (this.namesThisChat()) {
+        this.foreign = false;
+        if (visible.length) {
+          this.hrefWatch = false;
+          this.watchUntil = 0;
+          this.sampleIds(visible);
+        } else if (performance.now() >= this.watchUntil) this.hrefWatch = false;
+        return;
+      }
+      const known = this.visitIds;
+      if (!known?.size || !visible.length) {
+        if (performance.now() >= this.watchUntil) this.hrefWatch = false;
+        return;
+      }
+      if (visible.some((id) => known.has(id))) {
+        this.foreign = false;
+        this.hrefWatch = false;
+        this.watchUntil = 0;
+        this.sampleIds(visible);
+        return;
+      }
+      if (this.foreign) return;
+      this.foreign = true;
+      this.hrefWatch = false;
+      this.watchUntil = 0;
+      this.suppressed = null;
+      this.abort?.abort(new DOMException(NAVIGATED, "AbortError"));
+      this.abort = null;
+    }
     /** Notes which messages the current chat shows (at most every SAMPLE_MS), for after a navigation. */
     sampleIds(ids) {
       const chatId = this.chatId;
-      if (!chatId) return;
+      if (!chatId || this.foreign || this.namesOtherChat()) return;
       const now = performance.now();
       if (!ids && this.sample?.chatId === chatId && now - this.sample.at < SAMPLE_MS) return;
       const list2 = ids ?? this.pageIds();
-      if (list2.length && !this.showsPrevious(list2)) this.sample = { chatId, ids: new Set(list2), at: now };
+      if (list2.length && !this.showsPrevious(list2)) {
+        this.sample = { chatId, ids: new Set(list2), at: now };
+        this.visitIds ??= /* @__PURE__ */ new Set();
+        for (const id of list2) this.visitIds.add(id);
+      }
     }
     /**
      * True while the page may still show the previous chat: every message id read belongs to it (or
      * nothing could be identified). The guard ends with the first read that holds a message of the new
-     * chat — a chat branched from the previous one shares its first ids, so one new id is enough.
-     * There is no time limit: an old page never turns into the new chat by waiting.
+     * chat — a chat branched from the previous one shares its first ids, so one new id is enough — or
+     * when the page itself names this chat. There is no time limit: an old page never turns into the
+     * new chat by waiting. A page that names a different chat stays blocked without forgetting the guard.
      */
     showsPrevious(ids) {
+      if (this.namesOtherChat()) return true;
+      if (this.namesThisChat()) {
+        this.stale = null;
+        return false;
+      }
       const st = this.stale;
       if (!st) return false;
       if (ids.some((id) => !st.ids.has(id))) {
@@ -4784,7 +4955,7 @@ ${m.markdown}`)}`;
     async ownPage(route, maxMs) {
       const start = performance.now();
       for (; ; ) {
-        if (!this.live(route)) return false;
+        if (!this.live(route) || this.refuseCapture()) return false;
         if (!this.showsPrevious(this.pageIds())) return true;
         if (performance.now() - start >= maxMs) return false;
         await wait(250);
@@ -4803,6 +4974,7 @@ ${m.markdown}`)}`;
      * turn's own captures include the finished answer).
      */
     snapshot(reason) {
+      if (this.refuseCapture()) return Promise.resolve({ ok: true });
       if (this.abort) {
         this.suppressed = stronger(this.suppressed, reason);
         return Promise.resolve({ ok: true });
@@ -4819,7 +4991,7 @@ ${m.markdown}`)}`;
       if (ticket.gen !== this.gen) return;
       if (reason === "answered" && (ticket.turn !== this.observer.turn || !this.observer.settled)) return;
       const route = this.route();
-      if (!route || !this.store.state.tracked || this.abort) return;
+      if (!route || !this.store.state.tracked || this.abort || this.refuseCapture()) return;
       if (!this.onPage(route)) {
         void this.checkRoute();
         return;
@@ -4831,7 +5003,7 @@ ${m.markdown}`)}`;
       const view = this.view;
       const atEnd = reason !== "sent" && !busy && this.observer.settled && isAtEnd(this.adapter, document);
       const messages = await this.withArtifacts(read.messages);
-      if (!this.live(route) || this.abort) return;
+      if (!this.live(route) || this.abort || this.refuseCapture()) return;
       const { fullRead, ...status } = await request("chat/snapshot", { snapshot: makeSnapshot(this.adapter, route.chatId, read, messages, false, atEnd, view), reason });
       if (!this.live(route)) return;
       this.store.applyStatus(status);
@@ -4844,7 +5016,7 @@ ${m.markdown}`)}`;
      */
     readAgain(route) {
       const now = performance.now();
-      if (this.abort || !this.live(route) || this.autoRescan.gen === route.gen && now - this.autoRescan.at < AUTO_RESCAN_MS) return;
+      if (this.abort || !this.live(route) || this.refuseCapture() || this.autoRescan.gen === route.gen && now - this.autoRescan.at < AUTO_RESCAN_MS) return;
       this.autoRescan = { gen: route.gen, at: now };
       void this.init({ rescan: true });
     }
@@ -4864,7 +5036,7 @@ ${m.markdown}`)}`;
       let sig = "";
       let since = start;
       while (performance.now() - start < maxMs) {
-        if (!this.live(route) || !this.onPage(route) || this.abort) return false;
+        if (!this.live(route) || !this.onPage(route) || this.abort || this.refuseCapture()) return false;
         const msgs = this.adapter.messages(document);
         const ids = msgs.flatMap((n) => n.id ? [n.id] : []);
         const own = !this.showsPrevious(ids);
@@ -4898,7 +5070,7 @@ ${m.markdown}`)}`;
     async init(opts = {}) {
       const route = this.route();
       const rescan = !!opts.rescan;
-      if (!route || this.abort || rescan !== this.store.state.tracked || !this.onPage(route)) return;
+      if (!route || this.abort || rescan !== this.store.state.tracked || !this.onPage(route) || this.refuseCapture()) return;
       const abort = new AbortController();
       this.abort = abort;
       let heartbeat = 0;
@@ -4926,9 +5098,10 @@ ${m.markdown}`)}`;
         if (!this.live(route)) throw new DOMException("Cancelled", "AbortError");
         this.store.applyStatus(started.status);
         if (!await this.ownPage(route, OWN_PAGE_WAIT_MS)) {
-          if (!this.live(route)) throw new DOMException("Cancelled", "AbortError");
+          if (!this.live(route) || this.refuseCapture()) throw new DOMException(NAVIGATED, "AbortError");
           throw new InitIncompleteError("stale");
         }
+        if (this.refuseCapture()) throw new DOMException(NAVIGATED, "AbortError");
         const artifacts = this.settings.saveVisualizations ? this.adapter.artifacts?.bind(this.adapter) : void 0;
         const result = await captureFullHistory(this.adapter, document, {
           signal: abort.signal,
@@ -4944,8 +5117,9 @@ ${m.markdown}`)}`;
         const messages = attachArtifacts(result.messages, result.artifacts);
         if (!messages.length) throw new InitIncompleteError("empty");
         if (!messages.some((m) => m.role === "assistant")) throw new InitIncompleteError("one-sided");
+        if (this.refuseCapture()) throw new DOMException(NAVIGATED, "AbortError");
         if (this.showsPrevious(this.pageIds())) throw new InitIncompleteError("stale");
-        const read = { messages, url: location.href.split("#")[0] ?? location.href, title: this.adapter.title(document), capturedAt: result.readAt };
+        const read = { messages, url: canonicalPageUrl(this.adapter, location.href), title: this.adapter.title(document), capturedAt: result.readAt };
         const snapshot = makeSnapshot(this.adapter, route.chatId, read, messages, true, false, this.view, result.startConfirmed);
         const id = initId;
         let cancelling = null;
@@ -5047,8 +5221,20 @@ ${m.markdown}`)}`;
   }
 
   // src/content/index.ts
-  var adapter = adapterFor(location.hostname);
-  if (adapter && window.top === window) {
-    new Controller(adapter).start().catch((e) => log.error("failed to start", e));
+  function isPrerendering(doc) {
+    return doc.prerendering === true;
   }
+  function boot() {
+    const adapter = adapterFor(location.hostname);
+    if (!adapter || window.top !== window) return;
+    const go = () => {
+      new Controller(adapter).start().catch((e) => log.error("failed to start", e));
+    };
+    if (isPrerendering(document)) {
+      document.addEventListener("prerenderingchange", go, { once: true });
+      return;
+    }
+    go();
+  }
+  boot();
 })();

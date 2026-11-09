@@ -446,6 +446,7 @@ function mergeSnapshot(known, snap, reads) {
     const captured = new Set(incoming.map((m) => m.id));
     if (lastAt !== void 0 && known.slice(lastAt + 1).some((m) => !captured.has(m.id) && observed(m))) return AMBIGUOUS;
   }
+  if (!snap.atEnd && diverged(incoming, known, index, observed)) return AMBIGUOUS;
   let lastKnown = firstKnown;
   incoming.forEach((m, i) => {
     if (index.has(m.id)) lastKnown = i;
@@ -460,6 +461,17 @@ function mergeSnapshot(known, snap, reads) {
     }
   });
   return { ok: true, messages: out };
+}
+function diverged(incoming, known, index, observed) {
+  const captured = new Set(incoming.map((m) => m.id));
+  for (let i = 0; i < incoming.length; i++) {
+    const at = index.get(incoming[i].id);
+    if (at === void 0) continue;
+    const next = known[at + 1];
+    if (!next || captured.has(next.id) || !observed(next)) continue;
+    if (incoming.slice(i + 1).some((m) => !index.has(m.id))) return true;
+  }
+  return false;
 }
 function branchChanged(incoming, firstKnown, known, index, observed) {
   const skipsSeen = (from, to) => known.slice(from, to).some(observed);
@@ -1197,8 +1209,9 @@ var Engine = class {
   /**
    * Applies a capture of a tracked chat. A capture read from the page before one we already applied
    * is ignored (captures can arrive out of order). Auto-commit only runs once the AI finished answering.
-   * A capture that cannot be placed safely changes nothing; when it was a settled read of the chat's
-   * end, the reply asks the page to read the whole chat again (`fullRead`).
+   * A capture that cannot be placed safely changes nothing. The reply asks the page to read the whole
+   * chat again (`fullRead`), including a branch seen away from the bottom. A capture taken while the
+   * AI is still answering (`sent`) does not.
    */
   async snapshot(snap, reason = "answered") {
     const key2 = chatKey(snap.service, snap.chatId);
@@ -1211,7 +1224,7 @@ var Engine = class {
       const reads = pageReadsOf(rec);
       const merged = mergeSnapshot(rec.messages, { ...snap, messages }, reads);
       if (!merged.ok) {
-        if (merged.code === "ambiguous") fullRead = !!snap.atEnd && reason !== "sent";
+        if (merged.code === "ambiguous") fullRead = reason !== "sent";
         else this.chatErrors.set(key2, merged.message);
         return false;
       }
@@ -1988,8 +2001,13 @@ var SITE_SERVICES = {
   "https://claude.ai": "claude",
   "https://gemini.google.com": "gemini"
 };
+function isTopDocument(sender) {
+  if (sender.documentLifecycle === "prerender") return false;
+  if (sender.frameType) return sender.frameType === "outermost_frame";
+  return sender.frameId === 0;
+}
 function senderService(sender) {
-  if (!sender || sender.frameId !== 0) return null;
+  if (!sender || !isTopDocument(sender)) return null;
   let origin = sender.origin;
   if (!origin && sender.url) {
     try {
