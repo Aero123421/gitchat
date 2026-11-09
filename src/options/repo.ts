@@ -34,29 +34,31 @@ export function createRepoChooser(onDone: (repo: RepoRef) => void, opts?: { onRe
   let selected: RepoSummary | null = null;
   const body = h('div', { class: 'stack' });
 
-  // Quiet control under the chooser. A forbidden/auth error shows the same action beside that error instead.
-  const escapeBtn = replaceSignIn
-    ? h('button', { class: 'btn ghost small', type: 'button', onClick: () => replaceSignIn() }, t('wrongTokenUseDifferent'))
-    : null;
+  // Leaving is blocked while a repository is being created or chosen: that request still carries the
+  // old token, and its result would move the wizard on after the sign-out.
+  const leave = () => {
+    if (!busy) replaceSignIn?.();
+  };
+  // Quiet control under the chooser. An access error shows the same action beside that error instead.
+  const escapeBtn = replaceSignIn ? h('button', { class: 'btn ghost small', type: 'button', onClick: leave }, t('wrongTokenUseDifferent')) : null;
 
   function escapeButton(): HTMLButtonElement {
-    return h('button', { class: 'btn small', type: 'button', onClick: () => void replaceSignIn?.() }, t('wrongTokenUseDifferent'));
+    return h('button', { class: 'btn small', type: 'button', onClick: leave }, t('wrongTokenUseDifferent'));
   }
 
-  // These codes mean the token is accepted but cannot write here (wrong repository, or no Contents write).
+  // forbidden/auth: the token is accepted but can't write here (wrong repository, or no Contents write).
+  // not-found: GitHub answers 404 for a private repository the token can't see.
+  const HINTS: Record<string, string> = { forbidden: 'tokenLacksAccess', auth: 'tokenLacksAccess', 'not-found': 'tokenMayNotSeeRepo' };
   function accessHint(code: string): HTMLElement | null {
-    if (!replaceSignIn || (code !== 'forbidden' && code !== 'auth')) return null;
-    return h(
-      'div',
-      { class: 'token-hint stack' },
-      h('div', { class: 'note' }, icon('key'), h('span', null, t('tokenLacksAccess'))),
-      escapeButton(),
-    );
+    const key = HINTS[code];
+    if (!replaceSignIn || !key) return null;
+    return h('div', { class: 'token-hint stack' }, h('div', { class: 'note' }, icon('key'), h('span', null, t(key))), escapeButton());
   }
 
   function syncEscape(): void {
     if (!escapeBtn) return;
     escapeBtn.hidden = !!root.querySelector('.token-hint');
+    escapeBtn.disabled = busy;
   }
 
   const seg = h(
@@ -204,6 +206,7 @@ export function createRepoChooser(onDone: (repo: RepoRef) => void, opts?: { onRe
           disabled: busy,
           onClick: async () => {
             busy = true;
+            syncEscape();
             error = '';
             errorKind = '';
             btn.setAttribute('disabled', '');
@@ -282,6 +285,7 @@ export function createRepoChooser(onDone: (repo: RepoRef) => void, opts?: { onRe
           disabled: busy,
           onClick: async () => {
             busy = true;
+            syncEscape();
             error = '';
             errorKind = '';
             useBtn.setAttribute('disabled', '');

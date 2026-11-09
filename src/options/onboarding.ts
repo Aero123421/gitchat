@@ -80,7 +80,9 @@ export function createOnboarding(opts: { preview: WidgetPreview; onFinish: () =>
     const pasteToken = app.auth?.method === 'pat';
     try {
       await request('auth/signout', {});
-      await refreshAuth();
+      // The token is gone now, so never show the old account again even if the refresh below fails.
+      app.auth = null;
+      await refreshAuth().catch(() => undefined);
       tokenFirst = pasteToken;
       replacing = false;
       go('connect');

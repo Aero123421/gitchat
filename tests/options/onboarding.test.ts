@@ -175,6 +175,57 @@ describe('replacing a sign-in during setup', () => {
     expect(root.textContent).toContain('tokenLacksAccess');
   });
 
+  it('goes to the token form even when refreshing auth fails after a sign-out', async () => {
+    const { root, state } = await wizard(pat, (type) => (type === 'auth/get' ? fail('network') : type === 'repo/list' ? ok([]) : ok()));
+    click(root, 'back');
+    click(root, 'useDifferentToken');
+    await vi.waitFor(() => expect(root.querySelector('#gc-token')).toBeTruthy());
+    expect(state.app.auth).toBeNull();
+    expect(root.textContent).not.toContain('signedInAs');
+  });
+
+  it('does not sign out while a repository is being chosen', async () => {
+    let finish: (r: Reply) => void = () => undefined;
+    const booted = await boot(() => ok());
+    const replies = (globalThis as { chrome: { runtime: { sendMessage: unknown } } }).chrome.runtime;
+    replies.sendMessage = (env: { type: string }) => {
+      booted.calls.push(env.type);
+      if (env.type === 'repo/list') return Promise.resolve(ok([REPO]));
+      if (env.type === 'repo/use') return new Promise<Reply>((r) => (finish = r));
+      return Promise.resolve(ok());
+    };
+    booted.state.app.auth = pat;
+    const { createOnboarding } = await import('../../src/options/onboarding');
+    const root = createOnboarding({ preview, onFinish() {} });
+    document.body.append(root);
+    await vi.waitFor(() => expect(root.querySelector('.repo')).toBeTruthy());
+    (root.querySelector('.repo') as HTMLElement).click();
+    clickSolid(root, 'use');
+    const wayBack = [...root.querySelectorAll('button')].find((b) => b.textContent?.includes('wrongTokenUseDifferent'))!;
+    expect(wayBack.disabled).toBe(true);
+    wayBack.click();
+    await Promise.resolve();
+    expect(booted.calls).not.toContain('auth/signout');
+    finish(fail('network'));
+    await vi.waitFor(() => expect(wayBack.disabled).toBe(false));
+  });
+
+  it('explains that a private repository may be invisible to the token', async () => {
+    const { root } = await wizard(pat, (type) => {
+      if (type === 'repo/list') return ok([REPO]);
+      if (type === 'repo/info') return fail('not-found');
+      return ok();
+    });
+    await vi.waitFor(() => expect(root.querySelector('.repo')).toBeTruthy());
+    const search = root.querySelector<HTMLInputElement>('input[type="search"], input.field')!;
+    search.value = 'someone/private-chats';
+    search.dispatchEvent(new Event('input'));
+    click(root, 'lookUpTyped');
+    await vi.waitFor(() => expect(root.querySelector('.token-hint')).toBeTruthy());
+    expect(root.textContent).toContain('errNotFound');
+    expect(root.textContent).toContain('tokenMayNotSeeRepo');
+  });
+
   it('does not show the wizard-only action on the settings repository chooser', async () => {
     const { state } = await boot((type) => {
       if (type === 'repo/list') return ok([REPO]);
