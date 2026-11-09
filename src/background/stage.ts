@@ -90,6 +90,10 @@ const AMBIGUOUS: MergeResult = { ok: false, code: 'ambiguous', message: 'The cap
  * - A live capture may hold only the part of a long chat that is in the DOM, so it is an upsert:
  *   known ids are updated in place and messages absent from it are kept. New ids after the last
  *   known one are appended; new ids between known ones are left for a later capture to place.
+ *   An unknown id after a known one, where the saved chat's next message is a different one this
+ *   view could have shown and the capture does not contain, replaced that turn. It is refused unless
+ *   the capture reaches the end,
+ *   which replaces the branch instead of appending it.
  * - Except when a live capture reaches the end of the chat (`atEnd`) and disagrees with what was read
  *   on the page after its first known message — a new id in the middle, read messages skipped over,
  *   or new messages where read ones followed. That is an edited or regenerated branch: the capture
@@ -98,8 +102,9 @@ const AMBIGUOUS: MergeResult = { ok: false, code: 'ambiguous', message: 'The cap
  *   read before the view started, or ones the view read itself. Messages that came from another
  *   device's copy, or that another tab read later, prove nothing by their absence.
  * - A live capture that cannot be placed safely is refused as 'ambiguous': it shares no message with
- *   a chat that has some (e.g. the first question was edited), or it reaches the end but stops before
- *   messages the view read there (the end got shorter). Only a complete capture can tell.
+ *   a chat that has some (e.g. the first question was edited), it reaches the end but stops before
+ *   messages the view read there (the end got shorter), or it shows a replaced turn before the end.
+ *   Only a complete capture can tell.
  *
  * A message the page still shows exactly as the capturing view read it last (or, for a view that never
  * read it, as this device read it last) keeps the version we have: it may hold another device's edit,
@@ -165,6 +170,11 @@ export function mergeSnapshot(known: CapturedMessage[], snap: ChatSnapshot, read
     if (lastAt !== undefined && known.slice(lastAt + 1).some((m) => !captured.has(m.id) && observed(m))) return AMBIGUOUS;
   }
 
+  // Away from the end, appending an unknown id after a known one would keep both branches when the
+  // saved chat continues with a message this capture could have shown and does not. A successor this
+  // view never saw (another device's turn) is not that: the new ids are still an append.
+  if (!snap.atEnd && diverged(incoming, known, index, observed)) return AMBIGUOUS;
+
   let lastKnown = firstKnown;
   incoming.forEach((m, i) => {
     if (index.has(m.id)) lastKnown = i;
@@ -186,6 +196,29 @@ export function mergeSnapshot(known: CapturedMessage[], snap: ChatSnapshot, read
  * and then add new messages. A new id followed by a known one, read messages skipped between two
  * captured ones, or new messages where read ones still followed, means another branch.
  */
+/**
+ * After a known message K, the capture has an unknown id, and the saved message right after K is a
+ * different one this view could have shown and the capture does not contain. A new turn after the
+ * last saved message has no such successor, a window of known ids only has no unknown id, and a
+ * successor this view never saw belongs to another device, so none of those count.
+ */
+function diverged(
+  incoming: CapturedMessage[],
+  known: CapturedMessage[],
+  index: Map<string, number>,
+  observed: (m: CapturedMessage) => boolean,
+): boolean {
+  const captured = new Set(incoming.map((m) => m.id));
+  for (let i = 0; i < incoming.length; i++) {
+    const at = index.get(incoming[i]!.id);
+    if (at === undefined) continue;
+    const next = known[at + 1];
+    if (!next || captured.has(next.id) || !observed(next)) continue;
+    if (incoming.slice(i + 1).some((m) => !index.has(m.id))) return true;
+  }
+  return false;
+}
+
 function branchChanged(
   incoming: CapturedMessage[],
   firstKnown: number,

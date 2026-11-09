@@ -211,6 +211,8 @@ export function readStep(clientHeight: number): number {
 
 /** Some message row is rendered inside the scroller's visible box (true when there is no layout). */
 function rowsInView(adapter: Adapter, doc: Document, scroller: HTMLElement): boolean {
+  // A detached node is 0×0. That must not count as "every row is in view" or as the chat fitting.
+  if (!scroller.isConnected) return false;
   const box = scroller.getBoundingClientRect();
   if (box.height <= 0) return true;
   return adapter.messages(doc).some((n) => {
@@ -241,8 +243,20 @@ function missingRanges(seen: ReadonlySet<number>, total: number): Array<[number,
 export async function captureFullHistory(adapter: Adapter, doc: Document, opts: InitOptions): Promise<InitResult> {
   const { signal, onProgress } = opts;
   signal.throwIfAborted();
-  const scroller = adapter.scrollContainer(doc);
-  if (!scroller) throw new InitIncompleteError('no-scroller');
+  const found = adapter.scrollContainer(doc);
+  if (!found?.isConnected) throw new InitIncompleteError('no-scroller');
+  let scroller: HTMLElement = found;
+  /**
+   * The page can swap the scroller while older turns load. A disconnected node is 0×0, so keeping
+   * it would mark the start as confirmed. A replacement is adopted only while the latched node is
+   * still in the document; once that node is gone the read cannot be trusted.
+   */
+  const retarget = (): void => {
+    if (!scroller.isConnected) throw new InitIncompleteError('no-scroller');
+    const next = adapter.scrollContainer(doc);
+    if (!next?.isConnected) throw new InitIncompleteError('no-scroller');
+    scroller = next;
+  };
   const restoreTo = scroller.scrollTop;
   const fromBottom = scroller.scrollHeight - scroller.scrollTop;
   const maxLoadMs = opts.maxLoadMs ?? 10 * 60_000;
@@ -310,6 +324,7 @@ export async function captureFullHistory(adapter: Adapter, doc: Document, opts: 
     for (const a of await opts.artifacts(fresh ? new Set() : new Set(arts.keys()))) if (fresh || !arts.has(a.key)) arts.set(a.key, a);
   };
   const scrollTo = async (y: number) => {
+    if (!scroller.isConnected) throw new InitIncompleteError('no-scroller');
     const max = scroller.scrollHeight - scroller.clientHeight;
     scroller.scrollTop = Math.max(0, Math.min(max, y));
     scroller.dispatchEvent(new Event('scroll'));
@@ -376,6 +391,7 @@ export async function captureFullHistory(adapter: Adapter, doc: Document, opts: 
     let lastHeight = -1;
     for (;;) {
       if (performance.now() - loadStart >= maxLoadMs) throw new InitIncompleteError('timeout');
+      retarget();
       scrollToTop(scroller);
       await settle(scroller, 450, 4000, signal);
       const count = adapter.loadedCount(doc) ?? adapter.messages(doc).length;
@@ -391,6 +407,7 @@ export async function captureFullHistory(adapter: Adapter, doc: Document, opts: 
       if (stable >= 2 && performance.now() - quietSince >= topQuietMs) break;
     }
     // the start is certain only when nothing is hidden above or below: the whole transcript fits
+    retarget();
     const startConfirmed = scroller.scrollHeight <= scroller.clientHeight + 4 && adapter.messages(doc).length > 0;
 
     // ---- 2. read top to bottom
@@ -447,6 +464,7 @@ export async function captureFullHistory(adapter: Adapter, doc: Document, opts: 
     }
     // the settled end of the conversation replaces anything provisional read before
     if (adapter.virtualized) await scrollTo(scroller.scrollHeight);
+    retarget();
     if (!rowsInView(adapter, doc, scroller)) throw new InitIncompleteError('coverage');
     harvest(true);
     await collectArtifacts(true);

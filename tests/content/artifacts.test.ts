@@ -125,6 +125,29 @@ describe('claude artifacts', () => {
     expect(linked?.assets).toHaveLength(1);
     expect(linked?.markdown).toContain('> **Artifact:** [Four Value Bar Chart](gitchat-asset:');
   });
+
+  it('forgets a clicked card when the chat id changes', async () => {
+    const chatA = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    const chatB = '11111111-2222-3333-4444-555555555555';
+    const mount = (id: string) => {
+      document.body.innerHTML = `<div data-testid="assistant-message" data-turn-key="turn-a-hub-reply">
+        <button data-testid="frame-card-open">Chart</button></div>
+        <iframe id="${id}" src="https://claude.ai/code/artifact/ART" title="Chart"></iframe>`;
+      const outer = document.getElementById(id) as HTMLIFrameElement;
+      const inner = document.createElement('iframe');
+      inner.src = 'https://x.frame.claudeusercontent.com/';
+      withWindows([inner]);
+      Object.defineProperty(outer, 'contentDocument', { configurable: true, get: () => ({ querySelector: () => inner }) });
+    };
+    history.replaceState(null, '', `/chat/${chatA}`);
+    mount('outer-a');
+    claude.watch!(document);
+    document.querySelector('[data-testid="frame-card-open"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(await claude.artifacts!(document)).toHaveLength(1);
+    history.replaceState(null, '', `/chat/${chatB}`);
+    mount('outer-b');
+    expect(await claude.artifacts!(document)).toEqual([]);
+  });
 });
 
 describe('gemini', () => {

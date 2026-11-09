@@ -95,15 +95,21 @@ describe('mergeSnapshot', () => {
       expect(ids(mergeSnapshot(chat, snap([], false, true)))).toEqual(chat.map((m) => m.id));
     });
 
-    it('leaves a branch seen mid-window for a capture of the end to settle', () => {
+    it('refuses a branch seen away from the end, and still appends a new turn', () => {
       // new ids before the last known one: not placed yet
       expect(ids(mergeSnapshot(chat, snap([u('x1'), a('x2'), a('a2')], false, false)))).toEqual(chat.map((m) => m.id));
-      // new ids after the last known one are appended for now...
-      const midway = mergeSnapshot(chat, snap([u('u1'), a('a1'), u('u2b'), a('a2b')], false, false));
-      expect(ids(midway)).toEqual(['u1', 'a1', 'u2', 'a2', 'u3', 'a3', 'u2b', 'a2b']);
-      // ...and the next capture that reaches the end drops the turns it skips
-      const settled = mergeSnapshot(midway.ok ? midway.messages : [], snap([u('u1'), a('a1'), u('u2b'), a('a2b')], false, true));
-      expect(ids(settled)).toEqual(['u1', 'a1', 'u2b', 'a2b']);
+      // an unknown id after a known one, where the saved chat continues with a different message
+      expect(ids(mergeSnapshot(chat, snap([u('u1'), a('a1'), u('u2b'), a('a2b')], false, false)))).toBe('ambiguous');
+      const short = [u('u1'), a('a1'), u('u2'), a('a2')];
+      expect(ids(mergeSnapshot(short, snap([a('a1'), u('u2b'), a('a2b')], false, false)))).toBe('ambiguous');
+      // a new turn after the last saved message is an append, and a window of known ids changes nothing
+      expect(ids(mergeSnapshot(short, snap([a('a2'), u('u3'), a('a3')], false, false)))).toEqual(['u1', 'a1', 'u2', 'a2', 'u3', 'a3']);
+      expect(ids(mergeSnapshot(chat, snap([a('a1'), u('u2'), a('a2')], false, false)))).toEqual(chat.map((m) => m.id));
+      // at the end, the same branch still replaces the suffix
+      expect(ids(mergeSnapshot(chat, snap([u('u1'), a('a1'), u('u2b'), a('a2b')], false, true)))).toEqual(['u1', 'a1', 'u2b', 'a2b']);
+      // a successor this view never saw (another device) does not turn a new turn into a branch
+      const remote = [u('u1'), a('a1'), u('u9'), a('a9')];
+      expect(ids(mergeSnapshot(remote, snap([a('a1'), u('u2'), a('a2')], false, false), readsOf(remote.slice(0, 2))))).toEqual(['u1', 'a1', 'u9', 'a9', 'u2', 'a2']);
     });
 
     it('never prunes messages this device did not see on the page (they came from another device)', () => {

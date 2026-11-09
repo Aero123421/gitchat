@@ -232,8 +232,9 @@ export class Engine {
   /**
    * Applies a capture of a tracked chat. A capture read from the page before one we already applied
    * is ignored (captures can arrive out of order). Auto-commit only runs once the AI finished answering.
-   * A capture that cannot be placed safely changes nothing; when it was a settled read of the chat's
-   * end, the reply asks the page to read the whole chat again (`fullRead`).
+   * A capture that cannot be placed safely changes nothing. The reply asks the page to read the whole
+   * chat again (`fullRead`), including a branch seen away from the bottom. A capture taken while the
+   * AI is still answering (`sent`) does not.
    */
   async snapshot(snap: ChatSnapshot, reason: SnapshotReason = 'answered'): Promise<ChatStatus> {
     const key = chatKey(snap.service, snap.chatId);
@@ -246,7 +247,7 @@ export class Engine {
       const reads = pageReadsOf(rec);
       const merged = mergeSnapshot(rec.messages, { ...snap, messages }, reads);
       if (!merged.ok) {
-        if (merged.code === 'ambiguous') fullRead = !!snap.atEnd && reason !== 'sent';
+        if (merged.code === 'ambiguous') fullRead = reason !== 'sent';
         else this.chatErrors.set(key, merged.message);
         return false;
       }

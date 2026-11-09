@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { claude } from '../../src/content/adapters/claude';
 import { AiObserver } from '../../src/content/capture/observer';
 import type { Adapter } from '../../src/content/adapters/types';
 import type { AiPhase } from '../../src/shared/types';
@@ -132,6 +133,31 @@ describe('AiObserver', () => {
     await vi.advanceTimersByTimeAsync(5_000);
     expect(obs.settled).toBe(true);
     expect(obs.turn).toBe(first + 1);
+    obs.stop();
+  });
+
+  it('does not report a Claude answer finished while its row is unmounted', async () => {
+    document.body.innerHTML = '<div data-autoscroll-container></div>';
+    const events: string[] = [];
+    const obs = new AiObserver(claude, document, {
+      phase: () => {},
+      sent: () => events.push('sent'),
+      answered: () => events.push('answered'),
+    });
+    obs.start();
+    document.body.innerHTML = `<div data-autoscroll-container>
+      <div data-testid="assistant-message" data-turn-key="turn-9-hub-reply" data-is-streaming="true"><p>partial</p></div>
+    </div><button data-testid="chat-input-stop"></button>`;
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(events).toContain('sent');
+    document.body.innerHTML = '<div data-autoscroll-container></div>';
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(events).not.toContain('answered');
+    document.body.innerHTML = `<div data-autoscroll-container>
+      <div data-testid="assistant-message" data-turn-key="turn-9-hub-reply"><p>done</p></div>
+    </div>`;
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(events).toContain('answered');
     obs.stop();
   });
 });

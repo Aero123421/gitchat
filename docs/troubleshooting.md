@@ -62,6 +62,7 @@ Check these four conditions:
    - On a blank "New chat" screen before the first message is sent, there is no conversation ID yet.
    - On ChatGPT right after sending the first prompt, the URL briefly uses a transient `/c/local-chatgpt:<uuid>` path; gitchat waits until ChatGPT assigns the permanent `/c/<uuid>` URL.
    - Supported URL paths are `chatgpt.com/c/<uuid>`, `claude.ai/chat/<uuid>`, and `gemini.google.com/app/<id>` (or `/gem/<gem>/<id>`).
+   - Gemini chats opened with a second Google account (`/u/<n>/app/<id>` or `/u/<n>/gem/<gem>/<id>`) are the same chats. Saved links leave out that account slot and query parameters such as `?authuser` and `?hl`.
 2. **Not a temporary chat**: ChatGPT temporary chats (`?temporary-chat=true`) are meant to disappear, so gitchat never shows the widget or saves them.
 3. **Service is enabled in settings**: open **Settings → Behavior → Services** and confirm that **ChatGPT**, **Claude**, or **Gemini** is switched on.
 4. **Tab was already open before installing or reloading the extension**: Chrome does not inject new content scripts into tabs that were already open before the extension was loaded. Reload the chat tab once.

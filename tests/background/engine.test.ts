@@ -656,6 +656,18 @@ describe('engine: round-3 cases', () => {
     expect(full.staged.map((x) => `${x.id}:${x.kind}`)).toEqual(['u1b:text', 'a1b:text', 'u1:removed', 'a1:removed']);
   });
 
+  it('asks for a complete read when a branch is captured away from the end, and still appends a new turn', async () => {
+    const t = await setup();
+    await track(t, [user('u1'), bot('a1'), user('u2'), bot('a2')], { capturedAt: at(10) });
+    await t.engine.commit(KEY);
+    const branch = await t.engine.snapshot(snap([bot('a1'), user('u2b'), bot('a2b')], { capturedAt: at(11), atEnd: false }), 'answered');
+    expect(branch.fullRead).toBe(true);
+    expect(branch.staged).toEqual([]);
+    const appended = await t.engine.snapshot(snap([bot('a2'), user('u3'), bot('a3')], { capturedAt: at(12), atEnd: false }), 'answered');
+    expect(appended.fullRead).toBeUndefined();
+    expect(appended.staged.map((x) => x.id)).toEqual(['u3', 'a3']);
+  });
+
   it('keeps older saved messages when a rescan could not confirm it reached the start of the chat', async () => {
     const t = await setup();
     const many = Array.from({ length: 48 }, (_, i) => [user(`u${i}`), bot(`a${i}`)]).flat();

@@ -37,6 +37,13 @@ function visiblePane(doc: Document): HTMLElement | null {
   return panes.find((p) => p.getBoundingClientRect().height > 0) ?? null;
 }
 
+/** `local-chatgpt:<uuid>` on the thread or a message, without the prefix. */
+function conversationAttr(root: ParentNode): string | null {
+  const el = root.querySelector('[data-chatgpt-conversation-selection-target], [data-chatgpt-selection-conversation-id]');
+  if (!el) return null;
+  return el.getAttribute('data-chatgpt-conversation-selection-target') ?? el.getAttribute('data-chatgpt-selection-conversation-id');
+}
+
 /**
  * Where the transcript is read: the visible pane. The new UI without a visible pane (navigating,
  * only a stale hidden copy left) has nothing to read — never fall back to the whole document there,
@@ -127,6 +134,17 @@ export const chatgpt = defineAdapter({
   // `/c/local-chatgpt:<uuid>` is a transient id right after the first send: wait for the real one.
   // Temporary chats are meant to disappear, so gitchat never saves them.
   chatId: (url) => (url.searchParams.get('temporary-chat') === 'true' ? null : idFromPath(url, /\/c\/([0-9a-f]{8}-[0-9a-f-]{27,})/i)),
+  // The page names its conversation even when the URL has not caught up (a branch, or another account).
+  pageChatId(doc) {
+    const panes = doc.querySelectorAll('.thread-scroll-container');
+    const pane = panes.length ? visiblePane(doc) : doc.documentElement;
+    // Panes exist but none is visible: a hidden copy can still name the previous chat.
+    if (!pane) return null;
+    const raw = conversationAttr(pane);
+    if (!raw) return null;
+    const id = raw.replace(/^local-chatgpt:/i, '').trim();
+    return id ? id.toLowerCase() : null;
+  },
   root: transcript,
   // ~11 turns in the DOM at a time
   virtualized: true,

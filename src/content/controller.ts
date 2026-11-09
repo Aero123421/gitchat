@@ -10,7 +10,15 @@
 // of it). The previous chat's message ids are remembered, and a read made only of them is not a read
 // of the new chat: nothing is saved until a message of the new chat is on the page (however long
 // that takes — no time limit turns an old page into the new chat). A chat branched from the
-// previous one shares its first messages, so one new message is enough.
+// previous one shares its first messages, so one new message is enough. Where the page names its
+// own conversation, that id clears this guard when it matches the URL, and blocks captures while it
+// still names the previous chat. Any other mismatch is not trusted either way: the page's id can lag
+// behind the URL right after a chat is created.
+//
+// A URL change that keeps the chat id (an account slot, a query) is checked against the message ids
+// already seen on this visit. A page that shares none of them is not written into the open chat.
+// The check stops at the first non-empty sample, so a later scroll to another part of the same chat
+// is not mistaken for a different transcript.
 //
 // The AI observer and the page watchers only run while a chat of an enabled service is shown.
 
@@ -22,7 +30,7 @@ import type { Adapter } from './adapters/types';
 import { UiStore } from './bridge';
 import { Widget } from './widget';
 import { AiObserver } from './capture/observer';
-import { attachArtifacts, isAtEnd, makeSnapshot, readPage, type PageRead } from './capture/snapshot';
+import { attachArtifacts, canonicalPageUrl, isAtEnd, makeSnapshot, readPage, type PageRead } from './capture/snapshot';
 import type { CapturedMessage } from '../shared/types';
 import { captureFullHistory, InitIncompleteError, type InitProgress } from './capture/init';
 
@@ -36,6 +44,12 @@ const SAMPLE_MS = 1500;
 const OWN_PAGE_WAIT_MS = 10_000;
 /** At most one automatic full read per visit of a chat in this period. */
 const AUTO_RESCAN_MS = 60_000;
+/**
+ * After a URL change that keeps the chat id, how long to wait for the other transcript to appear.
+ * The other account's DOM can land a moment after the address bar. Past this, an empty page is not
+ * treated as a different chat.
+ */
+const SAME_CHAT_WATCH_MS = 4000;
 /** Abort reason when the tab moves to another chat: unlike Cancel, it does not undo a finished capture. */
 const NAVIGATED = 'gitchat:navigated';
 
@@ -84,8 +98,17 @@ export class Controller {
   private view = newView();
   /** Service message ids last seen on the page while the current chat was shown. */
   private sample: { chatId: string; ids: Set<string>; at: number } | null = null;
+  /** Every service message id seen on this visit (a virtualized window is only the latest sample). */
+  private visitIds: Set<string> | null = null;
+  /** The page shows a transcript that shares no message with this visit: do not write it into the chat. */
+  private foreign = false;
+  /** Same-id URL change whose transcript has not been judged yet (see SAME_CHAT_WATCH_MS). */
+  private hrefWatch = false;
+  private watchUntil = 0;
   /** The previous chat's ids, until a message of the new chat is on the page. */
   private stale: { ids: Set<string> } | null = null;
+  /** The chat shown before this one in the tab, for the page-named-id check. */
+  private prevChatId: string | null = null;
   /** Interval timers, cleared when the extension goes away under this script. */
   private timers: number[] = [];
   private watching = false;
@@ -273,19 +296,36 @@ export class Controller {
 
   private async checkRoute(force = false): Promise<void> {
     const href = location.href;
-    if (!force && href === this.lastUrl) {
-      this.sampleIds();
+    const hrefChanged = href !== this.lastUrl;
+    if (!force && !hrefChanged) {
+      this.guardOtherChat();
+      if (this.foreign || this.hrefWatch) this.confirmSameChat();
+      else this.sampleIds();
       return;
     }
     this.lastUrl = href;
     const chatId = this.settings.services[this.adapter.service] ? this.adapter.chatId(new URL(href)) : null;
-    if (!force && chatId === this.chatId) return;
+    if (chatId === this.chatId) {
+      // A forced re-open (reconnect, settings) is not a navigation. Only a new href can be another transcript.
+      if (chatId && hrefChanged) {
+        this.hrefWatch = true;
+        this.watchUntil = performance.now() + SAME_CHAT_WATCH_MS;
+        this.confirmSameChat();
+        this.guardOtherChat();
+      }
+      if (!force || this.foreign || this.namesOtherChat()) return;
+    }
 
     if (chatId !== this.chatId) {
       this.gen++;
       this.view = newView();
+      this.foreign = false;
+      this.hrefWatch = false;
+      this.watchUntil = 0;
+      this.visitIds = null;
       // until the new chat's messages show, the previous chat's still on the page are not its own
       const prev = this.chatId && this.sample?.chatId === this.chatId ? this.sample.ids : null;
+      this.prevChatId = this.chatId;
       this.stale = prev && chatId ? { ids: prev } : null;
       this.sample = null;
       // the old chat's init cleans up on its own and no longer touches this tab's UI (a capture it
@@ -312,7 +352,7 @@ export class Controller {
     const route: Route = { gen: this.gen, key, chatId };
     this.widget.show(this.settings.widget, this.widgetTheme());
     try {
-      const status = await request('chat/open', { service: this.adapter.service, chatId, url: href, title: this.adapter.title(document) });
+      const status = await request('chat/open', { service: this.adapter.service, chatId, url: canonicalPageUrl(this.adapter, href), title: this.adapter.title(document) });
       if (!this.live(route)) return;
       // an init running for this same chat keeps its local progress
       if (this.abort) this.store.applyStatus(status);
@@ -329,23 +369,107 @@ export class Controller {
     return this.adapter.messages(document).flatMap((n) => (n.id ? [n.id] : []));
   }
 
+  /** Conversation id the page reports, compared case-insensitively with the URL id. Missing means unknown. */
+  private pageConversationId(): string | null {
+    const raw = this.adapter.pageChatId?.(document);
+    if (!raw) return null;
+    const id = raw.trim().toLowerCase();
+    return id || null;
+  }
+
+  /** The page names the chat in the URL, so copied message ids are still this chat's. */
+  private namesThisChat(): boolean {
+    const page = this.pageConversationId();
+    return !!this.chatId && page === this.chatId.toLowerCase();
+  }
+
+  /**
+   * The page still names the chat this tab showed before. Only that is a disagreement: right after a
+   * chat is created the page's id may lag behind the URL, and a missing id says nothing.
+   */
+  private namesOtherChat(): boolean {
+    const page = this.pageConversationId();
+    const prev = this.prevChatId?.toLowerCase();
+    return !!this.chatId && !!page && !!prev && page === prev && page !== this.chatId.toLowerCase();
+  }
+
+  /** Stop writing into the open chat: another conversation is on the page, or this visit shares no message. */
+  private refuseCapture(): boolean {
+    return this.foreign || this.namesOtherChat();
+  }
+
+  /** A running init must not finish into this chat once the page names a different one. */
+  private guardOtherChat(): void {
+    if (!this.namesOtherChat() || !this.abort) return;
+    this.suppressed = null;
+    this.abort.abort(new DOMException(NAVIGATED, 'AbortError'));
+    this.abort = null;
+  }
+
+  /**
+   * Same chat id, new href. Overlap with this visit (or the page naming this chat) carries on.
+   * A non-empty sample that shares nothing is another transcript under the same id: refuse until
+   * the ids overlap again or the route changes. An empty read decides nothing.
+   */
+  private confirmSameChat(): void {
+    const visible = this.pageIds();
+    if (this.namesThisChat()) {
+      this.foreign = false;
+      if (visible.length) {
+        this.hrefWatch = false;
+        this.watchUntil = 0;
+        this.sampleIds(visible);
+      } else if (performance.now() >= this.watchUntil) this.hrefWatch = false;
+      return;
+    }
+    const known = this.visitIds;
+    if (!known?.size || !visible.length) {
+      if (performance.now() >= this.watchUntil) this.hrefWatch = false;
+      return;
+    }
+    if (visible.some((id) => known.has(id))) {
+      this.foreign = false;
+      this.hrefWatch = false;
+      this.watchUntil = 0;
+      this.sampleIds(visible);
+      return;
+    }
+    if (this.foreign) return;
+    this.foreign = true;
+    this.hrefWatch = false;
+    this.watchUntil = 0;
+    this.suppressed = null;
+    this.abort?.abort(new DOMException(NAVIGATED, 'AbortError'));
+    this.abort = null;
+  }
+
   /** Notes which messages the current chat shows (at most every SAMPLE_MS), for after a navigation. */
   private sampleIds(ids?: string[]): void {
     const chatId = this.chatId;
-    if (!chatId) return;
+    if (!chatId || this.foreign || this.namesOtherChat()) return;
     const now = performance.now();
     if (!ids && this.sample?.chatId === chatId && now - this.sample.at < SAMPLE_MS) return;
     const list = ids ?? this.pageIds();
-    if (list.length && !this.showsPrevious(list)) this.sample = { chatId, ids: new Set(list), at: now };
+    if (list.length && !this.showsPrevious(list)) {
+      this.sample = { chatId, ids: new Set(list), at: now };
+      this.visitIds ??= new Set();
+      for (const id of list) this.visitIds.add(id);
+    }
   }
 
   /**
    * True while the page may still show the previous chat: every message id read belongs to it (or
    * nothing could be identified). The guard ends with the first read that holds a message of the new
-   * chat — a chat branched from the previous one shares its first ids, so one new id is enough.
-   * There is no time limit: an old page never turns into the new chat by waiting.
+   * chat — a chat branched from the previous one shares its first ids, so one new id is enough — or
+   * when the page itself names this chat. There is no time limit: an old page never turns into the
+   * new chat by waiting. A page that names a different chat stays blocked without forgetting the guard.
    */
   private showsPrevious(ids: readonly string[]): boolean {
+    if (this.namesOtherChat()) return true;
+    if (this.namesThisChat()) {
+      this.stale = null;
+      return false;
+    }
     const st = this.stale;
     if (!st) return false;
     if (ids.some((id) => !st.ids.has(id))) {
@@ -359,7 +483,7 @@ export class Controller {
   private async ownPage(route: Route, maxMs: number): Promise<boolean> {
     const start = performance.now();
     for (;;) {
-      if (!this.live(route)) return false;
+      if (!this.live(route) || this.refuseCapture()) return false;
       if (!this.showsPrevious(this.pageIds())) return true;
       if (performance.now() - start >= maxMs) return false;
       await wait(250);
@@ -381,6 +505,7 @@ export class Controller {
    * turn's own captures include the finished answer).
    */
   private snapshot(reason: SnapshotReason): Promise<SnapResult> {
+    if (this.refuseCapture()) return Promise.resolve({ ok: true });
     if (this.abort) {
       this.suppressed = stronger(this.suppressed, reason);
       return Promise.resolve({ ok: true });
@@ -398,7 +523,7 @@ export class Controller {
     if (ticket.gen !== this.gen) return;
     if (reason === 'answered' && (ticket.turn !== this.observer.turn || !this.observer.settled)) return;
     const route = this.route();
-    if (!route || !this.store.state.tracked || this.abort) return;
+    if (!route || !this.store.state.tracked || this.abort || this.refuseCapture()) return;
     if (!this.onPage(route)) {
       void this.checkRoute();
       return;
@@ -413,7 +538,7 @@ export class Controller {
     // only a settled capture may drop turns that vanished (a 'sent' one is taken mid-change)
     const atEnd = reason !== 'sent' && !busy && this.observer.settled && isAtEnd(this.adapter, document);
     const messages = await this.withArtifacts(read.messages);
-    if (!this.live(route) || this.abort) return;
+    if (!this.live(route) || this.abort || this.refuseCapture()) return;
     const { fullRead, ...status } = await request('chat/snapshot', { snapshot: makeSnapshot(this.adapter, route.chatId, read, messages, false, atEnd, view), reason });
     if (!this.live(route)) return;
     this.store.applyStatus(status);
@@ -427,7 +552,7 @@ export class Controller {
    */
   private readAgain(route: Route): void {
     const now = performance.now();
-    if (this.abort || !this.live(route) || (this.autoRescan.gen === route.gen && now - this.autoRescan.at < AUTO_RESCAN_MS)) return;
+    if (this.abort || !this.live(route) || this.refuseCapture() || (this.autoRescan.gen === route.gen && now - this.autoRescan.at < AUTO_RESCAN_MS)) return;
     this.autoRescan = { gen: route.gen, at: now };
     void this.init({ rescan: true });
   }
@@ -449,7 +574,7 @@ export class Controller {
     let sig = '';
     let since = start;
     while (performance.now() - start < maxMs) {
-      if (!this.live(route) || !this.onPage(route) || this.abort) return false;
+      if (!this.live(route) || !this.onPage(route) || this.abort || this.refuseCapture()) return false;
       const msgs = this.adapter.messages(document);
       const ids = msgs.flatMap((n) => (n.id ? [n.id] : []));
       // the previous chat still on the page is not this chat's history
@@ -487,7 +612,7 @@ export class Controller {
   async init(opts: { rescan?: boolean } = {}): Promise<void> {
     const route = this.route();
     const rescan = !!opts.rescan;
-    if (!route || this.abort || rescan !== this.store.state.tracked || !this.onPage(route)) return;
+    if (!route || this.abort || rescan !== this.store.state.tracked || !this.onPage(route) || this.refuseCapture()) return;
     const abort = new AbortController();
     this.abort = abort;
     let heartbeat = 0;
@@ -516,9 +641,10 @@ export class Controller {
       this.store.applyStatus(started.status);
       // right after a navigation the page may still show the previous chat: wait for this one
       if (!(await this.ownPage(route, OWN_PAGE_WAIT_MS))) {
-        if (!this.live(route)) throw new DOMException('Cancelled', 'AbortError');
+        if (!this.live(route) || this.refuseCapture()) throw new DOMException(NAVIGATED, 'AbortError');
         throw new InitIncompleteError('stale');
       }
+      if (this.refuseCapture()) throw new DOMException(NAVIGATED, 'AbortError');
       const artifacts = this.settings.saveVisualizations ? this.adapter.artifacts?.bind(this.adapter) : undefined;
       const result = await captureFullHistory(this.adapter, document, {
         signal: abort.signal,
@@ -536,8 +662,9 @@ export class Controller {
       // a history without a single answer means the answers were not found: never save that as complete
       if (!messages.some((m) => m.role === 'assistant')) throw new InitIncompleteError('one-sided');
       // the previous chat's messages are not this chat's history
+      if (this.refuseCapture()) throw new DOMException(NAVIGATED, 'AbortError');
       if (this.showsPrevious(this.pageIds())) throw new InitIncompleteError('stale');
-      const read: PageRead = { messages, url: location.href.split('#')[0] ?? location.href, title: this.adapter.title(document), capturedAt: result.readAt };
+      const read: PageRead = { messages, url: canonicalPageUrl(this.adapter, location.href), title: this.adapter.title(document), capturedAt: result.readAt };
       const snapshot = makeSnapshot(this.adapter, route.chatId, read, messages, true, false, this.view, result.startConfirmed);
       // Cancel pressed while the background saves the capture is passed on. The background takes
       // them in order: a cancel that arrives first refuses the save; one that arrives after it

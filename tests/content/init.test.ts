@@ -135,6 +135,34 @@ describe('captureFullHistory', () => {
     expect(res.messages[0]?.id).toBe('m0');
   });
 
+  it('fails when the latched scroller is replaced by a detached node', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'performance', 'Date'] });
+    const { adapter } = harness({ total: 40, batch: 20, delayMs: 100, virtualized: false });
+    const live = adapter.scrollContainer;
+    adapter.scrollContainer = (doc) => {
+      if (performance.now() > 1000) {
+        const dead = document.createElement('div');
+        Object.defineProperty(dead, 'clientHeight', { get: () => 0 });
+        Object.defineProperty(dead, 'scrollHeight', { get: () => 0 });
+        return dead;
+      }
+      return live(doc);
+    };
+    let result: unknown = 'pending';
+    const run = captureFullHistory(adapter, document, { signal: new AbortController().signal, onProgress: () => {} }).then(
+      () => {
+        result = 'ok';
+      },
+      (e: unknown) => {
+        result = e;
+      },
+    );
+    await vi.advanceTimersByTimeAsync(20_000);
+    await run;
+    expect(result).toBeInstanceOf(InitIncompleteError);
+    expect((result as InitIncompleteError).reason).toBe('no-scroller');
+  });
+
   it('fails instead of reporting a partial history as complete when loading never settles', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'performance', 'Date'] });
     const { adapter, scroller, setTop } = harness({ total: 40, batch: 40, delayMs: 100, virtualized: false, neverSettles: true });

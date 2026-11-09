@@ -90,13 +90,26 @@ export interface PageRead {
   serviceIds?: string[];
 }
 
+/**
+ * The chat URL an adapter wants stored: its own canonical form, or origin + pathname. The hash is
+ * never part of the chat, and a hand-built adapter without the hook still drops the query.
+ */
+export function canonicalPageUrl(adapter: Adapter, href: string): string {
+  try {
+    const url = new URL(href);
+    return adapter.canonicalUrl?.(url) ?? `${url.origin}${url.pathname}`;
+  } catch {
+    return href.split('#')[0] ?? href;
+  }
+}
+
 /** Reads the visible messages and the page's identity in one synchronous step. */
 export function readPage(adapter: Adapter, doc: Document): PageRead {
   const nodes = adapter.messages(doc);
   return {
     messages: captureVisible(adapter, doc, nodes),
     serviceIds: nodes.flatMap((n) => (n.id ? [n.id] : [])),
-    url: location.href.split('#')[0] ?? location.href,
+    url: canonicalPageUrl(adapter, location.href),
     title: adapter.title(doc),
     capturedAt: new Date().toISOString(),
   };

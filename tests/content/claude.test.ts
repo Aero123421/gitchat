@@ -41,7 +41,11 @@ describe('claude adapter (live-site fixtures)', () => {
 
   it('extracts the chat id from the URL', () => {
     expect(claude.chatId(new URL('https://claude.ai/chat/0f1e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b?artifact=x'))).toBe('0f1e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b');
+    expect(claude.chatId(new URL('https://claude.ai/chat/0F1E2D3C-4B5A-6978-8A9B-0C1D2E3F4A5B'))).toBe('0f1e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b');
     expect(claude.chatId(new URL('https://claude.ai/new'))).toBeNull();
+    expect(claude.canonicalUrl!(new URL('https://claude.ai/chat/0f1e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b?artifact=x'))).toBe(
+      'https://claude.ai/chat/0f1e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b',
+    );
   });
 });
 

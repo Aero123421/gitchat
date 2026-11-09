@@ -102,5 +102,22 @@ describe('chatgpt adapter (new app-shell UI fixtures)', () => {
     expect(chatgpt.chatId(new URL('https://chatgpt.com/c/local-chatgpt%3A6af198f2-f520-83ec-9d97-4fe1747be806'))).toBeNull();
     expect(chatgpt.chatId(new URL('https://chatgpt.com/c/6af198f2-f520-83ec-9d97-4fe1747be806?temporary-chat=true'))).toBeNull();
     expect(chatgpt.chatId(new URL('https://chatgpt.com/g/g-p-abc/c/6af198f2-f520-83ec-9d97-4fe1747be806'))).toBe('6af198f2-f520-83ec-9d97-4fe1747be806');
+    expect(chatgpt.chatId(new URL('https://chatgpt.com/c/6AF198F2-F520-83EC-9D97-4FE1747BE806'))).toBe('6af198f2-f520-83ec-9d97-4fe1747be806');
+  });
+
+  it('keeps the path of a saved link and drops the query', () => {
+    const url = new URL('https://chatgpt.com/g/g-p-abc/c/6af198f2-f520-83ec-9d97-4fe1747be806?model=x');
+    expect(chatgpt.canonicalUrl!(url)).toBe('https://chatgpt.com/g/g-p-abc/c/6af198f2-f520-83ec-9d97-4fe1747be806');
+  });
+
+  it('reads the conversation id the page reports, not a hidden pane', () => {
+    load('basic.html');
+    expect(chatgpt.pageChatId!(document)).toBe('conversation_uuid');
+    const pane = document.createElement('div');
+    pane.className = 'thread-scroll-container';
+    pane.innerHTML = '<div data-chatgpt-conversation-selection-target="local-chatgpt:OTHER"></div>';
+    pane.getBoundingClientRect = () => ({ top: 0, bottom: 0, height: 0, left: 0, right: 0, width: 0, x: 0, y: 0, toJSON() {} }) as DOMRect;
+    document.body.appendChild(pane);
+    expect(chatgpt.pageChatId!(document)).toBeNull();
   });
 });

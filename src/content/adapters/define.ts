@@ -33,6 +33,10 @@ export interface AdapterSpec {
   /** Names to strip from document.title ("ChatGPT", "Claude", "Gemini"). */
   siteNames: string[];
   chatId(url: URL): string | null;
+  /** See Adapter.canonicalUrl. Default: origin + pathname. */
+  canonicalUrl?(url: URL): string;
+  /** See Adapter.pageChatId. */
+  pageChatId?(doc: Document): string | null;
   selectors: {
     user: readonly string[];
     assistant: readonly string[];
@@ -88,6 +92,22 @@ export function defineAdapter(spec: AdapterSpec): Adapter & { readonly selectors
     return spec.keep ? all.filter((n) => spec.keep!(n.el, n.role)) : all;
   };
   let opened: OpenedCard | null = null;
+  /** Chat the click belonged to. A later chat must not inherit it (one document for the whole tab). */
+  let openedFor: string | null = null;
+  const chatNow = (): string | null => {
+    try {
+      return spec.chatId(new URL(location.href));
+    } catch {
+      return null;
+    }
+  };
+  const currentOpened = (): OpenedCard | null => {
+    if (opened && openedFor !== chatNow()) {
+      opened = null;
+      openedFor = null;
+    }
+    return opened;
+  };
   const watched = new WeakSet<Document>();
   /** The outermost message element around `el`, as `messages()` would report it. */
   const ownerId = (el: Element): string | null => {
@@ -119,7 +139,10 @@ export function defineAdapter(spec: AdapterSpec): Adapter & { readonly selectors
         'click',
         (e) => {
           const card = e.target instanceof Element ? spec.cardOf!(e.target) : null;
-          if (card) opened = { messageId: ownerId(card), title: spec.cardTitle?.(card) ?? (card.textContent ?? '').trim() };
+          if (card) {
+            opened = { messageId: ownerId(card), title: spec.cardTitle?.(card) ?? (card.textContent ?? '').trim() };
+            openedFor = chatNow();
+          }
         },
         true,
       );
@@ -130,6 +153,8 @@ export function defineAdapter(spec: AdapterSpec): Adapter & { readonly selectors
     ...(spec.doneQuietMs ? { doneQuietMs: spec.doneQuietMs } : {}),
     ...(spec.topQuietMs ? { topQuietMs: spec.topQuietMs } : {}),
     chatId: (url) => spec.chatId(url),
+    canonicalUrl: (url) => spec.canonicalUrl?.(url) ?? `${url.origin}${url.pathname}`,
+    ...(spec.pageChatId ? { pageChatId: (doc: Document) => spec.pageChatId!(doc) } : {}),
     title(doc) {
       const el = s.title ? pick(doc, s.title) : null;
       const fromEl = el?.textContent?.trim();
@@ -174,7 +199,7 @@ export function defineAdapter(spec: AdapterSpec): Adapter & { readonly selectors
     ...(spec.artifacts
       ? {
           artifacts: (doc: Document, opts?: { skip?: ReadonlySet<string> }) =>
-            spec.artifacts!(doc, { ownerId, skip: (key) => opts?.skip?.has(key) ?? false, opened: () => opened }),
+            spec.artifacts!(doc, { ownerId, skip: (key) => opts?.skip?.has(key) ?? false, opened: currentOpened }),
         }
       : {}),
     theme: (doc) => (s.dark && exists(doc, s.dark) ? 'dark' : s.dark ? 'light' : themeFromBackground(doc)),
@@ -199,11 +224,14 @@ function scrollerCandidates(scope: ParentNode, doc: Document, sels: readonly str
   return out;
 }
 
-/** Matches the first capture group of `re` against the URL path. */
+/**
+ * Matches the first capture group of `re` against the URL path. Ids are hex or UUIDs; one lowercase
+ * spelling, so a link in another case stays the same file (saved front matter is already lowercase).
+ */
 export function idFromPath(url: URL, ...patterns: RegExp[]): string | null {
   for (const re of patterns) {
     const m = re.exec(url.pathname);
-    if (m?.[1]) return m[1];
+    if (m?.[1]) return m[1].toLowerCase();
   }
   return null;
 }

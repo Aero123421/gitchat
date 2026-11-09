@@ -4,7 +4,7 @@ ChatGPT, Claude, and Gemini update their front-end HTML frequently. To keep site
 
 - [`src/content/adapters/chatgpt.ts`](../src/content/adapters/chatgpt.ts) — `chatgpt.com` (new app shell, classic UI, and Work mode)
 - [`src/content/adapters/claude.ts`](../src/content/adapters/claude.ts) — `claude.ai`
-- [`src/content/adapters/gemini.ts`](../src/content/adapters/gemini.ts) — `gemini.google.com` (standard chats and Gems)
+- [`src/content/adapters/gemini.ts`](../src/content/adapters/gemini.ts) — `gemini.google.com` (standard chats and Gems). A second Google account adds `/u/<n>` in front of the path; the chat id and the saved link omit that slot.
 
 Shared helpers live in [`src/content/adapters/define.ts`](../src/content/adapters/define.ts), [`src/content/adapters/dom.ts`](../src/content/adapters/dom.ts), and [`src/content/adapters/types.ts`](../src/content/adapters/types.ts).
 
@@ -19,11 +19,11 @@ Shared helpers live in [`src/content/adapters/define.ts`](../src/content/adapter
 4. **Never write HTML into the host page**:
    Gemini enforces Trusted Types on the main document. Content capture only reads from the page DOM, and the widget renders inside an isolated `<gitchat-ui>` Shadow DOM.
 5. **Account for virtualized lists, hidden panes, and `content-visibility: auto`**:
-   - **ChatGPT** can leave a stale `0×0` copy of `.thread-scroll-container` in the DOM after navigation; `transcript()` reads only the visible pane (`getBoundingClientRect().height > 0`), and nothing at all while panes exist but none is visible. The controller adds a site-independent guard: after a navigation, a read whose message ids all belong to the previous chat is not a read of the new chat (a chat branched from it is recognized by its first message of its own).
+   - **ChatGPT** can leave a stale `0×0` copy of `.thread-scroll-container` in the DOM after navigation; `transcript()` reads only the visible pane (`getBoundingClientRect().height > 0`), and nothing at all while panes exist but none is visible. The controller adds a site-independent guard: after a navigation, a read whose message ids all belong to the previous chat is not a read of the new chat (a chat branched from it is recognized by its first message of its own). ChatGPT also names the open conversation in the DOM; when that id matches the URL, the guard ends even if every message id was copied, and while it still names the previous chat, captures stop (any other mismatch is ignored: the id can lag behind the URL right after a chat is created). A URL change that keeps the chat id (an account slot or a query) is checked the same way: if the visible message ids share nothing with this visit, captures stop until they overlap again.
    - **Gemini** uses `content-visibility: auto` on off-screen turns, which causes `element.innerText` to return an empty string. Always read text through `textContent` and structural DOM walks (`userText()` in `src/content/capture/snapshot.ts` and `toMarkdown()` in `src/content/capture/markdown.ts`).
    - **ChatGPT** `fallback-turn-N` keys are window-relative in virtualized lists and shift as the user scrolls; the adapter never uses them as message identity (it falls back to a content fingerprint instead).
 6. **Validate captures before staging**:
-   `mergeSnapshot()` (`src/background/stage.ts`) refuses empty complete captures (`complete: true`) and treats live captures (`complete: false`) as upserts by message ID so a broken selector or unloaded virtualized rows never overwrite previously captured messages. A live capture that cannot be placed safely is refused and answered with `fullRead`, and the tab reads the whole chat again.
+   `mergeSnapshot()` (`src/background/stage.ts`) refuses empty complete captures (`complete: true`) and treats live captures (`complete: false`) as upserts by message ID so a broken selector or unloaded virtualized rows never overwrite previously captured messages. A live capture that cannot be placed safely is refused and answered with `fullRead`, and the tab reads the whole chat again. That includes a branch captured away from the bottom: an unknown id after a known one, where the saved chat continues with a different message. A capture taken mid-answer does not ask for that full read.
 7. **Tie a preview to its message only on evidence**:
    A preview panel (Claude artifact, ChatGPT file preview) belongs to the card that is marked current (`aria-current="true"` on Claude) or to the card the user clicked (`ctx.opened()`). A title match is not enough on a virtualized list: the owning card may be unmounted while another card with the same title is on screen. Without evidence the preview is skipped and the saved copy is kept.
 
@@ -35,7 +35,7 @@ Verified against the live sites (2026-11):
 | --- | --- | --- | --- |
 | Message hook | `[data-chatgpt-search-unit-key$=":user"/":assistant"]` or `data-content-search-unit-key` (classic: `data-message-author-role`) | `[data-testid=user-message/assistant-message]` | `user-query` / `model-response` |
 | Stable id | `data-chatgpt-search-message-ids` (classic: `data-message-id`) | `data-turn-key` | `.conversation-container#<16hex>` (`<id>:u` / `<id>:a`) |
-| Thinking / streaming | `[data-response-starting]` / `[data-talvt-turn-state=in_progress]` (classic: `[data-testid="stop-button"]`) | `[data-testid="chat-input-stop"]` / `data-is-streaming=true` | `pending-request` / `.markdown[aria-busy=true]` |
+| Thinking / streaming | `[data-response-starting]` / `[data-talvt-turn-state=in_progress]` (classic: `[data-testid="stop-button"]`) | `[data-testid="chat-input-stop"]` / `data-is-streaming=true`. The streaming row's `data-turn-key` is remembered, so an answer that finishes while that row is unmounted is staged when the row is back | `pending-request` / `.markdown[aria-busy=true]` |
 | Long chats | Virtualized (~11 turns), +5 turns per load | Virtualized (~20 rows), +32 rows per load | +10 turns per load, `content-visibility:auto` |
 | Start of chat | None (stability: `topQuietMs: 3500`) | None (stability; `aria-posinset="1"` marks only the first loaded row) | None (stability: default `topQuietMs: 2500`) |
 | Visualization frames | `*.web-sandbox.oaiusercontent.com` | `*.claudeusercontent.com` (inside `iframe[src*="/code/artifact/"]`) | `*.scf.usercontent.goog` (inside `immersive-entry-chip`) |
@@ -53,7 +53,9 @@ An adapter is created with `defineAdapter(spec)` (`src/content/adapters/define.t
 | --- | --- | --- |
 | `service` | `'chatgpt' \| 'claude' \| 'gemini'` | Service identifier used in chat keys and repository folder names. |
 | `siteNames` | `string[]` | Suffixes stripped from `document.title` when deriving the conversation title. |
-| `chatId(url)` | `(url: URL) => string \| null` | Extracts the conversation ID from the page URL, or returns `null` on non-chat pages and temporary chats. |
+| `chatId(url)` | `(url: URL) => string \| null` | Extracts the conversation ID from the page URL, or returns `null` on non-chat pages and temporary chats. Ids are lowercased (hex / UUID); the chat key is unchanged. Gemini accepts an optional `/u/<n>` prefix and does not put it in the id. |
+| `canonicalUrl?(url)` | `(url: URL) => string` | URL stored and sent for the chat. Default is origin + pathname (no query, no hash). Gemini also drops a leading `/u/<n>`. Not the chat key. |
+| `pageChatId?(doc)` | `(doc: Document) => string \| null` | Conversation id the page itself reports. Null (or omitted) keeps the URL-only behaviour. ChatGPT reads `data-chatgpt-conversation-selection-target` / `data-chatgpt-selection-conversation-id` on the visible pane. |
 | `root?(doc)` | `(doc: Document) => ParentNode` | Optional root container when the page keeps duplicate hidden transcripts in the DOM (used on ChatGPT). |
 | `virtualized` | `boolean` | `true` when the site removes off-screen messages from the DOM (ChatGPT, Claude). Init then harvests while scrolling and serializes visualizations at each step; `false` (Gemini) reads the loaded transcript in one pass. |
 | `doneQuietMs?` | `number` | Quiet period (ms) after streaming stops before an answer counts as finished (default `700`; `3000` on ChatGPT, longer than the 1.9 s false-completion gap measured in Work mode). The timer restarts while the answer text keeps changing. |

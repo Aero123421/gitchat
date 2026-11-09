@@ -20,6 +20,16 @@ export interface Adapter {
   readonly service: ServiceId;
   /** Chat ID from the page URL, or null on pages that are not a saved conversation. */
   chatId(url: URL): string | null;
+  /**
+   * URL stored for this chat. Default is origin + pathname (no query, no hash). Gemini also drops
+   * the `/u/<n>` account slot. Never used as the chat key.
+   */
+  canonicalUrl?(url: URL): string;
+  /**
+   * Conversation id the page itself reports, when it exposes one (ChatGPT's selection attribute).
+   * Null when the attribute is missing — callers then keep the URL-only behaviour.
+   */
+  pageChatId?(doc: Document): string | null;
   /** Conversation title as shown by the site (empty when not known yet). */
   title(doc: Document): string;
   /** All message elements currently in the DOM, in conversation order. */

@@ -94,6 +94,12 @@ export const claude = defineAdapter({
     }
     return serializeFrames(requests);
   },
+  // The streaming answer's turn. The observer keeps it, so unmounting that row is not "done".
+  activeTurnId(doc) {
+    const streaming = Array.from(doc.querySelectorAll('[data-testid="assistant-message"][data-is-streaming="true"]')).pop();
+    return streaming?.getAttribute('data-turn-key') ?? null;
+  },
+  hasTurn: (doc, id) => !!doc.querySelector(`[data-turn-key="${CSS.escape(id)}"]`),
   aiPhase(doc) {
     const msgs = doc.querySelectorAll('[data-testid="assistant-message"]');
     const last = msgs[msgs.length - 1];

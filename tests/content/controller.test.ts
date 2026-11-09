@@ -608,4 +608,124 @@ describe('Controller', () => {
     await c.init({ rescan: true });
     expect(sent.some((x) => x.type === 'chat/init/start')).toBe(false);
   });
+
+  /** Same chat id with or without a `/u/<n>` slot, so a slot change is not a new chat. */
+  function slotAdapter(over: Partial<Adapter> = {}): Adapter {
+    return makeAdapter({
+      chatId: (url) => /^(?:\/u\/\d+)?\/chat\/(\w+)/.exec(url.pathname)?.[1] ?? null,
+      ...over,
+    });
+  }
+
+  function showMessages(ids: string[]) {
+    document.body.innerHTML = '';
+    const scroller = document.createElement('div');
+    scroller.id = 'scroller';
+    for (const id of ids) {
+      const el = document.createElement('div');
+      el.setAttribute('data-m', id);
+      el.setAttribute('data-role', 'user');
+      el.textContent = id;
+      scroller.appendChild(el);
+    }
+    Object.defineProperty(scroller, 'clientHeight', { get: () => 500 });
+    Object.defineProperty(scroller, 'scrollHeight', { get: () => 500 });
+    document.body.appendChild(scroller);
+  }
+
+  it('does not write a different transcript into the same chat id', async () => {
+    const c = await open(slotAdapter());
+    sent.length = 0;
+    history.replaceState(null, '', '/u/1/chat/a');
+    showMessages(['other-0', 'other-1']);
+    await c.checkRoute();
+    void c.snapshot('answered');
+    await c.init({ rescan: true });
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(sent.filter((s) => s.type === 'chat/snapshot' || s.type === 'chat/init/start' || s.type === 'chat/init/done')).toEqual([]);
+    showMessages(['a-0', 'a-1']);
+    await c.checkRoute();
+    void c.snapshot('answered');
+    await vi.advanceTimersByTimeAsync(50);
+    expect(snapshots().map((s) => s.messages.map((m) => m.id))).toEqual([['a-0', 'a-1']]);
+    expect(c.stale).toBeNull();
+    expect(c.foreign).toBe(false);
+  });
+
+  it('keeps capturing when a same-id URL change still shows this chat', async () => {
+    const c = await open(slotAdapter());
+    sent.length = 0;
+    history.replaceState(null, '', '/u/0/chat/a?hl=ja');
+    await c.checkRoute();
+    void c.snapshot('answered');
+    await vi.advanceTimersByTimeAsync(50);
+    void c.snapshot('manual');
+    await vi.advanceTimersByTimeAsync(50);
+    const snaps = snapshots();
+    expect(snaps).toHaveLength(2);
+    expect(snaps[0]?.messages.map((m) => m.id)).toEqual(['a-0', 'a-1']);
+    expect(snaps[0]?.url).toBe(`${location.origin}/u/0/chat/a`);
+    expect(c.stale).toBeNull();
+    expect(c.foreign).toBe(false);
+  });
+
+  it('stores origin and path, without the query or hash', async () => {
+    const c = new Controller(makeAdapter()) as unknown as Record<string, any>;
+    made.push(c);
+    c.settings = { ...DEFAULT_SETTINGS };
+    showChat('a');
+    history.replaceState(null, '', '/chat/a?model=x#h');
+    await c.checkRoute(true);
+    expect(sent.find((s) => s.type === 'chat/open')?.payload.url).toBe(`${location.origin}/chat/a`);
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(snapshots()[0]?.url).toBe(`${location.origin}/chat/a`);
+  });
+
+  it('saves a branched chat as soon as the page names it, before a message of its own', async () => {
+    let pageId: string | null = null;
+    const c = await open(makeAdapter({ pageChatId: () => pageId }));
+    sent.length = 0;
+    pageId = 'b';
+    history.replaceState(null, '', '/chat/b');
+    await c.checkRoute();
+    await vi.advanceTimersByTimeAsync(3000);
+    const [snap] = snapshots();
+    expect(snap?.chatId).toBe('b');
+    expect(snap?.messages.map((m) => m.id)).toEqual(['a-0', 'a-1']);
+    expect(c.store.state.error).not.toBe('errInitPrevChat');
+  });
+
+  it('does not capture while the page still names the previous chat', async () => {
+    let pageId: string | null = 'a';
+    const c = await open(makeAdapter({ pageChatId: () => pageId }));
+    sent.length = 0;
+    history.replaceState(null, '', '/chat/b'); // the URL moved on, the page still names chat a
+    await c.checkRoute();
+    const extra = document.createElement('div');
+    extra.setAttribute('data-m', 'new-9');
+    extra.setAttribute('data-role', 'user');
+    extra.textContent = 'new';
+    document.getElementById('scroller')!.appendChild(extra);
+    void c.snapshot('answered');
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(snapshots()).toEqual([]);
+    pageId = 'b';
+    void c.snapshot('manual');
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(snapshots().at(-1)?.chatId).toBe('b');
+  });
+
+  it('keeps saving when the page id differs from the URL but is not the previous chat', async () => {
+    // right after a chat is created the page can still carry a provisional id
+    const c = await open(makeAdapter({ pageChatId: () => 'local-provisional' }));
+    sent.length = 0;
+    const extra = document.createElement('div');
+    extra.setAttribute('data-m', 'new-9');
+    extra.setAttribute('data-role', 'user');
+    extra.textContent = 'new';
+    document.getElementById('scroller')!.appendChild(extra);
+    void c.snapshot('manual');
+    await vi.advanceTimersByTimeAsync(50);
+    expect(snapshots()).toHaveLength(1);
+  });
 });

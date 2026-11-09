@@ -64,4 +64,19 @@ describe('gemini adapter (live-site fixtures)', () => {
     expect(gemini.chatId(new URL('https://gemini.google.com/app/bb4c0123456789ab'))).toBe('bb4c0123456789ab');
     expect(gemini.chatId(new URL('https://gemini.google.com/app'))).toBeNull();
   });
+
+  it('extracts the chat id when another Google account is selected', () => {
+    expect(gemini.chatId(new URL('https://gemini.google.com/u/1/app/bb4c0123456789ab'))).toBe('bb4c0123456789ab');
+    expect(gemini.chatId(new URL('https://gemini.google.com/u/2/gem/coding-partner/bb4c0123456789ab'))).toBe('bb4c0123456789ab');
+    expect(gemini.chatId(new URL('https://gemini.google.com/u/1/app'))).toBeNull();
+    expect(gemini.chatId(new URL('https://gemini.google.com/x/1/app/bb4c0123456789ab'))).toBeNull();
+    expect(gemini.chatId(new URL('https://gemini.google.com/app/BB4C0123456789AB'))).toBe('bb4c0123456789ab');
+  });
+
+  it('stores a chat link without the account slot or the query', () => {
+    const gem = new URL('https://gemini.google.com/u/1/gem/coding-partner/bb4c0123456789ab?authuser=1&hl=ja#x');
+    expect(gemini.canonicalUrl!(gem)).toBe('https://gemini.google.com/gem/coding-partner/bb4c0123456789ab');
+    const app = new URL('https://gemini.google.com/app/bb4c0123456789ab');
+    expect(gemini.canonicalUrl!(app)).toBe('https://gemini.google.com/app/bb4c0123456789ab');
+  });
 });

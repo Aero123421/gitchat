@@ -20,7 +20,11 @@ This file is the contract between the parts of the codebase. User-facing docs li
 
 Rules: parts talk only through `src/shared/protocol.ts`. The UI kit is framework-free ES modules and
 must not import from `background/`. Secrets (tokens) live only in `chrome.storage.local` and never
-leave the background worker except to `api.github.com` / `github.com`.
+leave the background worker except to `api.github.com` / `github.com`. The background accepts a
+content-script message only from the tab's top document. A prerender keeps a non-zero `frameId`
+after activation, so that document is `sender.frameType === 'outermost_frame'` (falling back to
+`frameId === 0` when the type is absent). A document still prerendering is rejected, and the
+content script starts only after `prerenderingchange`.
 
 ## Data flow
 
@@ -38,7 +42,8 @@ chat page DOM ──adapter──► CapturedMessage[] ──► ChatSnapshot �
   are an **upsert**: they may hold only the part of a long chat that is in the DOM, so absent messages
   are kept and new ids are added. A live snapshot with `atEnd: true` (the capture reaches the last
   message) that shows unknown ids after a known one is an edit or a regenerated answer: it is
-  authoritative from its first known message, and the turns that vanished are dropped. Init
+  authoritative from its first known message, and the turns that vanished are dropped. A branch
+  seen away from the end is not appended (see Ambiguous captures). Init
   snapshots (`complete: true`) are authoritative from their first message on; they replace the whole
   list only when the capture is known to start at the chat's first message (`startConfirmed`: the
   transcript fit on screen). Otherwise older saved messages stay (older history may not have loaded),
@@ -53,17 +58,22 @@ chat page DOM ──adapter──► CapturedMessage[] ──► ChatSnapshot �
   shown — read on this device before the visit started, or by the view itself. Messages from another
   device's copy, or read later by another tab, are never dropped by their absence.
 - **Ambiguous captures**: a live snapshot that shares no message with a chat that has some (the first
-  question was edited), or that reaches the end but stops before messages its view read there (the
-  end got shorter), is not applied. When it was a settled read of the end, the reply carries
+  question was edited), that reaches the end but stops before messages its view read there (the
+  end got shorter), or that shows a replaced turn before the end (an unknown id after a known one
+  where the saved chat continues with a different message), is not applied. The reply carries
   `fullRead` and the tab reads the whole chat again (an automatic rescan, at most once a minute per
-  visit), which settles it with a complete capture.
+  visit), which settles it with a complete capture. A capture taken mid-answer (`sent`) does not.
 - **Capture order**: `capturedAt` is the time the page was read (before any async enrichment). The
   content script sends captures in read order, and the background ignores one older than the last it
   applied for that chat.
 - **Right chat, right turn**: after a navigation, a read whose site message ids all belong to the
   previous chat (or that has none) is ignored: the page, or a hidden copy of it, still shows the old
   chat. One id the old chat did not have marks the new one, so a chat branched from the old one is
-  accepted. There is no time limit; init waits up to 10 s for the new chat and then fails. An `answered` capture re-checks the site's "AI is working" signal right before reading, so it
+  accepted. Where the page names its conversation (ChatGPT's selection attribute), that id clears
+  the guard when it matches the URL, so a branch opened as a new chat is saved before a message of
+  its own appears, and a page that still names the previous chat is not captured. A URL change that keeps
+  the chat id is checked against the message ids of this visit; a transcript that shares none of
+  them is not written into the open chat. There is no time limit; init waits up to 10 s for the new chat and then fails. An `answered` capture re-checks the site's "AI is working" signal right before reading, so it
   never takes the next turn's beginning. Before Commit/Push, the popup needs the tab's explicit
   `{ok: true}` to its refresh (no reply, a timeout of 8 s or a malformed reply stop the action).
 - **Snapshot reasons**: the content script sends `sent` when the AI starts working (the user's
@@ -134,7 +144,9 @@ messages: 14
 
 `length` is the body's length in characters, so a message that itself contains a gitchat file (or a
 `## Assistant` heading in a code block) is read back correctly. Files without it are parsed by
-headings outside code fences.
+headings outside code fences. The stored `url` is the adapter's canonical chat URL (origin and path;
+Gemini also drops a leading `/u/<n>` account slot), not the raw address bar. The chat key stays
+`service` + chat id. Chat ids are stored lowercase.
 
 ## Sync rules (multi-device, no manual conflicts)
 

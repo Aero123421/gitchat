@@ -147,18 +147,34 @@ export function validatePayload(type: RequestType, payload: unknown): ServiceId 
   }
 }
 
-const SITE_SERVICES: Record<string, ServiceId> = {
+export const SITE_SERVICES: Record<string, ServiceId> = {
   'https://chatgpt.com': 'chatgpt',
   'https://claude.ai': 'claude',
   'https://gemini.google.com': 'gemini',
 };
 
+/** `frameType` is on a message sender at runtime (Chrome 106+); this package's MessageSender omits it. */
+interface FrameSender extends chrome.runtime.MessageSender {
+  frameType?: chrome.extensionTypes.FrameType;
+}
+
 /**
- * The chat service of a content script's top frame, or null for anything else (an extension page,
- * a sub-frame such as a visualization sandbox, or an unexpected site).
+ * The top document of a tab. A prerender keeps a non-zero frameId after it is activated, so the
+ * frame type is the signal; `frameId === 0` remains the fallback where the type is absent. A
+ * document still prerendering is not the page the user is on.
+ */
+function isTopDocument(sender: FrameSender): boolean {
+  if (sender.documentLifecycle === 'prerender') return false;
+  if (sender.frameType) return sender.frameType === 'outermost_frame';
+  return sender.frameId === 0;
+}
+
+/**
+ * The chat service of a content script's top document, or null for anything else (an extension page,
+ * a sub-frame such as a visualization sandbox, a prerender, or an unexpected site).
  */
 export function senderService(sender: chrome.runtime.MessageSender | undefined): ServiceId | null {
-  if (!sender || sender.frameId !== 0) return null;
+  if (!sender || !isTopDocument(sender)) return null;
   let origin = sender.origin;
   if (!origin && sender.url) {
     try {

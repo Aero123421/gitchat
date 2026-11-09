@@ -38,7 +38,13 @@ function canvasTitle(chip: Element): string {
 export const gemini = defineAdapter({
   service: 'gemini',
   siteNames: ['Google Gemini', 'Gemini'],
-  chatId: (url) => idFromPath(url, /^\/app\/([0-9a-f]{12,})/i, /^\/gem\/[^/]+\/([0-9a-f]{12,})/i),
+  // A second signed-in Google account adds /u/<n> in front: /u/1/app/<id>
+  chatId: (url) => idFromPath(url, /^(?:\/u\/\d+)?\/app\/([0-9a-f]{12,})/i, /^(?:\/u\/\d+)?\/gem\/[^/]+\/([0-9a-f]{12,})/i),
+  // The slot is this profile's sign-in order, and the query is account/language chrome. Neither belongs in a saved link.
+  canonicalUrl(url) {
+    const path = url.pathname.replace(/^\/u\/\d+/, '') || '/';
+    return `${url.origin}${path}`;
+  },
   // loaded turns stay in the DOM (off-screen ones use content-visibility:auto)
   virtualized: false,
   selectors: {
