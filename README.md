@@ -38,7 +38,7 @@ A small widget sits at the right edge of the chat page.
 <p align="center">
   <img src="docs/images/styles-en.png" width="470" alt="The three widget styles: Creature, Line and Dot">
   &nbsp;
-  <img src="docs/images/panel.png" width="300" alt="The panel: commit graph with an origin line, Commit, Push, copy link, settings, and the auto commit and auto push switches">
+  <img src="docs/images/panel.png" width="290" alt="The panel: commit graph with an origin line, Commit, Push, copy link, settings, and the auto commit and auto push switches">
 </p>
 
 Three styles, all monochrome glass with one blue accent: **Creature** (the default; it watches the AI think and reacts to what you do), **Line** and **Dot**.
