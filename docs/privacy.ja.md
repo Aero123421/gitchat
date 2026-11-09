@@ -17,7 +17,7 @@ gitchat は開発者側のサーバーを一切持たず、アクセス解析や
 | --- | --- | --- |
 | `chrome.storage.local` | なし（この端末のみ） | GitHub の認証状態（`token`、GitHub の `login` 名、認証方式 `method`、トークンの `scopes`、保存日時 `savedAt`）。 |
 | `chrome.storage.session` | なし（メモリ上のみ） | OAuth Device Flow で GitHub 上の承認を待っている間の一時データ（`clientId`, `deviceCode`, ポーリング間隔 `interval`, 有効期限 `expiresAt`）。サインイン完了時またはブラウザ終了時に消去されます。 |
-| `chrome.storage.sync` | あり（Chrome アカウント経由） | 機密情報を含まない設定項目のみ: ウィジェットのスタイル（`creature`, `line`, `dot`）、`autoCommit`、`autoPush`、保存先リポジトリ（`owner`, `name`, `branch`）、有効なサービス（`chatgpt`, `claude`, `gemini`）、`saveVisualizations`、および任意のカスタム `githubClientId`。トークンなどの秘密情報がここに保存されることはありません。 |
+| `chrome.storage.sync` | あり（Chrome アカウント経由） | 機密情報を含まない設定項目のみ: ウィジェットのスタイル（`creature`, `line`, `dot`）、テーマ（`auto`, `light`, `dark`）、`autoCommit`、`autoPush`、保存先リポジトリ（`owner`, `name`, `branch`）、有効なサービス（`chatgpt`, `claude`, `gemini`）、`saveVisualizations`、および任意のカスタム `githubClientId`。トークンなどの秘密情報がここに保存されることはありません。 |
 | `IndexedDB`（`gitchat`） | なし（この端末のみ） | 追跡中のチャットレコード（`chats`）、ローカルコミット（`commits`）、同期状態のメタデータ（`meta`）。ローカルコミットが GitHub へプッシュされると、コミットレコード内の本文データ（`doc`）は削除され、ウィジェットのコミットグラフ表示用に各チャット最新 12 件のプッシュ済みコミット概要のみが保持されます。 |
 | あなたの GitHub リポジトリ | GitHub 上に保存 | 追跡中のチャットごとの Markdown ファイル（`chatgpt/`, `claude/`, `gemini/`）、取り込まれた可視化の HTML ファイル（`<chat>.assets/*.html`）、および初回の `README.md`。 |
 

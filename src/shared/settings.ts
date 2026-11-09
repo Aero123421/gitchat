@@ -2,6 +2,7 @@ import type { Settings } from './types';
 
 export const DEFAULT_SETTINGS: Settings = {
   widget: 'creature',
+  theme: 'auto',
   autoCommit: false,
   autoPush: false,
   repo: null,
@@ -19,6 +20,8 @@ export function normalizeSettings(raw: unknown): Settings {
     ...DEFAULT_SETTINGS,
     ...s,
     services: { ...DEFAULT_SETTINGS.services, ...(s.services ?? {}) },
+    // Missing on settings saved before theme existed; anything else unknown is Auto too.
+    theme: s.theme === 'light' || s.theme === 'dark' || s.theme === 'auto' ? s.theme : 'auto',
   };
   if (!['creature', 'line', 'dot'].includes(out.widget)) out.widget = DEFAULT_SETTINGS.widget;
   // Auto-push needs auto-commit: a push can only send commits that exist.

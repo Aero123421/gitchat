@@ -114,7 +114,9 @@ main { padding: 34px 20px 140px; }
   border: 0; background: transparent; padding: 6px 12px; border-radius: 8px; cursor: pointer; font-size: 12px; font-weight: 500; color: var(--ink-2);
   transition: background .2s, color .2s;
 }
-.seg button[aria-selected="true"] { background: var(--tint-strong); color: var(--ink); box-shadow: 0 1px 2px var(--shadow), inset 0 0 0 .5px var(--edge); }
+.seg button[aria-selected="true"],
+.seg button[aria-checked="true"] { background: var(--tint-strong); color: var(--ink); box-shadow: 0 1px 2px var(--shadow), inset 0 0 0 .5px var(--edge); }
+.row .seg { align-self: center; flex: none; }
 .repos { max-height: 268px; overflow: auto; border-radius: 12px; box-shadow: inset 0 0 0 .5px var(--line); }
 .repos:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .repo { display: flex; align-items: center; gap: 8px; padding: 10px 12px; cursor: pointer; border-top: .5px solid var(--line); }

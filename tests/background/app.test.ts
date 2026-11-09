@@ -66,8 +66,8 @@ describe('router', () => {
   });
 
   it('lets the on-page widget change only widget settings, never sign in or pick repositories', async () => {
-    const r = await t.call('settings/set', { patch: { autoCommit: true, repo: { owner: 'evil', name: 'x', branch: 'main' }, githubClientId: 'x' } }, CONTENT_SCRIPT);
-    expect(r).toMatchObject({ ok: true, data: { autoCommit: true, repo: null, githubClientId: '' } });
+    const r = await t.call('settings/set', { patch: { autoCommit: true, theme: 'dark', repo: { owner: 'evil', name: 'x', branch: 'main' }, githubClientId: 'x' } }, CONTENT_SCRIPT);
+    expect(r).toMatchObject({ ok: true, data: { autoCommit: true, theme: 'auto', repo: null, githubClientId: '' } });
     for (const type of ['auth/pat', 'auth/get', 'repo/use', 'repo/list'] as const) {
       const denied = await t.call(type, { token: 'tok', owner: 'a', name: 'b' } as never, CONTENT_SCRIPT);
       expect(denied).toMatchObject({ ok: false, code: 'forbidden' });

@@ -41,7 +41,7 @@ A small widget sits at the right edge of the chat page.
   <img src="docs/images/panel.png" width="290" alt="The panel: commit graph with an origin line, Commit, Push, copy link, settings, and the auto commit and auto push switches">
 </p>
 
-Three styles, all monochrome glass with one blue accent: **Creature** (the default; it watches the AI think and reacts to what you do), **Line** and **Dot**.
+Three styles, all monochrome glass with one blue accent: **Creature** (the default; it watches the AI think and reacts to what you do), **Line** and **Dot**. The theme is **Auto** (the default), **Light** or **Dark**: Auto follows the chat site on the widget and the system theme on the settings page and popup. The toolbar icon itself cannot change with the theme (Chrome allows one icon).
 
 ## Features
 
@@ -145,7 +145,7 @@ The hidden comment under each heading keeps the message's identity, so another c
 
 - **No middleman**: gitchat operates no servers, analytics, or telemetry. Conversations go directly from your browser to `api.github.com`.
 - **Local token storage**: your GitHub token is stored only in `chrome.storage.local` on that device, is never synced across devices, never leaves the background service worker except in requests to `github.com` and `api.github.com`, and can be scoped to a single private repository using a fine-grained personal access token.
-- **Synced preferences only**: non-secret settings (widget style, repository name, auto-commit/push switches, enabled services) sync through your Chrome profile (`chrome.storage.sync`).
+- **Synced preferences only**: non-secret settings (widget style, theme, repository name, auto-commit/push switches, enabled services) sync through your Chrome profile (`chrome.storage.sync`).
 
 For a full breakdown of storage locations and extension permissions, see [Privacy](docs/privacy.md).
 

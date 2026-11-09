@@ -124,6 +124,6 @@ Open the settings page at any time from the gear icon in the widget panel, the t
 | **Account** | View the connected GitHub account (`@login`), authentication method (`GitHub sign-in` or `Personal access token`), and token scopes, or sign out on this device. |
 | **Repository** | Open the configured repository on GitHub, switch to a different repository, view the target branch, and check the current sync status. |
 | **Behavior** | Toggle **Auto commit** and **Auto push**; enable or disable gitchat per service (**ChatGPT**, **Claude**, **Gemini**); toggle **Save visualizations** (saves rendered HTML of interactive artifacts/charts in `<chat>.assets/`, on by default). |
-| **Appearance** | Switch the on-page widget between **Creature**, **Line**, and **Dot** with an interactive preview. |
+| **Appearance** | Switch the on-page widget between **Creature**, **Line**, and **Dot** with an interactive preview. Set **Theme** to **Auto** (default; the widget follows the chat site, and this page and the popup follow the system), **Light**, or **Dark**. The toolbar icon cannot change with the theme (Chrome allows one icon). |
 | **Advanced** | Set a custom **GitHub OAuth client ID** (to sign in through a GitHub App or OAuth App you control with Device Flow enabled), or click **Reset settings** to sign out on this device and restore default preferences without modifying your repository. |
 | **About** | Extension version, link to the GitHub project, and license (`MIT`). |

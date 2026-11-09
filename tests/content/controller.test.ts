@@ -556,6 +556,51 @@ describe('Controller', () => {
     expect(sent).toEqual([]);
   });
 
+  it('applies Light or Dark over the site theme immediately, and follows the site again on Auto', async () => {
+    let site: 'light' | 'dark' = 'dark';
+    const c = await open(makeAdapter({ theme: () => site }));
+    const setTheme = vi.spyOn(c.widget, 'setTheme');
+    const show = vi.spyOn(c.widget, 'show');
+    const hide = vi.spyOn(c.widget, 'hide');
+    sent.length = 0;
+    c.onEvent({ type: 'settings', settings: { ...DEFAULT_SETTINGS, theme: 'light' } });
+    expect(setTheme).toHaveBeenCalledTimes(1);
+    expect(setTheme).toHaveBeenCalledWith('light');
+    expect(hide).not.toHaveBeenCalled();
+    expect(sent.some((s) => s.type === 'chat/open')).toBe(false);
+    setTheme.mockClear();
+    c.onEvent({ type: 'settings', settings: { ...DEFAULT_SETTINGS, theme: 'dark' } });
+    expect(setTheme).toHaveBeenCalledWith('dark');
+    setTheme.mockClear();
+    site = 'light';
+    c.onEvent({ type: 'settings', settings: { ...DEFAULT_SETTINGS, theme: 'auto' } });
+    expect(setTheme).toHaveBeenCalledTimes(1);
+    expect(setTheme).toHaveBeenCalledWith('light');
+    // a style change remounts at once in the chosen theme, still without waiting for the poll
+    c.onEvent({ type: 'settings', settings: { ...DEFAULT_SETTINGS, widget: 'line', theme: 'dark' } });
+    expect(show).toHaveBeenCalledWith('line', 'dark');
+  });
+
+  it('opens in the chosen theme and the site poll does not override it', async () => {
+    handlers['settings/get'] = () => ({ ...DEFAULT_SETTINGS, theme: 'light' });
+    const site = 'dark' as const;
+    const c = new Controller(makeAdapter({ theme: () => site })) as unknown as Record<string, any>;
+    made.push(c);
+    const show = vi.spyOn(c.widget, 'show');
+    const setTheme = vi.spyOn(c.widget, 'setTheme');
+    showChat('a');
+    await c.start();
+    expect(show).toHaveBeenCalledWith('creature', 'light');
+    setTheme.mockClear();
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(setTheme).toHaveBeenCalled();
+    expect(setTheme.mock.calls.every((call) => call[0] === 'light')).toBe(true);
+    setTheme.mockClear();
+    c.onEvent({ type: 'settings', settings: { ...DEFAULT_SETTINGS, theme: 'auto' } });
+    expect(setTheme).toHaveBeenCalledWith('dark');
+    for (const id of c.timers as number[]) clearInterval(id);
+  });
+
   it('does not rescan an untracked chat or start tracking through rescan', async () => {
     handlers['chat/open'] = (p) => status(`claude:${p.chatId as string}`, { tracked: false });
     const c = await open(makeAdapter());

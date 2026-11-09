@@ -1,8 +1,9 @@
-// Widget style picker and the auto commit / auto push switches (with the push-implies-commit link).
+// Widget style picker, the theme switch, and the auto commit / auto push switches
+// (with the push-implies-commit link).
 
 import { t } from '../shared/i18n';
 import { applySettingsPatch } from '../shared/settings';
-import type { Settings, WidgetStyle } from '../shared/types';
+import type { Settings, ThemeChoice, WidgetStyle } from '../shared/types';
 import { h, s } from './kit/dom';
 import { errorText } from './kit/errors';
 import { createSwitch, type SwitchHandle } from './kit/switch';
@@ -11,6 +12,61 @@ import type { WidgetPreview } from './preview';
 
 const STYLES: WidgetStyle[] = ['creature', 'line', 'dot'];
 const LABEL: Record<WidgetStyle, string> = { creature: 'styleCreature', line: 'styleLine', dot: 'styleDot' };
+
+const THEMES: readonly ThemeChoice[] = ['auto', 'light', 'dark'];
+const THEME_LABEL: Record<ThemeChoice, string> = { auto: 'themeAuto', light: 'themeLight', dark: 'themeDark' };
+
+/** Auto / Light / Dark. Auto clears the page attribute (see applyPageTheme). */
+export function createThemePicker(onError: (msg: string) => void): HTMLElement {
+  const group = h('div', { class: 'seg', role: 'radiogroup', 'aria-label': t('theme') });
+  const buttons = THEMES.map((theme) =>
+    h(
+      'button',
+      {
+        type: 'button',
+        role: 'radio',
+        'aria-checked': String(app.settings.theme === theme),
+        tabindex: app.settings.theme === theme ? 0 : -1,
+        'data-theme': theme,
+        onClick: () => void choose(theme),
+      },
+      t(THEME_LABEL[theme]),
+    ),
+  );
+  group.append(...buttons);
+
+  const sync = () => {
+    for (const b of buttons) {
+      const selected = b.dataset.theme === app.settings.theme;
+      b.setAttribute('aria-checked', String(selected));
+      b.tabIndex = selected ? 0 : -1;
+    }
+  };
+
+  async function choose(theme: ThemeChoice): Promise<void> {
+    if (app.settings.theme === theme) return;
+    try {
+      await patchSettings({ theme });
+    } catch (e) {
+      onError(errorText(e));
+    }
+  }
+
+  group.addEventListener('keydown', (e) => {
+    const i = THEMES.indexOf(app.settings.theme);
+    let next = -1;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next = (i + 1) % THEMES.length;
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') next = (i + THEMES.length - 1) % THEMES.length;
+    if (next < 0) return;
+    e.preventDefault();
+    const theme = THEMES[next]!;
+    void choose(theme);
+    buttons[next]?.focus();
+  });
+
+  on('settings', sync);
+  return group;
+}
 
 /** Small static drawings of each widget, in the widgets' own vocabulary. */
 function glyph(style: WidgetStyle): SVGSVGElement {

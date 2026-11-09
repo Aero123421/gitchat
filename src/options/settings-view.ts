@@ -11,7 +11,7 @@ import { h, icon, mount, spinner } from './kit/dom';
 import { errorText } from './kit/errors';
 import { glass } from './kit/glass';
 import { createSwitch } from './kit/switch';
-import { createAutoSwitches, createStylePicker, row } from './prefs';
+import { createAutoSwitches, createStylePicker, createThemePicker, row } from './prefs';
 import type { WidgetPreview } from './preview';
 import { createRepoChooser } from './repo';
 import { app, on, patchSettings, refreshAuth, refreshSettings, refreshSync } from './state';
@@ -270,7 +270,11 @@ export function createSettingsView(opts: { preview: WidgetPreview; onReset: () =
   });
 
   // ---------------------------------------------------------------- layout
-  const appearance = section('appearance', createStylePicker(opts.preview, onError));
+  const appearance = section(
+    'appearance',
+    h('div', { class: 'rows' }, row(t('theme'), null, createThemePicker(onError))),
+    createStylePicker(opts.preview, onError),
+  );
   const behavior = section(
     'behavior',
     h(

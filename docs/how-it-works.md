@@ -181,7 +181,7 @@ gitchat is designed to be used across several computers connected to the same Gi
 
 ## On-page widgets and panel
 
-The on-page widget mounts inside an isolated Shadow DOM under a `<gitchat-ui>` element on the right edge of the page, adapts to the page's light or dark theme, and can be dragged vertically to any comfortable position.
+The on-page widget mounts inside an isolated Shadow DOM under a `<gitchat-ui>` element on the right edge of the page. With **Theme** set to **Auto** (the default) it follows the page's light or dark theme; **Light** or **Dark** pins it. It can be dragged vertically to any comfortable position. The settings page and the popup follow the system theme unless Light or Dark is chosen. The toolbar icon itself cannot change with the theme, because Chrome allows one icon.
 
 | Style | Visual language |
 | --- | --- |

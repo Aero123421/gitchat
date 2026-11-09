@@ -380,6 +380,18 @@
   "syncState": {
     "message": "Sync"
   },
+  "theme": {
+    "message": "Theme"
+  },
+  "themeAuto": {
+    "message": "Auto"
+  },
+  "themeDark": {
+    "message": "Dark"
+  },
+  "themeLight": {
+    "message": "Light"
+  },
   "tokenTitle": {
     "message": "Personal access token"
   },

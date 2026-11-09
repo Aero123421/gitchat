@@ -76,6 +76,8 @@ export async function installDevShim(): Promise<boolean> {
   const noClientId = params.get('nocid') === '1';
 
   let settings: Settings = { ...DEFAULT_SETTINGS };
+  // Keep the query override and the saved theme in step, so applying settings does not clear it.
+  if (theme === 'light' || theme === 'dark') settings.theme = theme;
   let auth: AuthState | null = null;
   if (['signedin', 'settings', 'chat', 'untracked', 'new', 'other', 'pushing', ''].includes(scenario) && scenario !== 'onboarding') {
     auth = { token: 'demo', method: 'device', login: 'octocat', scopes: ['repo'], savedAt: Date.now() };

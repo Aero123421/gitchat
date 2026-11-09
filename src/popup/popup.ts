@@ -10,6 +10,8 @@ import { glass } from '../options/kit/glass';
 import { graphCSS, renderGraph } from '../options/kit/graph';
 import { createMark } from '../options/kit/mark';
 import { injectKitStyles } from '../options/kit/styles';
+import { applyPageTheme } from '../options/kit/theme';
+import { onSettingsChanged } from '../shared/settings';
 import { copy, SERVICE_LINKS } from '../options/kit/util';
 import { refreshPage } from './refresh';
 import { availableActions } from '../shared/actions.js';
@@ -345,6 +347,14 @@ async function main(): Promise<void> {
   } catch (e) {
     mount(root, card(h('div', { class: 'note err', role: 'alert' }, icon('alert'), h('span', null, errorText(e)))));
     return;
+  }
+  applyPageTheme(settings.theme);
+  // The popup stays open while the settings page (or another device) changes the theme.
+  try {
+    const stopTheme = onSettingsChanged((next) => applyPageTheme(next.theme));
+    addEventListener('unload', stopTheme);
+  } catch {
+    // storage events are unavailable in the standalone preview
   }
   if (!auth || !settings.repo) {
     mount(root, setupView(!!auth));

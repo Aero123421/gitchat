@@ -126,6 +126,9 @@ export interface StagedItem {
 
 export type WidgetStyle = 'creature' | 'line' | 'dot';
 
+/** `auto` follows the system on extension pages and the chat site on the widget. */
+export type ThemeChoice = 'auto' | 'light' | 'dark';
+
 export interface RepoRef {
   owner: string;
   name: string;
@@ -135,6 +138,7 @@ export interface RepoRef {
 /** Synced across the user's devices via chrome.storage.sync. Never put secrets here. */
 export interface Settings {
   widget: WidgetStyle;
+  theme: ThemeChoice;
   autoCommit: boolean;
   autoPush: boolean;
   repo: RepoRef | null;

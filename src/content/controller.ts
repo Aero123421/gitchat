@@ -122,7 +122,7 @@ export class Controller {
         void this.checkRoute();
       }, 400),
       window.setInterval(() => {
-        if (this.chatId) this.widget.setTheme(this.adapter.theme(document));
+        if (this.chatId) this.widget.setTheme(this.widgetTheme());
       }, 1500),
     );
     await this.checkRoute(true);
@@ -174,6 +174,12 @@ export class Controller {
     });
   }
 
+  /** Chosen Light/Dark wins over the chat site; Auto keeps following the site. */
+  private widgetTheme(): 'light' | 'dark' {
+    const theme = this.settings.theme;
+    return theme === 'light' || theme === 'dark' ? theme : this.adapter.theme(document);
+  }
+
   private onEvent(ev: BackgroundEvent): void {
     if (ev.type === 'status') {
       const was = this.store.state.tracked;
@@ -187,9 +193,14 @@ export class Controller {
       const prev = this.settings;
       this.settings = ev.settings;
       this.store.applySettings(ev.settings);
-      if (prev.widget !== ev.settings.widget || prev.services[this.adapter.service] !== ev.settings.services[this.adapter.service]) {
+      const widgetChanged = prev.widget !== ev.settings.widget;
+      const serviceChanged = prev.services[this.adapter.service] !== ev.settings.services[this.adapter.service];
+      if (widgetChanged || serviceChanged) {
         this.widget.hide();
         void this.checkRoute(true);
+      } else if (prev.theme !== ev.settings.theme && this.chatId) {
+        // A chosen theme, or a return to Auto, applies now — not on the next 1.5s poll.
+        this.widget.setTheme(this.widgetTheme());
       }
     }
   }
@@ -299,7 +310,7 @@ export class Controller {
     const key = chatKey(this.adapter.service, chatId);
     this.key = key;
     const route: Route = { gen: this.gen, key, chatId };
-    this.widget.show(this.settings.widget, this.adapter.theme(document));
+    this.widget.show(this.settings.widget, this.widgetTheme());
     try {
       const status = await request('chat/open', { service: this.adapter.service, chatId, url: href, title: this.adapter.title(document) });
       if (!this.live(route)) return;

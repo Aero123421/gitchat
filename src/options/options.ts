@@ -6,6 +6,7 @@ import { installDevShim } from './kit/dev-shim';
 import { errorText } from './kit/errors';
 import { createMark } from './kit/mark';
 import { injectKitStyles } from './kit/styles';
+import { applyPageTheme } from './kit/theme';
 import { createOnboarding } from './onboarding';
 import { WidgetPreview } from './preview';
 import { createSettingsView } from './settings-view';
@@ -54,6 +55,13 @@ async function main(): Promise<void> {
   }, 15_000);
 
   const preview = new WidgetPreview();
+  // Live: patchSettings and a change from another device both emit 'settings'.
+  const paintTheme = () => {
+    applyPageTheme(app.settings.theme);
+    preview.syncTheme();
+  };
+  on('settings', paintTheme);
+  paintTheme();
   const forceOnboarding = location.hash === '#onboarding';
   const showSettings = () => {
     preview.hide();

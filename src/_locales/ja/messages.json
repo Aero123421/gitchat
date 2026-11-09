@@ -380,6 +380,18 @@
   "syncState": {
     "message": "同期"
   },
+  "theme": {
+    "message": "テーマ"
+  },
+  "themeAuto": {
+    "message": "自動"
+  },
+  "themeDark": {
+    "message": "ダーク"
+  },
+  "themeLight": {
+    "message": "ライト"
+  },
   "tokenTitle": {
     "message": "個人アクセストークン"
   },

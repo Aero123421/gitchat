@@ -34,9 +34,7 @@ export class WidgetPreview {
   private wanted = false;
 
   constructor() {
-    dark.addEventListener('change', () => {
-      if (this.host) this.host.dataset.theme = currentTheme();
-    });
+    dark.addEventListener('change', () => this.syncTheme());
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) clearTimeout(this.timer);
       else if (this.inst) this.schedule(4000);
@@ -50,7 +48,10 @@ export class WidgetPreview {
   /** Show (or switch to) a style. */
   show(style: WidgetStyle): void {
     this.wanted = true;
-    if (this.inst && this.style === style) return;
+    if (this.inst && this.style === style) {
+      this.syncTheme();
+      return;
+    }
     this.unmount();
     const host = document.createElement('gitchat-ui');
     host.dataset.theme = currentTheme();
@@ -66,6 +67,11 @@ export class WidgetPreview {
   hide(): void {
     this.wanted = false;
     this.unmount();
+  }
+
+  /** Follow the page: a chosen light/dark, or the OS when the attribute is absent (Auto). */
+  syncTheme(): void {
+    if (this.host) this.host.dataset.theme = currentTheme();
   }
 
   /** Mirror the auto commit/push settings so the preview shows the right buttons. */
