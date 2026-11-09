@@ -4906,7 +4906,7 @@ button { font: inherit; }
         h(
           "div",
           { class: "rows" },
-          row(t("version"), null, h("span", { class: "mono muted" }, "0.1.5")),
+          row(t("version"), null, h("span", { class: "mono muted" }, "0.1.6")),
           // after `git pull` in the extension folder: load the new files without visiting chrome://extensions
           row(t("reloadExtension"), t("reloadExtensionHint"), h("button", { class: "btn small", type: "button", onClick: () => chrome.runtime.reload() }, t("reloadExtension"))),
           row(t("project"), null, h("a", { class: "mono", href: PROJECT_URL, target: "_blank", rel: "noopener noreferrer" }, PROJECT_URL.replace("https://", ""))),
