@@ -68,6 +68,8 @@ const css = `
 `;
 
 export function mountCreature(host, store, options = {}) {
+  // an untracked chat has nothing for the panel to show — except why saving it failed
+  const noPanel = () => (!store.state.tracked && store.state.phase !== 'error') || store.state.phase === 'capturing';
   const root = host.attachShadow({ mode: 'open' });
   setHTML(root, `<style>${glassCSS}${panelCSS}${actionsCSS}${css}</style>
   <div class="box">
@@ -659,7 +661,7 @@ export function mountCreature(host, store, options = {}) {
       return;
     }
     if (panelOpen) closePanel();
-    else if (!store.state.tracked || store.state.phase === 'capturing') {
+    else if (noPanel()) {
       // nothing to show in a panel yet: reveal the start (or cancel) button instead
       pinUntil = performance.now() + 3000;
       acts.nod();
@@ -674,7 +676,7 @@ export function mountCreature(host, store, options = {}) {
   kb.addEventListener('click', () => {
     wakeFrames();
     if (panelOpen) closePanel();
-    else if (!store.state.tracked || store.state.phase === 'capturing') {
+    else if (noPanel()) {
       acts.nod();
       actions.focusFirst();
     } else openPanel(true);

@@ -47,6 +47,8 @@ export interface ChatRecord {
    * settled capture ('answered', 'manual' or init) arrives.
    */
   settled?: boolean;
+  /** Bumped on every write by the engine, so in-memory caches can tell the record changed. */
+  rev?: number;
   /** Current content (the "working tree"). */
   messages: CapturedMessage[];
   /** Messages as of the last local commit. */
@@ -56,12 +58,17 @@ export interface ChatRecord {
 
 /** One message as captures on this device last read it on the page. */
 export interface PageRead {
-  /** Hash of the latest reading ('' when unknown). */
+  /** Hash of the latest reading by any view ('' when unknown). */
   h: string;
   /** When this device first read it (epoch ms; 0 when unknown). */
   at: number;
   /** The page views that read it, most recent first (a few). */
   v?: string[];
+  /**
+   * What each of those views read last (view id → hash). A view re-reading what it read before has
+   * not seen a change, even when another view read something else in between.
+   */
+  hv?: Record<string, string>;
 }
 
 /** What a commit contains. Rendered to files at push time, once the final path is known. */
@@ -106,4 +113,10 @@ export interface CommitWithDoc {
 export interface SyncMeta {
   lastPushAt?: number;
   lastError?: string;
+  /**
+   * After a failed automatic push: no automatic push before this time (epoch ms), and how many
+   * attempts failed in a row. Stored, so a restarted service worker keeps waiting (e.g. a rate limit).
+   */
+  nextAllowedAt?: number;
+  retries?: number;
 }

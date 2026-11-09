@@ -4,11 +4,16 @@
 //    older messages (it loads them lazily, in batches). Reported as a growing message count. Only a
 //    long quiet period at the top counts as "the start": no site gives a trustworthy marker (Claude's
 //    aria-posinset="1" is the first *loaded* row). Running out of time is an error, never a success.
+//    Whether the history really starts there is known only when the whole transcript fits on screen,
+//    or the chat is too short to be loaded in batches (`startConfirmed`); otherwise the capture is
+//    complete from its first message on, and the background keeps saved messages above it.
 // 2. Reading — virtualized lists (only ~20 rows in the DOM at a time) are walked from the top to the
 //    bottom in overlapping steps, collecting every message by ID and every visualization while it is
 //    mounted. After each step we wait until rows are rendered in the viewport. Coverage is checked:
 //    against the site's row positions where it has them (Claude), otherwise by requiring every step
-//    to overlap the previous one (a gap triggers one finer pass). Missing coverage is an error.
+//    to overlap the previous one (a gap triggers one finer pass). Missing coverage is an error. A
+//    message row counts as read only once its body has content: a row whose body renders late is
+//    visited again. A walk that stops moving (no scroll progress, no new messages) fails as stalled.
 //    Lists that keep all loaded messages in the DOM are read once. Reported as 0–100 %.
 // 3. If the AI is still answering, wait for it to finish; then read the end again — that settled read
 //    replaces earlier, provisional text and visualizations.
@@ -42,6 +47,8 @@ export interface InitOptions {
   owns?(): boolean;
   /** How long to wait for rows to render in the viewport after a scroll step (default 3 s). */
   rowWaitMs?: number;
+  /** Fail the reading walk when it makes no progress for this long (default 25 s). */
+  stallMs?: number;
 }
 
 export interface InitResult {
@@ -49,12 +56,23 @@ export interface InitResult {
   artifacts: CapturedArtifact[];
   /** ISO time of the last read of the page. */
   readAt: string;
+  /**
+   * The capture is known to begin at the conversation's first message: once loading stopped, the
+   * whole transcript fit in its scroller. Otherwise older history may simply not have loaded.
+   */
+  startConfirmed: boolean;
 }
+
+/** At most this many messages: the chat came in one piece (see the end of captureFullHistory). */
+const SMALL_CHAT_MESSAGES = 8;
 
 /** The history could not be loaded completely; nothing partial is ever reported as complete. */
 export class InitIncompleteError extends Error {
-  /** `stale`: the page still showed the previous chat's messages (the new one had not rendered). */
-  constructor(readonly reason: 'timeout' | 'busy' | 'no-scroller' | 'empty' | 'one-sided' | 'coverage' | 'stale') {
+  /**
+   * `stale`: the page still showed the previous chat's messages (the new one had not rendered).
+   * `stalled`: reading stopped making progress (the list would not scroll further).
+   */
+  constructor(readonly reason: 'timeout' | 'busy' | 'no-scroller' | 'empty' | 'one-sided' | 'coverage' | 'stale' | 'stalled') {
     super(`init incomplete: ${reason}`);
     this.name = 'InitIncompleteError';
   }
@@ -229,20 +247,48 @@ export async function captureFullHistory(adapter: Adapter, doc: Document, opts: 
   const fromBottom = scroller.scrollHeight - scroller.scrollTop;
   const maxLoadMs = opts.maxLoadMs ?? 10 * 60_000;
   const rowWaitMs = opts.rowWaitMs ?? 3000;
+  const stallMs = opts.stallMs ?? 25_000;
   const acc = new OrderedMessages();
   const arts = new Map<string, CapturedArtifact>();
-  /** Positions of every row seen (also rows without content), and each message's position. */
-  const seenPos = new Set<number>();
+  // Coverage. A message row is covered once its body was read with content; a row the adapter does
+  // not count as a message (e.g. a separator) is covered when seen. A message row seen only empty
+  // (its body renders late) is not covered yet: it is visited again.
+  /** Positions of message rows read with content. */
+  const readPos = new Set<number>();
+  /** Positions of rows that are not messages. */
+  const otherPos = new Set<number>();
+  /** Positions of message rows seen without content so far. */
+  const emptyPos = new Set<number>();
+  /** Service ids of messages seen without content (with where: the scroll offset), and of messages read with content. */
+  const emptyAt = new Map<string, number>();
+  const readIds = new Set<string>();
   const posById = new Map<string, number>();
   let readAt = new Date().toISOString();
   /** Previous window's ids, to tell whether consecutive windows overlap. */
   let lastWindow: Set<string> | null = null;
+  const hasContent = (m: { markdown: string; kinds?: string[] }) => !!(m.markdown || m.kinds?.length);
+  const covered = () => new Set([...readPos, ...[...otherPos].filter((p) => !emptyPos.has(p))]);
+  /** Messages seen only without content (by service id). */
+  const unread = () => [...emptyAt.keys()].filter((id) => !readIds.has(id));
 
   const read = (): CapturedMessage[] => {
     const rows = adapter.messages(doc).map((node) => ({ node, msg: captureMessage(adapter, node), pos: adapter.positionOf?.(node) ?? null }));
-    for (const r of rows) if (r.pos) seenPos.add(r.pos);
-    for (const p of adapter.rowPositions?.(doc) ?? []) seenPos.add(p);
-    const kept = rows.filter((r) => r.msg.markdown || r.msg.kinds?.length);
+    const messagePos = new Set<number>();
+    for (const r of rows) {
+      if (r.pos) messagePos.add(r.pos);
+      if (hasContent(r.msg)) {
+        if (r.pos) {
+          readPos.add(r.pos);
+          emptyPos.delete(r.pos);
+        }
+        if (r.node.id) readIds.add(r.node.id);
+      } else {
+        if (r.pos && !readPos.has(r.pos)) emptyPos.add(r.pos);
+        if (r.node.id && !emptyAt.has(r.node.id)) emptyAt.set(r.node.id, scroller.scrollTop);
+      }
+    }
+    for (const p of adapter.rowPositions?.(doc) ?? []) if (!messagePos.has(p)) otherPos.add(p);
+    const kept = rows.filter((r) => hasContent(r.msg));
     const msgs = assignIds(kept.map((r) => r.msg));
     kept.forEach((r, i) => {
       if (r.pos) posById.set(msgs[i]!.id, r.pos);
@@ -269,11 +315,17 @@ export async function captureFullHistory(adapter: Adapter, doc: Document, opts: 
     scroller.dispatchEvent(new Event('scroll'));
     await waitForRows(adapter, doc, scroller, signal, rowWaitMs);
   };
-  /** One walk from the top to the bottom; returns whether every step overlapped the previous one. */
+  /**
+   * One walk from the top to the bottom; returns whether every step overlapped the previous one.
+   * Fails as `stalled` when neither the scroll position nor the messages read move on for `stallMs`.
+   */
   const walk = async (step: number, report: boolean): Promise<boolean> => {
     let gapless = true;
     lastWindow = null;
     await scrollTo(0);
+    let furthest = -1;
+    let known = -1;
+    let movedAt = performance.now();
     for (;;) {
       signal.throwIfAborted();
       if (!harvest()) gapless = false;
@@ -281,7 +333,36 @@ export async function captureFullHistory(adapter: Adapter, doc: Document, opts: 
       const max = scroller.scrollHeight - scroller.clientHeight;
       if (report) onProgress({ stage: 'reading', count: acc.size, progress: 0.25 + 0.75 * (max > 0 ? scroller.scrollTop / max : 1) });
       if (scroller.scrollTop >= max - 2) return gapless;
+      if (scroller.scrollTop > furthest + 1 || acc.size > known) {
+        furthest = Math.max(furthest, scroller.scrollTop);
+        known = acc.size;
+        movedAt = performance.now();
+      } else if (performance.now() - movedAt >= stallMs) {
+        throw new InitIncompleteError('stalled');
+      }
       await scrollTo(scroller.scrollTop + step);
+    }
+  };
+  /** A message row was seen only empty: give late bodies time to render, then read the window again. */
+  const revisit = async () => {
+    await sleep(rowWaitMs, signal);
+    harvest();
+    await collectArtifacts();
+  };
+  /**
+   * Messages seen only without their body: go back to where each was seen, after a wait, twice at
+   * most. What stays empty after that is an empty message (e.g. a reply that is only tool use).
+   */
+  const revisitUnread = async () => {
+    for (let round = 0; round < 2 && unread().length; round++) {
+      if (!adapter.virtualized) {
+        await revisit();
+        continue;
+      }
+      for (const y of new Set(unread().map((id) => emptyAt.get(id)!))) {
+        await scrollTo(y);
+        await revisit();
+      }
     }
   };
 
@@ -309,6 +390,8 @@ export async function captureFullHistory(adapter: Adapter, doc: Document, opts: 
       // a long, complete quiet period at the top counts as having reached it
       if (stable >= 2 && performance.now() - quietSince >= topQuietMs) break;
     }
+    // the start is certain only when nothing is hidden above or below: the whole transcript fits
+    const startConfirmed = scroller.scrollHeight <= scroller.clientHeight + 4 && adapter.messages(doc).length > 0;
 
     // ---- 2. read top to bottom
     if (adapter.virtualized) {
@@ -318,9 +401,17 @@ export async function captureFullHistory(adapter: Adapter, doc: Document, opts: 
         // the site numbers its rows: every position up to the total must have been read
         for (let attempt = 0; ; attempt++) {
           const total = adapter.loadedCount(doc);
-          const missing = total ? missingRanges(seenPos, total) : [];
+          const missing = total ? missingRanges(covered(), total) : [];
           if (!missing.length) break;
-          if (attempt >= 3) throw new InitIncompleteError('coverage');
+          if (attempt >= 3) {
+            // rows never seen are a gap; message rows seen only empty get their late-body visits
+            // below (revisitUnread), and what stays empty is an empty message, not a missing one
+            const seen = (p: number) => readPos.has(p) || otherPos.has(p) || emptyPos.has(p);
+            if (missing.some(([from, to]) => Array.from({ length: to - from + 1 }, (_, i) => from + i).some((p) => !seen(p)))) {
+              throw new InitIncompleteError('coverage');
+            }
+            break;
+          }
           for (const [from, to] of missing) {
             const at = (p: number) => ((p - 1) / total!) * scroller.scrollHeight;
             for (let y = at(from) - scroller.clientHeight / 2; y <= at(to) + scroller.clientHeight / 2; y += step) {
@@ -330,15 +421,18 @@ export async function captureFullHistory(adapter: Adapter, doc: Document, opts: 
             }
           }
         }
+        await revisitUnread();
         acc.sortBy(posById);
-      } else if (!gapless) {
+      } else {
         // two consecutive windows shared no message: something may have been skipped, read again finer
-        if (!(await walk(Math.max(1, Math.round(step / 2)), false))) throw new InitIncompleteError('coverage');
+        if (!gapless && !(await walk(Math.max(1, Math.round(step / 2)), false))) throw new InitIncompleteError('coverage');
+        await revisitUnread();
       }
     } else {
-      // every loaded message is in the DOM: one read is enough
+      // every loaded message is in the DOM: one read is enough (plus a wait for late bodies)
       await waitForRows(adapter, doc, scroller, signal, rowWaitMs);
       harvest();
+      await revisitUnread();
       onProgress({ stage: 'reading', count: acc.size, progress: 0.9 });
     }
 
@@ -357,7 +451,11 @@ export async function captureFullHistory(adapter: Adapter, doc: Document, opts: 
     harvest(true);
     await collectArtifacts(true);
     onProgress({ stage: 'reading', count: acc.size, progress: 1 });
-    return { messages: acc.list(), artifacts: [...arts.values()], readAt };
+    // a chat this short is never split into loading batches on any supported site (ChatGPT renders
+    // at least 5 turns before loading older ones, Claude 32 rows, Gemini 10 turns): it is whole even
+    // when a long answer makes it taller than the screen (e.g. right after editing the first question)
+    const whole = startConfirmed || acc.size <= SMALL_CHAT_MESSAGES;
+    return { messages: acc.list(), artifacts: [...arts.values()], readAt, startConfirmed: whole };
   } finally {
     // back to where the user was (measured from the bottom: the list grew above them) — also after
     // a cancel or a failure, but only while this conversation still owns the scroller

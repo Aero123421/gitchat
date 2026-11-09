@@ -63,7 +63,7 @@ Because conversations often contain personal or work context, a **private** repo
 When you connected with a personal access token, this step opens on **Existing repository**, where the repository from the previous step is listed.
 
 - **New repository**: enter a repository name (default `ai-chats`), keep **Private** turned on, and click **Create**. This needs a sign-in that may create repositories (GitHub sign-in, or a token with repository creation access). gitchat creates the repository on your GitHub account, adds a short `README.md` noting that the archive is managed by gitchat, and tags the repository with the `gitchat` topic so your other devices can spot it easily.
-- **Existing repository**: select an existing repository from the list and click **Use**, or type `owner/name` in the search box if it is not listed. To avoid writing into an unrelated project by mistake, gitchat only accepts repositories that are either **empty** or **already managed by gitchat** (containing a gitchat `README.md` or existing `chatgpt/`, `claude/`, or `gemini/` Markdown files).
+- **Existing repository**: select an existing repository from the list and click **Use**, or type `owner/name` in the search box if it is not listed. To avoid writing into an unrelated project by mistake, gitchat only accepts repositories that are either **empty** or **already managed by gitchat** (containing gitchat's `README.md`, or chat files written by gitchat in `chatgpt/`, `claude/`, or `gemini/`). Other Markdown files in those folders do not count.
 
 ### Step 3: Choose how it looks and works
 

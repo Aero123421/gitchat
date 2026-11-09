@@ -11,6 +11,7 @@ import { icon } from './icons.js';
 import { applyLens } from './glass.js';
 import { Spring, clamp, moving, wake } from './spring.js';
 import { setHTML } from './html.js';
+import { availableActions } from '../../../shared/actions.js';
 
 export const BTN = 26;
 export const BTN_GAP = 6;
@@ -86,12 +87,7 @@ export function createActions(root, parent, store, label = (k) => LABELS[k] ?? k
 
   function visible() {
     const st = store.state;
-    if (st.phase === 'capturing') return ['cancel'];
-    if (!st.tracked) return ['start'];
-    const out = [];
-    if (!st.settings.autoCommit) out.push('commit');
-    if (!st.settings.autoPush || st.phase === 'error') out.push('push');
-    return out;
+    return availableActions(st, st.settings);
   }
 
   function update() {

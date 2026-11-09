@@ -54,6 +54,8 @@ interface Ctx {
   /** Inside <pre> or inline code: keep whitespace verbatim. */
   pre: boolean;
   listDepth: number;
+  /** Inside a link that has text: images are decoration. */
+  skipImages?: boolean;
 }
 
 export function toMarkdown(root: Element, hooks: MarkdownHooks = {}): MarkdownResult {
@@ -134,7 +136,7 @@ function render(node: Node, ctx: Ctx): string {
     case 'A':
       return link(el as HTMLAnchorElement, ctx);
     case 'IMG':
-      return image(el as HTMLImageElement, ctx);
+      return ctx.skipImages ? '' : image(el as HTMLImageElement, ctx);
     case 'IFRAME':
       return iframe(el as HTMLIFrameElement, ctx);
     case 'TABLE':
@@ -260,7 +262,8 @@ function wrap(s: string, mark: string): string {
   return `${m[1]}${mark}${m[2]}${mark}${m[3]}`;
 }
 
-function inlineCode(code: string): string {
+/** A code span that holds `code` exactly, whatever backticks it contains. */
+export function inlineCode(code: string): string {
   const runs = code.match(/`+/g) ?? [];
   const fence = '`'.repeat(Math.max(0, ...runs.map((r) => r.length)) + 1);
   const pad = code.startsWith('`') || code.endsWith('`') ? ' ' : '';
@@ -363,7 +366,11 @@ function list(el: Element, ctx: Ctx): string {
 
 function link(a: HTMLAnchorElement, ctx: Ctx): string {
   const custom = ctx.hooks.linkLabel?.(a);
+  // an image next to the link text is decoration (a site icon on a citation): the text is the label
+  const skip = ctx.skipImages;
+  if ((a.textContent ?? '').trim()) ctx.skipImages = true;
   const label = custom != null ? escapeText(custom) : inline(a, ctx);
+  ctx.skipImages = skip;
   const href = a.getAttribute('href') ?? '';
   if (!href || href.startsWith('javascript:')) return label;
   ctx.kinds.add('link');

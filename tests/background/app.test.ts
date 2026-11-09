@@ -148,6 +148,20 @@ describe('sign-in', () => {
     expect(await t.call('auth/get', {})).toEqual({ ok: true, data: null });
   });
 
+  it('ignores a device code that arrives after the sign-in was cancelled', async () => {
+    await t.call('settings/set', { patch: { githubClientId: 'Iv1.test' } });
+    const hold = t.fake.pause((r) => r.url.pathname === '/login/device/code');
+    const starting = t.call('auth/device/start', {});
+    await hold.reached;
+    await t.call('auth/device/cancel', {});
+    hold.release();
+    expect(await starting).toMatchObject({ ok: false, code: 'cancelled' });
+    // nothing is pending: an approval can't sign in
+    t.fake.tokenReplies = [{ access_token: 'tok', token_type: 'bearer', scope: 'repo' }];
+    expect(await t.call('auth/device/wait', {})).toMatchObject({ ok: false, code: 'expired' });
+    expect(await t.call('auth/get', {})).toEqual({ ok: true, data: null });
+  });
+
   it('reports a denied device sign-in', async () => {
     await t.call('settings/set', { patch: { githubClientId: 'Iv1.test' } });
     await t.call('auth/device/start', {});
@@ -169,6 +183,16 @@ describe('repositories', () => {
     expect(await t.call('settings/get', {})).toMatchObject({ data: { repo: { owner: 'octo', name: 'empty' } } });
     // Already managed by gitchat: accepted as is.
     expect(await t.call('repo/use', { owner: 'octo', name: 'empty' })).toMatchObject({ ok: true });
+  });
+
+  it('accepts a repository with chat files only when gitchat wrote them', async () => {
+    await t.signIn();
+    const notes = t.fake.addRepo('notes');
+    await t.fake.commitFiles(notes, { 'chatgpt/notes.md': '# My notes\n' });
+    expect(await t.call('repo/use', { owner: 'octo', name: 'notes' })).toMatchObject({ ok: false, code: 'repo-not-empty' });
+    const chats = t.fake.addRepo('chats-elsewhere');
+    await t.fake.commitFiles(chats, { 'claude/2026-11-01-x--c1.md': '---\ngitchat: 1\nservice: claude\nid: "c1"\n---\n\n# x\n' });
+    expect(await t.call('repo/use', { owner: 'octo', name: 'chats-elsewhere' })).toMatchObject({ ok: true });
   });
 
   it('creates a private repository and lists repositories', async () => {

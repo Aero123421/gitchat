@@ -19,9 +19,9 @@ Shared helpers live in [`src/content/adapters/define.ts`](../src/content/adapter
 4. **Never write HTML into the host page**:
    Gemini enforces Trusted Types on the main document. Content capture only reads from the page DOM, and the widget renders inside an isolated `<gitchat-ui>` Shadow DOM.
 5. **Account for virtualized lists, hidden panes, and `content-visibility: auto`**:
-   - **ChatGPT** can leave a stale `0×0` copy of `.thread-scroll-container` in the DOM after navigation; `transcript()` reads only the visible pane (`getBoundingClientRect().height > 0`), and nothing at all while panes exist but none is visible. The controller adds a site-independent guard: after a navigation, a read that still contains any of the previous chat's message ids is not a read of the new chat (for at most 30 s).
+   - **ChatGPT** can leave a stale `0×0` copy of `.thread-scroll-container` in the DOM after navigation; `transcript()` reads only the visible pane (`getBoundingClientRect().height > 0`), and nothing at all while panes exist but none is visible. The controller adds a site-independent guard: after a navigation, a read whose message ids all belong to the previous chat is not a read of the new chat (a chat branched from it is recognized by its first message of its own).
    - **Gemini** uses `content-visibility: auto` on off-screen turns, which causes `element.innerText` to return an empty string. Always read text through `textContent` and structural DOM walks (`userText()` in `src/content/capture/snapshot.ts` and `toMarkdown()` in `src/content/capture/markdown.ts`).
-   - **ChatGPT** `fallback-turn-N` keys are window-relative in virtualized lists and shift as the user scrolls; never use them as stable message identity.
+   - **ChatGPT** `fallback-turn-N` keys are window-relative in virtualized lists and shift as the user scrolls; the adapter never uses them as message identity (it falls back to a content fingerprint instead).
 6. **Validate captures before staging**:
    `mergeSnapshot()` (`src/background/stage.ts`) refuses empty complete captures (`complete: true`) and treats live captures (`complete: false`) as upserts by message ID so a broken selector or unloaded virtualized rows never overwrite previously captured messages. A live capture that cannot be placed safely is refused and answered with `fullRead`, and the tab reads the whole chat again.
 7. **Tie a preview to its message only on evidence**:
@@ -39,6 +39,9 @@ Verified against the live sites (2026-11):
 | Long chats | Virtualized (~11 turns), +5 turns per load | Virtualized (~20 rows), +32 rows per load | +10 turns per load, `content-visibility:auto` |
 | Start of chat | None (stability: `topQuietMs: 3500`) | None (stability; `aria-posinset="1"` marks only the first loaded row) | None (stability: default `topQuietMs: 2500`) |
 | Visualization frames | `*.web-sandbox.oaiusercontent.com` | `*.claudeusercontent.com` (inside `iframe[src*="/code/artifact/"]`) | `*.scf.usercontent.goog` (inside `immersive-entry-chip`) |
+| Code / inline code | `[data-code-block="true"]` box: language label in its `[data-markdown-copy="exclude"]` bar, source in `[data-code-block-source] code` (earlier: raw source in `data-chatgpt-copy-code`); inline code is `span[data-markdown-copy="inline-code"]` | `pre > code` with `language-*` | `code-block` with a language label |
+
+ChatGPT also marks copy roles on its markup (`data-markdown-copy="exclude" / "code-block" / "inline-code" / "contents"`): these are the most stable hooks it has, and the adapter relies on them. Citation links (`a[data-testid="chatgpt-citation"]`) carry a favicon `<img>`; the converter drops images inside links that have text, so the label is the source name.
 
 ## Adapter specification reference
 
@@ -68,7 +71,7 @@ An adapter is created with `defineAdapter(spec)` (`src/content/adapters/define.t
 | Hook | Purpose |
 | --- | --- |
 | `ignore` | CSS selectors for chrome elements to drop completely (copy buttons, action bars, screen-reader-only labels, `.katex-html`, reasoning tone blocks). |
-| `render(el, children, kind)` | Custom Markdown output for site-specific elements (such as ChatGPT's `[data-chatgpt-copy-code]` widgets, custom bold/italic spans, citation pills, file cards, or artifact cards). Runs before `ignore` and before built-in skipping (so a `<button>` can be a card); `kind('code')` records the content kind for the widget. |
+| `render(el, children, kind)` | Custom Markdown output for site-specific elements (such as ChatGPT's `[data-code-block]` boxes and inline-code spans, custom bold/italic spans, citation pills, file cards, or artifact cards). Runs before `ignore` and before built-in skipping (so a `<button>` can be a card); `kind('code')` records the content kind for the widget. |
 | `headingLevel(el)` | Adjusts heading levels when a site shifts them (ChatGPT's `[data-d-component]` headings and Claude shift `##` to `<h3>`, so `Number(el.tagName[1]) - 1` restores level 2). |
 | `linkLabel(a)` | Customizes link text (e.g. stripping `+3` counters from Claude citation pills). |
 | `codeLanguage(pre)` | Extracts the language identifier when it is stored in a decorative header rather than a `language-*` class (used on Gemini). |

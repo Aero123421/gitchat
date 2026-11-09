@@ -2,7 +2,7 @@
 // shows. Network and Chrome APIs come in through EngineDeps, so this runs the same in tests.
 
 import { GitchatError, type BackgroundEvent, type SnapshotReason, type SyncStatus } from '../shared/protocol';
-import { chatKey, type CapturedMessage, type ChatKey, type ChatPhase, type ChatSnapshot, type ChatStatus, type CommitInfo, type ServiceId, type Settings } from '../shared/types';
+import { chatKey, type CapturedMessage, type ChatKey, type ChatPhase, type ChatSnapshot, type ChatStatus, type CommitInfo, type ServiceId, type Settings, type StagedItem } from '../shared/types';
 import { log } from '../shared/log';
 import { toGitchatError } from './errors';
 import { RateLimitError, type GitHub } from './github/client';
@@ -111,7 +111,8 @@ export class Engine {
   /** Work requested while a push was running: a manual push, or an automatic one. */
   private readonly again = { manual: false, auto: false };
   private pushTimer: ReturnType<typeof setTimeout> | undefined;
-  private retries = 0;
+  /** Staged items per chat as of a record revision (status is asked for often; hashing a long chat is not free). */
+  private readonly stagedMemo = new Map<ChatKey, { rev: number; staged: StagedItem[] }>();
   private queue: Promise<unknown> = Promise.resolve();
   private repoQueue: Promise<unknown> = Promise.resolve();
 
@@ -160,7 +161,7 @@ export class Engine {
         rec.url = p.url || rec.url;
         rec.title = p.title || rec.title;
         rec.updatedAt = this.now();
-        await this.deps.db.putChat(rec);
+        await this.saveChat(rec);
       }
       return !!rec;
     });
@@ -195,7 +196,7 @@ export class Engine {
           return this.exclusive(async () => {
             if (await this.deps.db.getChat(key)) return 'known';
             const at = this.iso();
-            await this.deps.db.putChat({
+            await this.saveChat({
               key,
               service: p.service,
               chatId: p.chatId,
@@ -259,7 +260,7 @@ export class Engine {
       rec.title = snap.title || rec.title;
       rec.url = snap.url || rec.url;
       rec.updatedAt = this.now();
-      await this.deps.db.putChat(rec);
+      await this.saveChat(rec);
       return reason === 'answered' && (await this.autoCommit(rec));
     });
     if (committed) this.afterCommit();
@@ -404,7 +405,7 @@ export class Engine {
         this.chatErrors.delete(key);
         // the session ends with the change, in the same step: a cancel queued behind it finds nothing
         this.endInit(key, initId);
-        await this.deps.db.putChat(rec);
+        await this.saveChat(rec);
         return this.autoCommit(rec);
       });
       if (committed) this.afterCommit();
@@ -445,7 +446,7 @@ export class Engine {
       if (rec) {
         rec.tracked = false;
         rec.updatedAt = this.now();
-        await this.deps.db.putChat(rec);
+        await this.saveChat(rec);
       }
       this.endInit(key);
     });
@@ -496,6 +497,7 @@ export class Engine {
     const doc: ChatDoc = { service: rec.service, chatId: rec.chatId, url: rec.url, title: rec.title, createdAt: rec.createdAt, capturedAt: rec.capturedAt, messages: rec.messages };
     rec.committed = refsOf(rec.messages);
     rec.updatedAt = this.now();
+    rec.rev = (rec.rev ?? 0) + 1;
     return this.deps.db.addCommit(
       {
         id: crypto.randomUUID(),
@@ -599,8 +601,7 @@ export class Engine {
       throw err;
     }
     await this.exclusive(() => this.applyPush(pending, items, outcome, id));
-    await this.setSyncMeta({ lastPushAt: this.now() });
-    this.retries = 0;
+    await this.setSyncMeta({ lastPushAt: this.now() }, { clearWait: true });
     this.deps.clearRetry?.();
   }
 
@@ -648,7 +649,7 @@ export class Engine {
       rec.pathConfirmed = true;
       rec.remoteBlob = res.remoteBlob;
       rec.updatedAt = this.now();
-      await this.deps.db.putChat(rec);
+      await this.saveChat(rec);
     }
     await this.prune();
   }
@@ -689,10 +690,20 @@ export class Engine {
     this.again.auto = false;
   }
 
+  /**
+   * An automatic push. After a failed one the next waits (the rate limit's reset, or a growing
+   * backoff); the deadline and the attempt count are stored, so a restarted worker keeps waiting
+   * instead of pushing right away. A manual push does not wait.
+   */
   private async autoPush(): Promise<void> {
     // The setting may have been turned off while the push was waiting.
     if (!(await this.deps.settings.get()).autoPush) {
       this.deps.clearRetry?.();
+      return;
+    }
+    const left = await this.waitLeft();
+    if (left > 0) {
+      this.deps.scheduleRetry?.(left);
       return;
     }
     try {
@@ -700,10 +711,17 @@ export class Engine {
     } catch (e) {
       const err = toGitchatError(e);
       if (!RETRYABLE.has(err.code)) return;
-      this.retries++;
-      const wait = err instanceof RateLimitError ? err.retryAfterMs : Math.min(30 * 60_000, 30_000 * 2 ** (this.retries - 1));
+      const retries = ((await this.deps.db.getMeta<SyncMeta>('sync'))?.retries ?? 0) + 1;
+      const wait = err instanceof RateLimitError ? err.retryAfterMs : Math.min(30 * 60_000, 30_000 * 2 ** (retries - 1));
+      await this.setSyncMeta({ nextAllowedAt: this.now() + wait, retries }, { keepError: true });
       this.deps.scheduleRetry?.(wait);
     }
+  }
+
+  /** Time left before an automatic push may run again (0 when it may run now). */
+  private async waitLeft(): Promise<number> {
+    const until = (await this.deps.db.getMeta<SyncMeta>('sync'))?.nextAllowedAt ?? 0;
+    return Math.max(0, until - this.now());
   }
 
   /** Woken up by the alarm: after a failed automatic push, or because the worker was restarted. */
@@ -715,7 +733,11 @@ export class Engine {
   async resume(): Promise<void> {
     await this.ensureRepo();
     const s = await this.deps.settings.get();
-    if (s.autoPush && (await this.pendingCount()) > 0) this.schedulePush(Math.min(1000, this.deps.pushDelayMs ?? 1000));
+    if (!s.autoPush || (await this.pendingCount()) === 0) return;
+    // still waiting after a failed push (e.g. a rate limit): only re-arm the wake-up for when it ends
+    const left = await this.waitLeft();
+    if (left > 0) this.deps.scheduleRetry?.(left);
+    else this.schedulePush(Math.min(1000, this.deps.pushDelayMs ?? 1000));
   }
 
   // ---- settings
@@ -735,7 +757,8 @@ export class Engine {
         return any;
       });
     }
-    if (next.autoPush && (committed || !prev.autoPush) && (await this.pendingCount()) > 0) this.schedulePush();
+    // a new repository (e.g. after "choose a repository first") gets what is waiting
+    if (next.autoPush && (committed || !prev.autoPush || repoChanged) && (await this.pendingCount()) > 0) this.schedulePush();
     if (committed || repoChanged) {
       await this.emitAll();
       await this.emitSync();
@@ -765,12 +788,13 @@ export class Engine {
         delete rec.remoteBlob;
         delete rec.baseRefs;
         rec.updatedAt = this.now();
-        await this.deps.db.putChat(rec);
+        await this.saveChat(rec);
       }
       await this.deps.db.setMeta(REPO_META, repo);
     });
     this.remoteMisses.clear();
-    if (stored !== undefined) await this.clearError();
+    // errors were about the previous choice (or about having none): they no longer apply
+    await this.clearError();
   }
 
   /** Forget the last push error (e.g. after signing in again). */
@@ -782,13 +806,13 @@ export class Engine {
 
   async status(key: ChatKey): Promise<ChatStatus> {
     await this.loadInits();
-    const [rec, mine, all, settings, meta] = await Promise.all([
+    const [rec, all, settings, meta] = await Promise.all([
       this.deps.db.getChat(key),
-      this.deps.db.commitsFor(key),
       this.deps.db.allCommits(),
       this.deps.settings.get(),
       this.deps.db.getMeta<SyncMeta>('sync'),
     ]);
+    const mine = all.filter((c) => c.key === key);
     const repo = repoId(settings.repo);
     const { service, chatId } = rec ?? splitKey(key);
     const tracked = !!rec?.tracked;
@@ -811,7 +835,7 @@ export class Engine {
       service,
       chatId,
       tracked,
-      staged: tracked && rec ? diffStaged(rec.messages, rec.committed) : [],
+      staged: tracked && rec ? this.stagedOf(rec) : [],
       commits: commits.map(toInfo),
       aheadTotal: all.filter((c) => isPending(c, repo)).length,
       phase,
@@ -827,6 +851,15 @@ export class Engine {
     return status;
   }
 
+  /** What is staged in a chat, computed once per revision of its record. */
+  private stagedOf(rec: ChatRecord): StagedItem[] {
+    const hit = this.stagedMemo.get(rec.key);
+    if (rec.rev !== undefined && hit?.rev === rec.rev) return hit.staged;
+    const staged = diffStaged(rec.messages, rec.committed);
+    if (rec.rev !== undefined) this.stagedMemo.set(rec.key, { rev: rec.rev, staged });
+    return staged;
+  }
+
   async syncStatus(): Promise<SyncStatus> {
     const [settings, meta] = await Promise.all([this.deps.settings.get(), this.deps.db.getMeta<SyncMeta>('sync')]);
     const out: SyncStatus = { repo: settings.repo, pending: await this.pendingCount() };
@@ -840,12 +873,26 @@ export class Engine {
     return (await this.deps.db.allCommits()).filter((c) => isPending(c, repo)).length;
   }
 
-  private async setSyncMeta(patch: SyncMeta): Promise<void> {
+  /**
+   * Updates the sync meta. The last error goes unless the patch sets it (or `keepError`); the wait
+   * after a failed automatic push stays until a push succeeds (`clearWait`).
+   */
+  private async setSyncMeta(patch: SyncMeta, opts: { keepError?: boolean; clearWait?: boolean } = {}): Promise<void> {
     const cur = (await this.deps.db.getMeta<SyncMeta>('sync')) ?? {};
     const next: SyncMeta = { ...cur, ...patch };
-    if (!('lastError' in patch)) delete next.lastError;
+    if (!('lastError' in patch) && !opts.keepError) delete next.lastError;
+    if (opts.clearWait) {
+      delete next.nextAllowedAt;
+      delete next.retries;
+    }
     await this.deps.db.setMeta('sync', next);
     await this.emitSync();
+  }
+
+  /** Writes a chat record; every write gets a new revision. */
+  private saveChat(rec: ChatRecord): Promise<void> {
+    rec.rev = (rec.rev ?? 0) + 1;
+    return this.deps.db.putChat(rec);
   }
 
   private async emitStatus(key: ChatKey): Promise<ChatStatus> {

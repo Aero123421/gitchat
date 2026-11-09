@@ -63,6 +63,7 @@ function snapshot(v: unknown): ServiceId {
   iso(s.capturedAt, 'capture time');
   bool(s.complete, 'complete');
   if (s.atEnd !== undefined) bool(s.atEnd, 'atEnd');
+  if (s.startConfirmed !== undefined) bool(s.startConfirmed, 'startConfirmed');
   if (s.view !== undefined) {
     const view = obj(s.view, 'view');
     str(view.id, 'view id', 64, 1);

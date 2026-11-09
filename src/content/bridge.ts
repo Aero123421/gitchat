@@ -58,6 +58,11 @@ export class UiStore {
   private aheadTotal = 0;
   /** Set while init runs in this tab: the local progress wins over the background's copy. */
   private capturingHere = false;
+  /**
+   * Why init failed in this tab. The background has already ended the init, so its status no longer
+   * says so: the reason is kept (as phase 'error') until the user acts again or the chat changes.
+   */
+  private initError = '';
 
   constructor(private readonly actions: UiActions) {}
 
@@ -96,6 +101,7 @@ export class UiStore {
 
   init(): void {
     if (this.state.tracked || this.state.phase === 'capturing') return;
+    this.initError = '';
     this.actions.init();
   }
 
@@ -113,6 +119,7 @@ export class UiStore {
   switchTo(key: string, status: ChatStatus | null): void {
     this.key = key;
     this.capturingHere = false;
+    this.initError = '';
     const s = this.state;
     Object.assign(s, emptyState(), { settings: s.settings, ai: s.ai, stalled: s.stalled });
     if (status) this.copy(status);
@@ -158,9 +165,13 @@ export class UiStore {
     this.emit('status');
   }
 
-  /** An action failed (init, or the fresh capture before a commit/push): show why until the next status. */
+  /**
+   * An action failed (init, or the fresh capture before a commit/push): show why. A commit/push
+   * failure shows until the next status; an init failure until the user acts again (see initError).
+   */
   fail(action: 'init' | 'commit' | 'push', message: string): void {
     const s = this.state;
+    if (action === 'init') this.initError = message;
     s.phase = 'error';
     s.error = message;
     this.emit('error', { action, message });
@@ -210,6 +221,7 @@ export class UiStore {
     }
     const starting = s.phase !== 'capturing';
     this.capturingHere = true;
+    this.initError = '';
     s.phase = 'capturing';
     s.error = '';
     s.captureStage = p.stage;
@@ -232,6 +244,12 @@ export class UiStore {
     if (!this.capturingHere) {
       s.phase = st.phase;
       if (st.phase === 'capturing' && st.progress != null) s.progress = st.progress;
+    }
+    // the chat got tracked after all (e.g. from another tab): the old failure no longer applies
+    if (st.tracked || st.phase !== 'idle') this.initError = '';
+    if (this.initError) {
+      s.phase = 'error';
+      s.error = this.initError;
     }
   }
 }

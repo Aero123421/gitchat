@@ -82,8 +82,11 @@ const AMBIGUOUS: MergeResult = { ok: false, code: 'ambiguous', message: 'The cap
  * Applies a capture to the messages we already have. `reads` is what captures on this device read on
  * the page before (see ChatRecord.pageReads); without it every known message counts as read.
  *
- * - A complete capture (init) is the whole conversation: it replaces the list and may remove
- *   messages. An empty capture, or one with questions but no answers at all, is refused.
+ * - A complete capture (init) is the whole conversation from its first message on: it replaces the
+ *   list from there and may remove messages. Saved messages before its first message are kept unless
+ *   the capture is known to start at the chat's beginning (`startConfirmed`): older history may just
+ *   not have loaded. A capture sharing no message with the saved ones replaces them only then, too.
+ *   An empty capture, or one with questions but no answers at all, is refused.
  * - A live capture may hold only the part of a long chat that is in the DOM, so it is an upsert:
  *   known ids are updated in place and messages absent from it are kept. New ids after the last
  *   known one are appended; new ids between known ones are left for a later capture to place.
@@ -98,17 +101,24 @@ const AMBIGUOUS: MergeResult = { ok: false, code: 'ambiguous', message: 'The cap
  *   a chat that has some (e.g. the first question was edited), or it reaches the end but stops before
  *   messages the view read there (the end got shorter). Only a complete capture can tell.
  *
- * A message the page still shows exactly as this device read it last keeps the version we have: it
- * may hold another device's edit, merged since. Messages keep their saved visualizations when the
- * new capture could not read them (see keepArtifacts).
+ * A message the page still shows exactly as the capturing view read it last (or, for a view that never
+ * read it, as this device read it last) keeps the version we have: it may hold another device's edit,
+ * merged since. Messages keep their saved visualizations when the new capture could not read them
+ * (see keepArtifacts).
  */
 export function mergeSnapshot(known: CapturedMessage[], snap: ChatSnapshot, reads?: ReadonlyMap<string, PageRead>): MergeResult {
   const incoming = uniqueIds(snap.messages);
   const byId = new Map(known.map((m) => [m.id, m]));
+  const view = snap.view;
+  /** What the capturing view read last; a view that never read the message goes by this device's last reading. */
+  const lastRead = (id: string) => {
+    const r = reads?.get(id);
+    return r && (view && r.hv && view.id in r.hv ? r.hv[view.id] : r.h);
+  };
   const place = (m: CapturedMessage) => {
     const old = byId.get(m.id);
     if (!old) return m;
-    if (reads?.get(m.id)?.h === messageHash(m)) return old;
+    if (lastRead(m.id) === messageHash(m)) return old;
     return keepArtifacts(old, m);
   };
 
@@ -118,11 +128,17 @@ export function mergeSnapshot(known: CapturedMessage[], snap: ChatSnapshot, read
     if (users >= 2 && users === incoming.length) {
       return { ok: false, code: 'invalid', message: 'The capture looked incomplete, so nothing was changed.' };
     }
-    return { ok: true, messages: incoming.map(place) };
+    const placed = incoming.map(place);
+    if (snap.startConfirmed === true || !known.length) return { ok: true, messages: placed };
+    // the start is not confirmed: what lies before the capture's first message is kept
+    const at = new Map(known.map((m, i) => [m.id, i]));
+    const first = incoming.find((m) => at.has(m.id));
+    if (!first) return { ok: true, messages: unionMessages(placed, known) };
+    const captured = new Set(incoming.map((m) => m.id));
+    return { ok: true, messages: [...known.slice(0, at.get(first.id)).filter((m) => !captured.has(m.id)), ...placed] };
   }
 
   if (!incoming.length) return { ok: true, messages: known };
-  const view = snap.view;
   const observed = (m: CapturedMessage) => {
     if (!reads) return true;
     const r = reads.get(m.id);
@@ -206,8 +222,15 @@ export function recordReads(
   const next = new Map(reads);
   for (const m of captured) {
     const prev = reads.get(m.id);
+    const h = messageHash(m);
     const v = view ? [view.id, ...(prev?.v ?? []).filter((x) => x !== view.id)].slice(0, 4) : prev?.v;
-    next.set(m.id, { h: messageHash(m), at: prev ? prev.at : now, ...(v?.length ? { v } : {}) });
+    // each listed view's own last reading (views dropped from the list are forgotten)
+    const hv: Record<string, string> = {};
+    for (const id of v ?? []) {
+      const was = view && id === view.id ? h : prev?.hv?.[id];
+      if (was !== undefined) hv[id] = was;
+    }
+    next.set(m.id, { h, at: prev ? prev.at : now, ...(v?.length ? { v } : {}), ...(Object.keys(hv).length ? { hv } : {}) });
   }
   const out: Record<string, PageRead> = {};
   for (const m of chat) {

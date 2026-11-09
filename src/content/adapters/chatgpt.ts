@@ -29,7 +29,7 @@ import type { Role } from '../../shared/types';
 import { defineAdapter, idFromPath } from './define';
 import { isShown } from './dom';
 import { serializeFrames, type FrameRequest } from '../capture/frames';
-import { fencedCode } from '../capture/markdown';
+import { fencedCode, inlineCode } from '../capture/markdown';
 
 /** The visible transcript pane (there may be a hidden duplicate). */
 function visiblePane(doc: Document): HTMLElement | null {
@@ -69,7 +69,8 @@ function messageId(el: Element, role: Role): string | null {
     if (v) return v;
   }
   const turn = el.closest('[data-turn-key]')?.getAttribute('data-turn-key');
-  if (!turn) return null;
+  // `fallback-turn-N` keys count from the top of the rendered window: they change as it scrolls
+  if (!turn || turn.startsWith('fallback-turn-')) return null;
   if (role === 'user') return turn;
   const unit = /:(\d+):assistant$/.exec(el.getAttribute('data-chatgpt-search-unit-key') ?? el.getAttribute('data-content-search-unit-key') ?? '');
   return `${turn}:a${unit?.[1] ?? ''}`;
@@ -98,16 +99,26 @@ function fileCardName(el: Element): string | null {
   return /^[^\s/\\]{1,120}\.[A-Za-z0-9]{1,10}$/.test(name) ? name : null;
 }
 
-/** Raw code and language of a code widget in the new UI. */
-function codeWidget(el: Element): string | null {
-  const raw = el.getAttribute('data-chatgpt-copy-code');
-  if (raw == null) return null;
+/** Language id from a code block's label ("TypeScript" → "typescript"); localized labels such as "plain text" give none. */
+function codeLanguage(el: Element): string {
   const lang =
     el.querySelector('.cm-content[data-language]')?.getAttribute('data-language') ??
     el.querySelector('[data-markdown-copy="exclude"] .truncate, [data-markdown-copy="exclude"] > div')?.textContent?.trim() ??
     '';
-  const id = /^[A-Za-z0-9+#.-]{1,20}$/.test(lang) ? lang.toLowerCase() : '';
-  return `\n\n${fencedCode(raw.replace(/\n$/, ''), id)}\n\n`;
+  return /^[A-Za-z0-9+#.-]{1,20}$/.test(lang) ? lang.toLowerCase() : '';
+}
+
+/**
+ * A code block in the new UI: either wrapped with its raw source in `data-chatgpt-copy-code`, or
+ * (since late 2026-11) a `[data-code-block]` box whose source pane holds a plain <code>.
+ */
+function codeWidget(el: Element): string | null {
+  let raw = el.getAttribute('data-chatgpt-copy-code');
+  if (raw == null && el.getAttribute('data-code-block') === 'true') {
+    raw = (el.querySelector('[data-code-block-source] code') ?? el.querySelector('code'))?.textContent ?? null;
+  }
+  if (raw == null) return null;
+  return `\n\n${fencedCode(raw.replace(/\n$/, ''), codeLanguage(el))}\n\n`;
 }
 
 export const chatgpt = defineAdapter({
@@ -214,11 +225,13 @@ export const chatgpt = defineAdapter({
       return tex ? { tex: tex.trim(), display: el.hasAttribute('data-d-block') } : null;
     },
     render(el, children, kind) {
-      if (el.hasAttribute('data-chatgpt-copy-code')) {
+      if (el.hasAttribute('data-chatgpt-copy-code') || el.getAttribute('data-code-block') === 'true') {
         const code = codeWidget(el);
         if (code != null) kind('code');
         return code;
       }
+      // inline code is a span in the new UI
+      if (el.getAttribute('data-markdown-copy') === 'inline-code') return inlineCode(el.textContent ?? '');
       const file = fileCardName(el);
       if (file) return `\n\n> **File:** ${file}\n\n`;
       if (el.getAttribute('data-d-component') === 'divider') return '\n\n---\n\n';

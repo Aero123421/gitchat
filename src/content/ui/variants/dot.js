@@ -53,6 +53,8 @@ const css = `
 `;
 
 export function mountDot(host, store, options = {}) {
+  // an untracked chat has nothing for the panel to show — except why saving it failed
+  const noPanel = () => (!store.state.tracked && store.state.phase !== 'error') || store.state.phase === 'capturing';
   const root = host.attachShadow({ mode: 'open' });
   setHTML(root, `<style>${glassCSS}${panelCSS}${actionsCSS}${css}</style>
   <div class="dock">
@@ -188,7 +190,7 @@ export function mountDot(host, store, options = {}) {
       frac = next / innerHeight;
       syncAnchor();
     } else if (panelOpen) closePanel();
-    else if (!store.state.tracked || store.state.phase === 'capturing') pinUntil = performance.now() + 3000;
+    else if (noPanel()) pinUntil = performance.now() + 3000;
     else openPanel();
   };
   orb.addEventListener('pointerup', release);
@@ -198,7 +200,7 @@ export function mountDot(host, store, options = {}) {
     e.preventDefault();
     wake();
     if (panelOpen) closePanel();
-    else if (!store.state.tracked || store.state.phase === 'capturing') actions.focusFirst();
+    else if (noPanel()) actions.focusFirst();
     else openPanel(true);
   });
 

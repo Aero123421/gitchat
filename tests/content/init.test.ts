@@ -254,6 +254,71 @@ describe('captureFullHistory', () => {
     expect(res.messages.map((m) => m.id)).toEqual(Array.from({ length: 30 }, (_, i) => `m${i}`));
   });
 
+  it('does not count a message row as read before its body has rendered (review 1-4)', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'performance', 'Date'] });
+    // 30 numbered rows; answer 17's body renders only after 5 s (the reviewer saw 29 messages at 4.8 s)
+    const { adapter } = slowList({ total: 30, renderDelayMs: 0, positions: true, lateBody: { index: 17, untilMs: 5000 } });
+    const run = captureFullHistory(adapter, document, { signal: new AbortController().signal, onProgress: () => {} });
+    await vi.advanceTimersByTimeAsync(120_000);
+    const res = await run;
+    expect(res.messages.map((m) => m.id)).toEqual(Array.from({ length: 30 }, (_, i) => `m${i}`));
+    expect(res.messages[17]?.markdown).toBe('message 17');
+  });
+
+  it('accepts a message row that stays empty through every visit (an empty reply), without failing', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'performance', 'Date'] });
+    const { adapter } = slowList({ total: 30, renderDelayMs: 0, positions: true, lateBody: { index: 17, untilMs: Infinity } });
+    const run = captureFullHistory(adapter, document, { signal: new AbortController().signal, onProgress: () => {} });
+    await vi.advanceTimersByTimeAsync(300_000);
+    const res = await run;
+    expect(res.messages).toHaveLength(29);
+    expect(res.messages.some((m) => m.id === 'm17')).toBe(false);
+  });
+
+  it('waits for a late body on a list without row numbers too', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'performance', 'Date'] });
+    const { adapter } = slowList({ total: 30, renderDelayMs: 0, lateBody: { index: 17, untilMs: 5000 } });
+    const run = captureFullHistory(adapter, document, { signal: new AbortController().signal, onProgress: () => {} });
+    await vi.advanceTimersByTimeAsync(120_000);
+    const res = await run;
+    expect(res.messages.map((m) => m.id)).toContain('m17');
+    expect(res.messages).toHaveLength(30);
+  });
+
+  it('fails as stalled when the reading walk stops moving, instead of reading forever (review 2-1)', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'performance', 'Date'] });
+    const { adapter } = slowList({ total: 30, renderDelayMs: 0, stuck: true });
+    const run = captureFullHistory(adapter, document, { signal: new AbortController().signal, onProgress: () => {}, stallMs: 20_000 });
+    const failed = expect(run).rejects.toMatchObject({ reason: 'stalled' });
+    await vi.advanceTimersByTimeAsync(60_000);
+    await failed;
+  });
+
+  it('confirms the start only when the whole transcript fits on screen (review 1-3)', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'performance', 'Date'] });
+    // 4 messages of 100 px in a 500 px scroller: everything is on screen
+    const short = harness({ total: 4, batch: 4, delayMs: 10, virtualized: false });
+    let run = captureFullHistory(short.adapter, document, { signal: new AbortController().signal, onProgress: () => {} });
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect((await run).startConfirmed).toBe(true);
+    // a short chat taller than the screen (a long answer to an edited first question) is still whole
+    const tall = harness({ total: 6, batch: 6, delayMs: 10, virtualized: false });
+    run = captureFullHistory(tall.adapter, document, { signal: new AbortController().signal, onProgress: () => {} });
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect((await run).startConfirmed).toBe(true);
+    const longer = harness({ total: 12, batch: 12, delayMs: 10, virtualized: false });
+    run = captureFullHistory(longer.adapter, document, { signal: new AbortController().signal, onProgress: () => {} });
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect((await run).startConfirmed).toBe(false);
+    // a long chat: older history may still arrive after the quiet period, so the start is not certain
+    const long = harness({ total: 96, batch: 32, delayMs: 2500, virtualized: false });
+    run = captureFullHistory(long.adapter, document, { signal: new AbortController().signal, onProgress: () => {} });
+    await vi.advanceTimersByTimeAsync(60_000);
+    const res = await run;
+    expect(res.messages).toHaveLength(96);
+    expect(res.startConfirmed).toBe(false);
+  });
+
   it('leaves the scroll alone on cancel when the conversation no longer owns the scroller (N16)', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'performance', 'Date'] });
     const { adapter, scroller, setTop } = harness({ total: 64, batch: 32, delayMs: 500, virtualized: true });
@@ -276,12 +341,23 @@ describe('captureFullHistory', () => {
  * A virtualized list with layout: rows are 100 px, the viewport 500 px, and only rows near the
  * viewport are in the DOM — rendered `renderDelayMs` after each scroll.
  */
-function slowList(opts: { total: number; renderDelayMs: number; positions?: boolean; claimTotal?: number }) {
+function slowList(opts: {
+  total: number;
+  renderDelayMs: number;
+  positions?: boolean;
+  claimTotal?: number;
+  /** This row's body is empty until `untilMs` after the list was made (Infinity: always). */
+  lateBody?: { index: number; untilMs: number };
+  /** The list never scrolls (the site keeps resetting it). */
+  stuck?: boolean;
+}) {
   document.body.innerHTML = '';
   const scroller = document.createElement('div');
   document.body.appendChild(scroller);
   let top = 0;
   let timer: ReturnType<typeof setTimeout> | null = null;
+  const made = performance.now();
+  const late = (i: number) => opts.lateBody?.index === i && performance.now() - made < opts.lateBody.untilMs;
   const rowRect = (i: number) => ({ top: i * 100 - top, bottom: i * 100 - top + 100, height: 100, left: 0, right: 100, width: 100, x: 0, y: i * 100 - top, toJSON() {} });
   const render = () => {
     scroller.innerHTML = '';
@@ -291,18 +367,21 @@ function slowList(opts: { total: number; renderDelayMs: number; positions?: bool
       const el = document.createElement('div');
       el.setAttribute('data-i', String(i));
       el.setAttribute('data-role', i % 2 ? 'assistant' : 'user');
-      el.textContent = `message ${i}`;
+      el.textContent = late(i) ? '' : `message ${i}`;
       el.getBoundingClientRect = () => rowRect(i) as DOMRect;
       scroller.appendChild(el);
     }
   };
   render();
+  // the late body appears on its own (the site finishes rendering it)
+  if (opts.lateBody && Number.isFinite(opts.lateBody.untilMs)) setTimeout(render, opts.lateBody.untilMs);
   scroller.getBoundingClientRect = () => ({ top: 0, bottom: 500, height: 500, left: 0, right: 100, width: 100, x: 0, y: 0, toJSON() {} }) as DOMRect;
   Object.defineProperty(scroller, 'clientHeight', { get: () => 500 });
   Object.defineProperty(scroller, 'scrollHeight', { get: () => opts.total * 100 });
   Object.defineProperty(scroller, 'scrollTop', {
     get: () => top,
     set: (v: number) => {
+      if (opts.stuck) return;
       top = Math.max(0, Math.min(v, opts.total * 100 - 500));
       if (timer) clearTimeout(timer);
       if (opts.renderDelayMs) timer = setTimeout(render, opts.renderDelayMs);

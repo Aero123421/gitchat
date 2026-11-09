@@ -4,6 +4,7 @@
 import { GitchatError, type RepoSummary } from '../../shared/protocol';
 import type { RepoRef } from '../../shared/types';
 import type { GitHub } from './client';
+import { parseFrontMatter } from '../render';
 import { getBlobText, getHead, getTreeIndex, putFile, repoPath, type Head } from './git';
 
 export const README_MARKER = '<!-- gitchat -->';
@@ -127,11 +128,17 @@ export async function bootstrapRepo(gh: GitHub, repo: Pick<RepoRef, 'owner' | 'n
   return ref();
 }
 
+/**
+ * True when gitchat evidently wrote to the repository: its README (with the marker), or a chat file
+ * whose front matter says `gitchat:`. A Markdown file that merely sits in `chatgpt/` is not enough.
+ */
 async function isManaged(gh: GitHub, repo: RepoRef, head: Head): Promise<boolean> {
   const index = await getTreeIndex(gh, repo, head.tree);
-  for (const p of index.entries.keys()) {
-    if (SERVICE_DIRS.some((d) => p.startsWith(`${d}/`)) && p.endsWith('.md')) return true;
-  }
   const readme = index.entries.get('README.md');
-  return !!readme && (await getBlobText(gh, repo, readme)).includes(README_MARKER);
+  if (readme && (await getBlobText(gh, repo, readme)).includes(README_MARKER)) return true;
+  const chats = [...index.entries].filter(([p]) => SERVICE_DIRS.some((d) => p.startsWith(`${d}/`)) && p.endsWith('.md')).slice(0, 3);
+  for (const [, sha] of chats) {
+    if (parseFrontMatter(await getBlobText(gh, repo, sha)).gitchat !== undefined) return true;
+  }
+  return false;
 }

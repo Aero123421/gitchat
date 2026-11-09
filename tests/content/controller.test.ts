@@ -54,7 +54,7 @@ function installChrome() {
 }
 
 /** Messages are `<div data-m=id data-role=…>` elements; the page shows one chat at a time. */
-function showChat(chatId: string, n = 2) {
+function showChat(chatId: string, n = 2, height = 500) {
   history.replaceState(null, '', `/chat/${chatId}`);
   document.body.innerHTML = '';
   const scroller = document.createElement('div');
@@ -67,7 +67,7 @@ function showChat(chatId: string, n = 2) {
     scroller.appendChild(el);
   }
   Object.defineProperty(scroller, 'clientHeight', { get: () => 500 });
-  Object.defineProperty(scroller, 'scrollHeight', { get: () => 500 });
+  Object.defineProperty(scroller, 'scrollHeight', { get: () => height });
   document.body.appendChild(scroller);
 }
 
@@ -94,9 +94,13 @@ function makeAdapter(over: Partial<Adapter> = {}): Adapter {
   };
 }
 
+/** Controllers made by a test: their page watchers are stopped afterwards (they share `document`). */
+const made: Array<Record<string, any>> = [];
+
 /** A controller with its settings loaded, showing `chatId` (open + reconcile done). */
 async function open(adapter: Adapter, chatId = 'a') {
   const c = new Controller(adapter) as unknown as Record<string, any>;
+  made.push(c);
   c.settings = { ...DEFAULT_SETTINGS };
   showChat(chatId);
   await c.checkRoute(true);
@@ -111,7 +115,10 @@ describe('Controller', () => {
     installChrome();
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'performance', 'Date'] });
   });
-  afterEach(() => vi.useRealTimers());
+  afterEach(() => {
+    for (const c of made.splice(0)) c.setWatching(false);
+    vi.useRealTimers();
+  });
 
   it('reads a tracked chat once it has settled after opening (answers finished while away)', async () => {
     await open(makeAdapter());
@@ -366,7 +373,7 @@ describe('Controller', () => {
     let release!: (v: CapturedArtifact[]) => void;
     let calls = 0;
     const adapter = makeAdapter({ aiPhase: () => phase, artifacts: () => (++calls === 2 ? new Promise((r) => (release = r)) : Promise.resolve([])) });
-    const c = await open(adapter); // the observer is not running: it has not seen the new turn
+    const c = await open(adapter); // the observer has not looked at the page since the new turn began
     sent.length = 0;
     void c.snapshot('manual');
     await vi.advanceTimersByTimeAsync(5);
@@ -434,6 +441,119 @@ describe('Controller', () => {
     finish();
     await vi.advanceTimersByTimeAsync(100);
     expect(sent.some((x) => x.type === 'chat/init/cancel')).toBe(false);
+  });
+
+  it('never saves the previous chat as the new one, however long it stays on the page (review 1-2)', async () => {
+    handlers['chat/open'] = (p) => status(`claude:${p.chatId as string}`, { tracked: p.chatId !== 'b' });
+    handlers['chat/init/start'] = (p) => ({ status: status(p.key as string, { tracked: false, phase: 'capturing' }), initId: 'i-b' });
+    handlers['chat/init/cancel'] = (p) => status(p.key as string, { tracked: false });
+    const c = await open(makeAdapter());
+    sent.length = 0;
+    history.replaceState(null, '', '/chat/b'); // the URL moved on, the DOM still shows chat a
+    await c.checkRoute();
+    await vi.advanceTimersByTimeAsync(31_000); // longer than the old 30 s limit
+    void c.init();
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(sent.some((x) => x.type === 'chat/init/done')).toBe(false);
+    expect(sent.find((x) => x.type === 'chat/init/cancel')?.payload.initId).toBe('i-b');
+    expect(c.store.state.error).toBe('errInitPrevChat');
+    expect(snapshots()).toEqual([]);
+  });
+
+  it('takes a chat branched from the previous one as soon as a message of its own shows', async () => {
+    const c = await open(makeAdapter());
+    sent.length = 0;
+    history.replaceState(null, '', '/chat/b');
+    await c.checkRoute();
+    // chat b was branched from a: it starts with a's messages, then has its own
+    const own = document.createElement('div');
+    own.setAttribute('data-m', 'b-2');
+    own.setAttribute('data-role', 'user');
+    own.textContent = 'b message 2';
+    document.getElementById('scroller')!.appendChild(own);
+    await vi.advanceTimersByTimeAsync(3000);
+    const [snap] = snapshots();
+    expect(snap?.chatId).toBe('b');
+    expect(snap?.messages.map((m) => m.id)).toEqual(['a-0', 'a-1', 'b-2']);
+  });
+
+  it('says the start of the chat is certain only when the whole transcript fit on screen (review 1-3)', async () => {
+    handlers['chat/open'] = (p) => status(`claude:${p.chatId as string}`, { tracked: false });
+    handlers['chat/init/start'] = (p) => ({ status: status(p.key as string, { tracked: false, phase: 'capturing' }), initId: 'i-fit' });
+    handlers['chat/init/done'] = (p) => status(`claude:${(p.snapshot as ChatSnapshot).chatId}`);
+    const c = await open(makeAdapter()); // 2 short messages in a 500 px scroller
+    void c.init();
+    await vi.advanceTimersByTimeAsync(30_000);
+    const done = sent.find((x) => x.type === 'chat/init/done')?.payload.snapshot as ChatSnapshot;
+    expect(done.complete).toBe(true);
+    expect(done.startConfirmed).toBe(true);
+    // a longer chat, taller than its scroller: older history might not have loaded (a chat of at
+    // most 8 messages counts as whole even when taller: no site loads so few in batches)
+    sent.length = 0;
+    showChat('a', 12, 2000);
+    c.store.switchTo('claude:a', status('claude:a', { tracked: false }));
+    void c.init();
+    await vi.advanceTimersByTimeAsync(30_000);
+    const again = sent.find((x) => x.type === 'chat/init/done')?.payload.snapshot as ChatSnapshot;
+    expect(again.complete).toBe(true);
+    expect(again.startConfirmed).toBeUndefined();
+  });
+
+  it('tells the popup why init failed, and keeps saying so after the background’s next status (review 2-2)', async () => {
+    handlers['chat/open'] = (p) => status(`claude:${p.chatId as string}`, { tracked: false });
+    handlers['chat/init/start'] = (p) => ({ status: status(p.key as string, { tracked: false }), initId: 'i-err' });
+    handlers['chat/init/cancel'] = (p) => status(p.key as string, { tracked: false });
+    let n = 0;
+    const c = await open(makeAdapter({ loadedCount: () => ++n })); // the history never stops growing
+    c.listenToPopup();
+    void c.init();
+    await vi.advanceTimersByTimeAsync(11 * 60_000);
+    const ask = () =>
+      new Promise<{ status: ChatStatus | null }>((resolve) => popupListener!({ gitchat: 1, type: 'content/current' }, {}, (r) => resolve(r as { status: ChatStatus | null })));
+    let cur = await ask();
+    expect(cur.status).toMatchObject({ phase: 'error', error: 'errInitIncomplete' });
+    // the background has ended the init, so its status says nothing about it
+    c.onEvent({ type: 'status', status: status('claude:a', { tracked: false }) });
+    cur = await ask();
+    expect(cur.status).toMatchObject({ phase: 'error', error: 'errInitIncomplete' });
+    // trying again clears it
+    handlers['chat/init/start'] = () => new Promise(() => {});
+    c.store.init();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(c.store.state.phase).toBe('capturing');
+  });
+
+  it('watches the page only while a chat of an enabled service is shown (review 5-1)', async () => {
+    const c = await open(makeAdapter());
+    expect(c.observer.running).toBe(true);
+    history.replaceState(null, '', '/settings');
+    await c.checkRoute();
+    expect(c.observer.running).toBe(false);
+    showChat('a');
+    await c.checkRoute();
+    expect(c.observer.running).toBe(true);
+    // the service is turned off in the settings
+    c.onEvent({ type: 'settings', settings: { ...DEFAULT_SETTINGS, services: { ...DEFAULT_SETTINGS.services, claude: false } } });
+    await vi.advanceTimersByTimeAsync(10);
+    expect(c.observer.running).toBe(false);
+  });
+
+  it('stops all its work when the extension goes away under it', async () => {
+    handlers['settings/get'] = () => ({ ...DEFAULT_SETTINGS });
+    const c = new Controller(makeAdapter()) as unknown as Record<string, any>;
+    made.push(c);
+    showChat('a');
+    await c.start();
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(c.observer.running).toBe(true);
+    expect(c.timers.length).toBe(2);
+    (globalThis as unknown as { chrome: { runtime: { id?: string } } }).chrome.runtime.id = undefined; // the extension was reloaded
+    await vi.advanceTimersByTimeAsync(500);
+    expect(c.observer.running).toBe(false);
+    expect(c.timers).toEqual([]);
+    sent.length = 0;
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(sent).toEqual([]);
   });
 
   it('does not rescan an untracked chat or start tracking through rescan', async () => {

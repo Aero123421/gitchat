@@ -186,7 +186,8 @@ export function createSettingsView(opts: { preview: WidgetPreview; onReset: () =
       onChange: async (v) => {
         sw.set(v);
         try {
-          await patchSettings({ services: { ...app.settings.services, [id]: v } as Settings['services'] });
+          // only this service: another settings tab may have changed the others
+          await patchSettings({ services: { [id]: v } as Partial<Settings['services']> as Settings['services'] });
         } catch (e) {
           sw.set(!v);
           onError(errorText(e));

@@ -171,12 +171,13 @@ main { padding: 34px 20px 140px; }
 .toast .note { background: var(--tint-strong); box-shadow: 0 8px 24px -10px var(--shadow), inset 0 0 0 .5px var(--edge); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); }
 .toast .note.err { background: color-mix(in srgb, var(--err-soft) 60%, var(--tint-strong)); }
 
-/* Leave room for the widget preview on the right edge. */
-@media (max-width: 1180px) { body.previewing main { padding-right: 132px; } }
+/* Leave room for the widget preview on the right edge. On the settings page the room is always
+   there, so the text never reflows as the preview comes and goes while scrolling. */
+@media (max-width: 1180px) { main:has(.layout), body.previewing main { padding-right: 132px; } }
 @media (max-width: 760px) {
   .top { padding: 0 14px; }
   main { padding: 22px 14px 140px; }
-  body.previewing main { padding-right: 14px; }
+  main:has(.layout), body.previewing main { padding-right: 14px; }
   .layout { grid-template-columns: minmax(0, 1fr); gap: 14px; }
   .sidenav { position: sticky; top: 56px; z-index: 10; flex-direction: row; overflow-x: auto; padding: 8px 0; margin: -8px 0 0;
     background: color-mix(in srgb, var(--bg) 80%, transparent); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }

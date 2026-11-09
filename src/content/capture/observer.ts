@@ -90,7 +90,15 @@ export class AiObserver {
     return this.turns;
   }
 
+  /** True between start() and stop(). */
+  get running(): boolean {
+    return this.mo !== null;
+  }
+
+  /** Starts watching (again after stop()); does nothing while already running. */
   start(): void {
+    if (this.mo) return;
+    this.stopped = false;
     this.lastChange = performance.now();
     this.mo = new MutationObserver((records) => this.onMutations(records));
     this.mo.observe(this.doc.body, {
@@ -105,11 +113,15 @@ export class AiObserver {
     this.tick();
   }
 
+  /** Stops watching: no observer, no timers (start() resumes). */
   stop(): void {
     this.stopped = true;
     this.mo?.disconnect();
+    this.mo = null;
     clearTimeout(this.timer);
+    this.timer = 0;
     clearInterval(this.poll);
+    this.poll = 0;
   }
 
   /** Forget the current phase (call after switching to another chat). */

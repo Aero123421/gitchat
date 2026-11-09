@@ -102,6 +102,14 @@ On long chats the site only keeps part of the conversation on the page and draws
 
 Commit and Push read the page once more before they run, so they include the newest answer. When that read fails, they stop instead of saving an older state. Wait until the page has finished loading and try again; reloading the tab also helps.
 
+### "Reading the chat stopped moving, so it was not saved"
+
+While reading a long chat, gitchat scrolls through it and stops if the page neither scrolls nor shows new messages for 25 seconds. Scroll the chat a little (or reload the tab) and start again.
+
+### "The page still showed the previous chat, so nothing was saved"
+
+Right after you switch chats, the page can still show the previous conversation for a moment. gitchat never saves those messages under the new chat; it waits up to 10 seconds for the new one and then stops. Wait until the chat has loaded and start again.
+
 ### "The answer is still running. Start saving again when it has finished."
 
 Init waits for an answer that is still being written, so the saved chat never ends with a question alone. If the answer does not finish within 10 minutes, init stops with this message. Start again once the answer is done.
@@ -134,7 +142,7 @@ When a conversation has multiple branches from editing a message or regenerating
 Your local commits remain stored in IndexedDB on your device; no captured messages are lost.
 
 - Click **Push** in the widget or toolbar popup to retry manually.
-- If **Auto push** is enabled, gitchat automatically schedules a background retry via `chrome.alarms` using exponential backoff (up to 30 minutes, or waiting until GitHub's rate-limit reset timestamp).
+- If **Auto push** is enabled, gitchat automatically schedules a background retry via `chrome.alarms` using exponential backoff (up to 30 minutes, or waiting until GitHub's rate-limit reset timestamp). The wait survives restarts of the extension's background worker; pressing **Push** yourself retries right away.
 
 ### "gitchat's background stopped responding. Try again."
 

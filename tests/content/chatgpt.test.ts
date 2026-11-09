@@ -38,6 +38,35 @@ describe('chatgpt adapter (new app-shell UI fixtures)', () => {
     expect(md).not.toMatch(/実行|コードを編集/);
   });
 
+  it('reads the late-2026-11 markup: code boxes, inline-code spans, citations and mention links', () => {
+    load('blocks.html');
+    const [user, ai] = captureVisible(chatgpt, document);
+    // fallback-turn-N keys are window-relative and never used as ids: the message uuids are
+    expect(user?.id).toBe('52f32c4e-2434-48c6-9865-7704a5701306');
+    expect(ai?.id).toBe('259dd900-3196-50af-867d-1a2470d4252c');
+    const md = ai!.markdown;
+    expect(md).toMatch(/^# 1\. 最優先：保存内容の信頼性$/m);
+    expect(md).toContain('対象は、確認時点の **v0.1.1／mainの `406d1eb`** です。`mergeSnapshot()` を参照。[対象コミット](https://github.com/Aero123421/gitchat/commit/406d1ebd2a369a8cb0b1f350a2cfd894b884fb1b)');
+    // a plain-text block is a fenced block (no language: the label is localized), not inline code
+    expect(md).toContain('```\nリモート編集をマージした後       REMOTE EDIT\n新しいタブBで読み取った後       REMOTE EDIT\n古いタブAが再読み取りした後     ORIGINAL\n```');
+    expect(md).toContain("````typescript\nconst view = { id: 'a', since: 0 };\n// ``` stays inside\n````");
+    // the citation's favicon is decoration
+    expect(md).toContain('[developer.chrome.com](https://developer.chrome.com/docs/extensions/develop/concepts/service-workers/lifecycle)');
+    expect(md).not.toContain('![');
+    expect(md).toContain('- **古いタブの再読み取りによって、取り込んだ新しい編集を巻き戻すケースがある。**');
+    expect(md).toContain('| 既存テスト | **18ファイル・245テスト成功** |');
+    expect(md).toMatch(/^---$/m);
+    expect(md).not.toMatch(/行の折り返し|コードをコピー|プレーンテキスト/);
+    expect(ai?.kinds).toContain('code');
+  });
+
+  it('never takes a window-relative fallback turn key as an id', () => {
+    load('blocks.html');
+    document.querySelectorAll('[data-chatgpt-search-message-ids]').forEach((e) => e.removeAttribute('data-chatgpt-search-message-ids'));
+    document.querySelectorAll('[data-chatgpt-selection-message-id]').forEach((e) => e.removeAttribute('data-chatgpt-selection-message-id'));
+    expect(chatgpt.messages(document).map((m) => m.id)).toEqual([null, null]);
+  });
+
   it('keeps inline vs display math apart', () => {
     load('math.html');
     const md = answer();

@@ -51,6 +51,13 @@ export interface ChatSnapshot {
   /** True when the whole history was captured (init), false for a partial/live capture. */
   complete: boolean;
   /**
+   * Complete captures only: the capture is known to begin at the conversation's first message (the
+   * whole transcript fit on screen, or the site marks its start). Without it the capture is
+   * authoritative from its first message on, and saved messages before that are kept: older history
+   * may simply not have loaded.
+   */
+  startConfirmed?: boolean;
+  /**
    * Live captures only: the capture reaches the end of the conversation (the transcript is scrolled
    * to its last message). The background then treats the capture as authoritative from its first
    * already-known message onward, so turns that vanished from the page (a branch edit or a

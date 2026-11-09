@@ -75,13 +75,8 @@ export function assignIds(list: Array<Omit<CapturedMessage, 'id'> & { id: string
 }
 
 /** Everything currently rendered on the page (may be a window of a longer chat). */
-export function captureVisible(adapter: Adapter, doc: Document): CapturedMessage[] {
-  return assignIds(
-    adapter
-      .messages(doc)
-      .map((n) => captureMessage(adapter, n))
-      .filter((m) => m.markdown || m.kinds?.length),
-  );
+export function captureVisible(adapter: Adapter, doc: Document, nodes = adapter.messages(doc)): CapturedMessage[] {
+  return assignIds(nodes.map((n) => captureMessage(adapter, n)).filter((m) => m.markdown || m.kinds?.length));
 }
 
 /** What one read of the page saw, frozen at the moment of the read. */
@@ -91,12 +86,16 @@ export interface PageRead {
   title: string;
   /** ISO time of the DOM read (not of any later enrichment). */
   capturedAt: string;
+  /** The site's own ids of the messages on the page (content-derived ids left out). */
+  serviceIds?: string[];
 }
 
 /** Reads the visible messages and the page's identity in one synchronous step. */
 export function readPage(adapter: Adapter, doc: Document): PageRead {
+  const nodes = adapter.messages(doc);
   return {
-    messages: captureVisible(adapter, doc),
+    messages: captureVisible(adapter, doc, nodes),
+    serviceIds: nodes.flatMap((n) => (n.id ? [n.id] : [])),
     url: location.href.split('#')[0] ?? location.href,
     title: adapter.title(doc),
     capturedAt: new Date().toISOString(),
@@ -156,7 +155,10 @@ export function attachArtifacts(messages: CapturedMessage[], artifacts: Captured
   return out;
 }
 
-/** `view`: the tab's visit to the chat that read the page (see ChatSnapshot.view). */
+/**
+ * `view`: the tab's visit to the chat that read the page (see ChatSnapshot.view). `startConfirmed`:
+ * a complete capture known to begin at the chat's first message (see ChatSnapshot.startConfirmed).
+ */
 export function makeSnapshot(
   adapter: Adapter,
   chatId: string,
@@ -165,6 +167,7 @@ export function makeSnapshot(
   complete: boolean,
   atEnd = false,
   view?: ChatSnapshot['view'],
+  startConfirmed = false,
 ): ChatSnapshot {
   return {
     service: adapter.service,
@@ -175,6 +178,7 @@ export function makeSnapshot(
     capturedAt: read.capturedAt,
     complete,
     ...(complete ? {} : { atEnd }),
+    ...(complete && startConfirmed ? { startConfirmed: true } : {}),
     ...(view ? { view } : {}),
   };
 }

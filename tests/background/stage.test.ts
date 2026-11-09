@@ -36,8 +36,19 @@ describe('mergeSnapshot', () => {
     expect(ids(mergeSnapshot(known, snap([msg('c'), msg('d'), msg('e')], false, true)))).toEqual(['a', 'b', 'c', 'd', 'e']);
   });
 
-  it('lets a complete capture replace the list, removing messages', () => {
+  it('lets a complete capture replace the list from its first message on, removing messages', () => {
     expect(ids(mergeSnapshot([u('a'), a('b'), u('c')], snap([u('a'), a('x')], true)))).toEqual(['a', 'x']);
+  });
+
+  it('keeps saved messages before a complete capture whose start is not confirmed (older history may not have loaded)', () => {
+    const chat = [u('u1'), a('a1'), u('u2'), a('a2'), u('u3'), a('a3')];
+    // only the last two turns loaded: nothing before them is removed, the rest is replaced
+    expect(ids(mergeSnapshot(chat, snap([u('u2'), a('a2b'), u('u4'), a('a4')], true)))).toEqual(['u1', 'a1', 'u2', 'a2b', 'u4', 'a4']);
+    // nothing in common: everything saved is kept, before the capture
+    expect(ids(mergeSnapshot(chat, snap([u('x1'), a('x2')], true)))).toEqual(['u1', 'a1', 'u2', 'a2', 'u3', 'a3', 'x1', 'x2']);
+    // the start is confirmed (e.g. the whole chat was on screen): a full replacement
+    expect(ids(mergeSnapshot(chat, { ...snap([u('x1'), a('x2')], true), startConfirmed: true }))).toEqual(['x1', 'x2']);
+    expect(ids(mergeSnapshot(chat, { ...snap([u('u2'), a('a2')], true), startConfirmed: true }))).toEqual(['u2', 'a2']);
   });
 
   it('refuses an empty complete capture, or one with questions but no answers', () => {
@@ -118,6 +129,28 @@ describe('mergeSnapshot', () => {
   });
 
   describe('readings that did not change', () => {
+    it("lets a stale tab re-read its old text without undoing an edit another tab read since (per-view readings)", () => {
+      const original = [u('u1'), a('a1', 'ORIGINAL')];
+      const A = { id: 'A', since: 1 };
+      const B = { id: 'B', since: 50 };
+      // tab A reads ORIGINAL
+      let reads = new Map(Object.entries(recordReads(new Map(), original, original, A, 10)));
+      // another device's edit is merged in
+      let chat = [u('u1'), a('a1', 'REMOTE EDIT')];
+      // a new tab B reads the edited text
+      const readB = { ...snap([u('u1'), a('a1', 'REMOTE EDIT')], false, true), view: B };
+      let r = mergeSnapshot(chat, readB, reads);
+      chat = r.ok ? r.messages : chat;
+      reads = new Map(Object.entries(recordReads(reads, readB.messages, chat, B, 60)));
+      expect(reads.get('a1')?.h).toBe(messageHash(a('a1', 'REMOTE EDIT')));
+      // the stale tab A reads its unchanged page again: still the edit
+      r = mergeSnapshot(chat, { ...snap(original, false, true), view: A }, reads);
+      expect(r.ok && r.messages[1]!.markdown).toBe('REMOTE EDIT');
+      // ...but a tab that never read it goes by the device's last reading: ORIGINAL is a change there
+      r = mergeSnapshot(chat, { ...snap(original, false, true), view: { id: 'C', since: 70 } }, reads);
+      expect(r.ok && r.messages[1]!.markdown).toBe('ORIGINAL');
+    });
+
     it('keeps a merged edit from another device while the page still shows what it showed', () => {
       const pageVersion = [u('u1'), a('a1', 'ORIGINAL')];
       const reads = readsOf(pageVersion);
@@ -135,7 +168,10 @@ describe('mergeSnapshot', () => {
     it('records each reading, keeping when a message was first read and by which views', () => {
       const before = new Map<string, PageRead>([['u1', { h: 'x', at: 5, v: ['T1'] }]]);
       const out = recordReads(before, [u('u1'), a('a1')], [u('u1'), a('a1')], { id: 'T2' }, 9);
-      expect(out).toEqual({ u1: { h: messageHash(u('u1')), at: 5, v: ['T2', 'T1'] }, a1: { h: messageHash(a('a1')), at: 9, v: ['T2'] } });
+      expect(out).toEqual({
+        u1: { h: messageHash(u('u1')), at: 5, v: ['T2', 'T1'], hv: { T2: messageHash(u('u1')) } },
+        a1: { h: messageHash(a('a1')), at: 9, v: ['T2'], hv: { T2: messageHash(a('a1')) } },
+      });
       // messages the chat no longer has are forgotten
       expect(Object.keys(recordReads(before, [a('a1')], [a('a1')], undefined, 9))).toEqual(['a1']);
     });

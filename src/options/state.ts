@@ -30,14 +30,14 @@ export function emit(topic: Topic): void {
 export async function loadAll(): Promise<unknown[]> {
   const [s, a, y] = await Promise.allSettled([request('settings/get', {}), request('auth/get', {}), request('sync/status', {})]);
   const errors: unknown[] = [];
-  if (s.status === 'fulfilled') app.settings = s.value;
+  if (s.status === 'fulfilled') setConfirmed(s.value);
   else errors.push(s.reason);
   if (a.status === 'fulfilled') app.auth = a.value;
   else errors.push(a.reason);
   if (y.status === 'fulfilled') app.sync = y.value;
   try {
     onSettingsChanged((next) => {
-      app.settings = next;
+      setConfirmed(next);
       emit('settings');
     });
   } catch {
@@ -52,7 +52,7 @@ export async function refreshAuth(): Promise<void> {
 }
 
 export async function refreshSettings(): Promise<void> {
-  app.settings = await request('settings/get', {});
+  setConfirmed(await request('settings/get', {}));
   emit('settings');
 }
 
@@ -65,18 +65,32 @@ export async function refreshSync(): Promise<void> {
   }
 }
 
+// Settings as last saved (or synced from elsewhere), and the changes still being saved. What the page
+// shows is always the saved settings with the pending changes on top, so a failed save can never
+// leave another change's value on screen.
+let confirmed: Settings = app.settings;
+const pending: Partial<Settings>[] = [];
+
+function setConfirmed(next: Settings): void {
+  confirmed = next;
+  app.settings = pending.reduce(applySettingsPatch, confirmed);
+}
+
 /** Apply a settings patch optimistically, then reconcile with what the background saved. */
 export async function patchSettings(patch: Partial<Settings>): Promise<Settings> {
-  const before = app.settings;
-  app.settings = applySettingsPatch(before, patch);
+  pending.push(patch);
+  setConfirmed(confirmed);
   emit('settings');
   try {
-    app.settings = await request('settings/set', { patch });
-    emit('settings');
-    return app.settings;
+    const saved = await request('settings/set', { patch });
+    pending.splice(pending.indexOf(patch), 1);
+    setConfirmed(saved);
+    return saved;
   } catch (e) {
-    app.settings = before;
-    emit('settings');
+    pending.splice(pending.indexOf(patch), 1);
+    setConfirmed(confirmed);
     throw e;
+  } finally {
+    emit('settings');
   }
 }

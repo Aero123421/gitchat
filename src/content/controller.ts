@@ -7,8 +7,12 @@
 // time, in the order they were read, so an older read can never arrive after a newer one.
 //
 // After a navigation the page may still show the previous chat for a moment (or keep a hidden copy
-// of it). The previous chat's message ids are remembered, and a read that still contains any of
-// them is not a read of the new chat: it waits until the new chat's messages are on the page.
+// of it). The previous chat's message ids are remembered, and a read made only of them is not a read
+// of the new chat: nothing is saved until a message of the new chat is on the page (however long
+// that takes — no time limit turns an old page into the new chat). A chat branched from the
+// previous one shares its first messages, so one new message is enough.
+//
+// The AI observer and the page watchers only run while a chat of an enabled service is shown.
 
 import { chatKey, type ChatKey, type ChatSnapshot, type ChatStatus, type Settings } from '../shared/types';
 import { EVENTS_PORT, request, type BackgroundEvent, type ContentCurrent, type RefreshResult, type SnapshotReason, type ToContent } from '../shared/protocol';
@@ -28,8 +32,8 @@ const STREAM_PACE_MS = 8000;
 const READY_TIMEOUT_MS = 20_000;
 /** How often the ids on the page are noted while a chat is shown (to recognise it after navigating). */
 const SAMPLE_MS = 1500;
-/** How long the previous chat's ids mark a read as stale at most (e.g. a chat branched from it shares them). */
-const STALE_MS = 30_000;
+/** How long init waits for the new chat to replace the previous one on the page before giving up. */
+const OWN_PAGE_WAIT_MS = 10_000;
 /** At most one automatic full read per visit of a chat in this period. */
 const AUTO_RESCAN_MS = 60_000;
 /** Abort reason when the tab moves to another chat: unlike Cancel, it does not undo a finished capture. */
@@ -80,8 +84,11 @@ export class Controller {
   private view = newView();
   /** Service message ids last seen on the page while the current chat was shown. */
   private sample: { chatId: string; ids: Set<string>; at: number } | null = null;
-  /** The previous chat's ids, until the new chat's own messages are on the page. */
-  private stale: { ids: Set<string>; until: number } | null = null;
+  /** The previous chat's ids, until a message of the new chat is on the page. */
+  private stale: { ids: Set<string> } | null = null;
+  /** Interval timers, cleared when the extension goes away under this script. */
+  private timers: number[] = [];
+  private watching = false;
   /** The last automatic full read: route generation and time. */
   private autoRescan = { gen: -1, at: -Infinity };
 
@@ -107,13 +114,44 @@ export class Controller {
     this.store.applySettings(this.settings);
     this.connect();
     this.listenToPopup();
-    this.observer.start();
-    this.adapter.watch?.(document);
     // Single-page apps change the URL without reloading: poll for it (content scripts cannot hook
     // the page's history API from their isolated world).
-    window.setInterval(() => void this.checkRoute(), 400);
-    window.setInterval(() => this.widget.setTheme(this.adapter.theme(document)), 1500);
+    this.timers.push(
+      window.setInterval(() => {
+        if (this.orphaned()) return;
+        void this.checkRoute();
+      }, 400),
+      window.setInterval(() => {
+        if (this.chatId) this.widget.setTheme(this.adapter.theme(document));
+      }, 1500),
+    );
     await this.checkRoute(true);
+  }
+
+  /** Watch the AI and the page only while a chat is shown (the route poll keeps running). */
+  private setWatching(on: boolean): void {
+    if (on === this.watching) return;
+    this.watching = on;
+    if (on) {
+      this.adapter.watch?.(document);
+      this.observer.start();
+    } else {
+      this.observer.stop();
+    }
+  }
+
+  /**
+   * The extension was reloaded or removed: this script can no longer reach it. Stop all work and
+   * take the widget off the page (the tab needs a reload to get the new version).
+   */
+  private orphaned(): boolean {
+    if (chrome.runtime?.id) return false;
+    for (const t of this.timers) clearInterval(t);
+    this.timers = [];
+    this.setWatching(false);
+    this.abort?.abort(new DOMException(NAVIGATED, 'AbortError'));
+    this.widget.hide();
+    return true;
   }
 
   // ---- background connection
@@ -129,7 +167,7 @@ export class Controller {
       this.port = null;
       // the service worker went to sleep or restarted: reconnect and re-announce the chat
       window.setTimeout(() => {
-        if (!chrome.runtime?.id) return;
+        if (this.orphaned()) return;
         this.connect();
         void this.checkRoute(true);
       }, 1000);
@@ -188,7 +226,10 @@ export class Controller {
   private statusSnapshot(): ChatStatus | null {
     if (!this.key || !this.chatId) return null;
     const s = this.store.state;
+    // a failure only this tab knows about (e.g. init could not read the chat) goes with it
+    const error = s.phase === 'error' && s.error ? { error: s.error } : {};
     return {
+      ...error,
       key: this.key,
       service: this.adapter.service,
       chatId: this.chatId,
@@ -234,7 +275,7 @@ export class Controller {
       this.view = newView();
       // until the new chat's messages show, the previous chat's still on the page are not its own
       const prev = this.chatId && this.sample?.chatId === this.chatId ? this.sample.ids : null;
-      this.stale = prev && chatId ? { ids: prev, until: performance.now() + STALE_MS } : null;
+      this.stale = prev && chatId ? { ids: prev } : null;
       this.sample = null;
       // the old chat's init cleans up on its own and no longer touches this tab's UI (a capture it
       // already finished is still saved: only Cancel takes that back)
@@ -248,6 +289,7 @@ export class Controller {
       this.store.switchTo(chatId ? chatKey(this.adapter.service, chatId) : '', null);
     }
     this.chatId = chatId;
+    this.setWatching(!!chatId);
     if (!chatId) {
       this.key = null;
       this.store.switchTo('', null);
@@ -287,19 +329,30 @@ export class Controller {
   }
 
   /**
-   * True while the page still shows the previous chat: a read with any of its ids. The guard ends
-   * once a read shows messages and none of them (the new chat is on the page), or after STALE_MS.
+   * True while the page may still show the previous chat: every message id read belongs to it (or
+   * nothing could be identified). The guard ends with the first read that holds a message of the new
+   * chat — a chat branched from the previous one shares its first ids, so one new id is enough.
+   * There is no time limit: an old page never turns into the new chat by waiting.
    */
   private showsPrevious(ids: readonly string[]): boolean {
     const st = this.stale;
     if (!st) return false;
-    if (performance.now() > st.until) {
+    if (ids.some((id) => !st.ids.has(id))) {
       this.stale = null;
       return false;
     }
-    if (ids.some((id) => st.ids.has(id))) return true;
-    if (ids.length) this.stale = null;
-    return false;
+    return true;
+  }
+
+  /** Waits (up to `maxMs`) until the page shows the route's own chat rather than the previous one. */
+  private async ownPage(route: Route, maxMs: number): Promise<boolean> {
+    const start = performance.now();
+    for (;;) {
+      if (!this.live(route)) return false;
+      if (!this.showsPrevious(this.pageIds())) return true;
+      if (performance.now() - start >= maxMs) return false;
+      await wait(250);
+    }
   }
 
   /** The site's "AI is working" signal right now (the observer only looks every so often). */
@@ -344,7 +397,7 @@ export class Controller {
     if (reason === 'answered' && busy) return;
     // one synchronous read: messages and the page's identity at the same moment
     const read = readPage(this.adapter, document);
-    if (!read.messages.length || this.showsPrevious(read.messages.map((m) => m.id))) return;
+    if (!read.messages.length || this.showsPrevious(read.serviceIds ?? [])) return;
     const view = this.view;
     // only a settled capture may drop turns that vanished (a 'sent' one is taken mid-change)
     const atEnd = reason !== 'sent' && !busy && this.observer.settled && isAtEnd(this.adapter, document);
@@ -450,6 +503,11 @@ export class Controller {
       }, 20_000);
       if (!this.live(route)) throw new DOMException('Cancelled', 'AbortError');
       this.store.applyStatus(started.status);
+      // right after a navigation the page may still show the previous chat: wait for this one
+      if (!(await this.ownPage(route, OWN_PAGE_WAIT_MS))) {
+        if (!this.live(route)) throw new DOMException('Cancelled', 'AbortError');
+        throw new InitIncompleteError('stale');
+      }
       const artifacts = this.settings.saveVisualizations ? this.adapter.artifacts?.bind(this.adapter) : undefined;
       const result = await captureFullHistory(this.adapter, document, {
         signal: abort.signal,
@@ -467,9 +525,9 @@ export class Controller {
       // a history without a single answer means the answers were not found: never save that as complete
       if (!messages.some((m) => m.role === 'assistant')) throw new InitIncompleteError('one-sided');
       // the previous chat's messages are not this chat's history
-      if (this.showsPrevious(messages.map((m) => m.id))) throw new InitIncompleteError('stale');
+      if (this.showsPrevious(this.pageIds())) throw new InitIncompleteError('stale');
       const read: PageRead = { messages, url: location.href.split('#')[0] ?? location.href, title: this.adapter.title(document), capturedAt: result.readAt };
-      const snapshot = makeSnapshot(this.adapter, route.chatId, read, messages, true, false, this.view);
+      const snapshot = makeSnapshot(this.adapter, route.chatId, read, messages, true, false, this.view, result.startConfirmed);
       // Cancel pressed while the background saves the capture is passed on. The background takes
       // them in order: a cancel that arrives first refuses the save; one that arrives after it
       // finds the chat saved. Either way the status of the later one is what stands.
@@ -573,6 +631,8 @@ function initError(e: unknown): string {
     if (e.reason === 'busy') return t('errInitBusy');
     if (e.reason === 'empty' || e.reason === 'one-sided') return t('errInitEmpty');
     if (e.reason === 'coverage') return t('errInitCoverage');
+    if (e.reason === 'stalled') return t('errInitStalled');
+    if (e.reason === 'stale') return t('errInitPrevChat');
     return t('errInitIncomplete');
   }
   const code = typeof e === 'object' && e && 'code' in e ? String((e as { code: unknown }).code) : '';

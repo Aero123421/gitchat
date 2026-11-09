@@ -12,6 +12,7 @@ import { createMark } from '../options/kit/mark';
 import { injectKitStyles } from '../options/kit/styles';
 import { copy, SERVICE_LINKS } from '../options/kit/util';
 import { refreshPage } from './refresh';
+import { availableActions } from '../shared/actions.js';
 
 const GRAPH_W = 284;
 const SERVICE_NAME: Record<ServiceId, string> = { chatgpt: 'ChatGPT', claude: 'Claude', gemini: 'Gemini' };
@@ -127,6 +128,9 @@ function chatView(tabId: number, cur: ContentCurrent & { chatId: string }, setti
   let status = initial;
   let busy: 'commit' | 'push' | 'track' | null = null;
   let error = '';
+  // a failure only the page knows (e.g. reading the history failed): the background's status never
+  // carries it, so keep showing it until the next action
+  let pageError = cur.status?.phase === 'error' ? (cur.status.error ?? '') : '';
   const graphBox = h('div', { class: 'p-graph' });
   const line = h('div', { class: 'p-line' });
   const actions = h('div', { class: 'p-actions' });
@@ -135,6 +139,7 @@ function chatView(tabId: number, cur: ContentCurrent & { chatId: string }, setti
   const run = async (kind: 'commit' | 'push', fn: () => Promise<ChatStatus | null>) => {
     busy = kind;
     error = '';
+    pageError = '';
     render();
     try {
       // stage what the page shows now; unless the tab confirms it did, committing could save stale data
@@ -153,8 +158,27 @@ function chatView(tabId: number, cur: ContentCurrent & { chatId: string }, setti
     }
   };
 
+  /** Ask the tab to start (or redo) a full read; the button is released whatever happens. */
+  const tabAction = async (type: 'content/init' | 'content/rescan') => {
+    busy = 'track';
+    error = '';
+    pageError = '';
+    render();
+    try {
+      const msg: ToContent = { gitchat: 1, type };
+      await chrome.tabs.sendMessage(tabId, msg);
+    } catch (e) {
+      error = errorText(e);
+    } finally {
+      busy = null;
+      render();
+    }
+    await refresh();
+  };
+
   function render(): void {
     const s = status;
+    const offered = availableActions(s, settings);
     // graph
     if (s.tracked && (s.commits.length || s.staged.length)) mount(graphBox, renderGraph(s, GRAPH_W));
     else mount(graphBox);
@@ -184,18 +208,7 @@ function chatView(tabId: number, cur: ContentCurrent & { chatId: string }, setti
             class: 'btn solid small',
             type: 'button',
             disabled: s.phase === 'capturing' || busy === 'track',
-            onClick: async () => {
-              busy = 'track';
-              render();
-              try {
-                const msg: ToContent = { gitchat: 1, type: 'content/init' };
-                await chrome.tabs.sendMessage(tabId, msg);
-              } catch (e) {
-                error = errorText(e);
-              }
-              busy = null;
-              await refresh();
-            },
+            onClick: () => void tabAction('content/init'),
           },
           s.phase === 'capturing' || busy === 'track' ? spinner() : icon('init'),
           h('span', null, t('track')),
@@ -204,7 +217,7 @@ function chatView(tabId: number, cur: ContentCurrent & { chatId: string }, setti
     } else {
       const staged = s.staged.length;
       const ahead = s.aheadTotal;
-      if (!settings.autoCommit)
+      if (offered.includes('commit'))
         items.push(
           h(
             'button',
@@ -220,7 +233,7 @@ function chatView(tabId: number, cur: ContentCurrent & { chatId: string }, setti
             staged ? h('span', { class: 'n' }, String(staged)) : null,
           ),
         );
-      if (!settings.autoPush) {
+      if (offered.includes('push')) {
         const sending = s.phase === 'pushing' || busy === 'push';
         items.push(
           h(
@@ -253,19 +266,7 @@ function chatView(tabId: number, cur: ContentCurrent & { chatId: string }, setti
             title: t('rescan'),
             'aria-label': t('rescan'),
             disabled: busy !== null || s.phase === 'pushing',
-            onClick: async () => {
-              busy = 'track';
-              error = '';
-              render();
-              try {
-                const msg: ToContent = { gitchat: 1, type: 'content/rescan' };
-                await chrome.tabs.sendMessage(tabId, msg);
-              } catch (e) {
-                error = errorText(e);
-              }
-              busy = null;
-              await refresh();
-            },
+            onClick: () => void tabAction('content/rescan'),
           },
           icon('refresh'),
         ),
@@ -294,7 +295,7 @@ function chatView(tabId: number, cur: ContentCurrent & { chatId: string }, setti
     }
     mount(actions, items);
 
-    const err = error || (s.phase === 'error' ? s.error ?? t('errGeneric') : '');
+    const err = error || (s.phase === 'error' ? s.error ?? t('errGeneric') : '') || pageError;
     mount(note, err ? h('div', { class: 'note err', role: 'alert' }, icon('alert'), h('span', null, err)) : null);
   }
 

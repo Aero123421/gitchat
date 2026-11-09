@@ -481,5 +481,11 @@
   },
   "openFullSize": {
     "message": "Open full size"
+  },
+  "errInitStalled": {
+    "message": "Reading the chat stopped moving, so it was not saved. Scroll the chat a little and try again."
+  },
+  "errInitPrevChat": {
+    "message": "The page still showed the previous chat, so nothing was saved. Wait until this chat has loaded and try again."
   }
 }

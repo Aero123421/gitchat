@@ -651,8 +651,22 @@ describe('engine: round-3 cases', () => {
     expect(s.staged).toEqual([]);
     // a capture taken mid-turn is just not applied
     expect((await t.engine.snapshot(snap([user('u1b')], { capturedAt: at(11) }), 'sent')).fullRead).toBeUndefined();
-    const full = await track(t, [user('u1b'), bot('a1b')], { capturedAt: at(12) });
+    // the complete read of the (short, fully visible) chat settles it
+    const full = await track(t, [user('u1b'), bot('a1b')], { capturedAt: at(12), startConfirmed: true });
     expect(full.staged.map((x) => `${x.id}:${x.kind}`)).toEqual(['u1b:text', 'a1b:text', 'u1:removed', 'a1:removed']);
+  });
+
+  it('keeps older saved messages when a rescan could not confirm it reached the start of the chat', async () => {
+    const t = await setup();
+    const many = Array.from({ length: 48 }, (_, i) => [user(`u${i}`), bot(`a${i}`)]).flat();
+    await track(t, many, { capturedAt: at(10) });
+    await t.engine.commit(KEY);
+    // the site only loaded the last 16 turns before the rescan stopped waiting
+    const s = await track(t, many.slice(-32), { capturedAt: at(11) });
+    expect(s.staged).toEqual([]);
+    // with the start confirmed, a shorter history does replace
+    const r = await track(t, many.slice(-4), { capturedAt: at(12), startConfirmed: true });
+    expect(r.staged.filter((x) => x.kind === 'removed')).toHaveLength(92);
   });
 
   it('lets a cancel that arrives during the repository lookup win: nothing is tracked or committed', async () => {
@@ -703,5 +717,85 @@ describe('engine: round-3 cases', () => {
     expect(s.staged).toEqual([]);
     await t.engine.push(KEY);
     expect(t.fake.fileAt(t.repo, path)).toContain('(2026-11-01-shared--c1.assets/chart.html)');
+  });
+});
+
+describe('engine: waiting, recovery and status', () => {
+  const at = (h: number) => `2026-11-09T${String(h).padStart(2, '0')}:00:00.000Z`;
+  const depsOf = (t: T) => (t.engine as unknown as { deps: ConstructorParameters<typeof Engine>[0] }).deps;
+  const rateLimitOnce = (t: T) =>
+    t.fake.inject(
+      (r) => r.method === 'GET' && r.url.pathname.endsWith('/git/ref/heads/main'),
+      () => new Response(JSON.stringify({ message: 'rate limited' }), { status: 429, headers: { 'retry-after': '600', 'content-type': 'application/json' } }),
+      2, // the init's repository lookup, then the automatic push
+    );
+  /** An automatic push hit a 10-minute rate limit; returns the clock and the engine that saw it. */
+  async function rateLimited(t: T) {
+    const clock = { now: Date.parse(at(10)) };
+    const alarms: number[] = [];
+    const engine = new Engine({ ...depsOf(t), now: () => clock.now, scheduleRetry: (ms) => alarms.push(ms), clearRetry: () => undefined });
+    rateLimitOnce(t);
+    const { initId } = await engine.initStart(KEY);
+    await engine.initDone(snap([user('u1'), bot('a1')], { complete: true, capturedAt: at(10) }), initId);
+    await vi.waitFor(() => expect(alarms).toContain(600_000));
+    return clock;
+  }
+
+  it('keeps waiting out a rate limit after the worker restarts', async () => {
+    const t = await setup({ autoCommit: true, autoPush: true });
+    const clock = await rateLimited(t);
+    const before = t.fake.commitCount(t.repo);
+    // the worker is restarted a minute later
+    clock.now += 60_000;
+    const alarms: number[] = [];
+    const restarted = new Engine({ ...depsOf(t), now: () => clock.now, scheduleRetry: (ms) => alarms.push(ms), clearRetry: () => undefined });
+    await restarted.resume();
+    expect(alarms).toEqual([540_000]);
+    await restarted.retry(); // an early wake-up does not push either
+    expect(t.fake.commitCount(t.repo)).toBe(before);
+    // once the wait is over, the automatic push goes
+    clock.now += 540_000;
+    await restarted.retry();
+    expect(t.fake.commitCount(t.repo)).toBeGreaterThan(before);
+    expect((await restarted.syncStatus()).pending).toBe(0);
+  });
+
+  it('still pushes right away when asked to, during the wait', async () => {
+    const t = await setup({ autoCommit: true, autoPush: true });
+    const clock = await rateLimited(t);
+    clock.now += 60_000;
+    const restarted = new Engine({ ...depsOf(t), now: () => clock.now, scheduleRetry: () => undefined, clearRetry: () => undefined });
+    await restarted.push(KEY);
+    expect((await restarted.syncStatus()).pending).toBe(0);
+    // and the wait is over: the next automatic push needn't wait
+    const meta = await depsOf(t).db.getMeta<{ nextAllowedAt?: number }>('sync');
+    expect(meta?.nextAllowedAt).toBeUndefined();
+  });
+
+  it('recovers from "choose a repository first" once one is chosen', async () => {
+    const t = await setup({ autoCommit: true, autoPush: true, repo: null });
+    const { initId } = await t.engine.initStart(KEY);
+    await t.engine.initDone(snap([user('u1'), bot('a1')], { complete: true }), initId);
+    await vi.waitFor(async () => expect((await t.engine.syncStatus()).lastError).toBeTruthy());
+    const prev = { ...DEFAULT_SETTINGS, autoCommit: true, autoPush: true, repo: null };
+    const repo = { owner: 'octo', name: 'chats', branch: 'main' };
+    t.setSettings({ repo });
+    await t.engine.settingsChanged(prev, { ...prev, repo });
+    await vi.waitFor(async () => expect((await t.engine.syncStatus()).pending).toBe(0));
+    expect((await t.engine.syncStatus()).lastError).toBeUndefined();
+    expect(t.fake.paths(t.repo).some((p) => p.startsWith('claude/'))).toBe(true);
+  });
+
+  it('reports what is staged after every change, even several in the same millisecond', async () => {
+    const t = await setup();
+    const engine = new Engine({ ...depsOf(t), now: () => Date.parse(at(10)) });
+    const { initId } = await engine.initStart(KEY);
+    await engine.initDone(snap([user('u1'), bot('a1')], { complete: true, capturedAt: at(10) }), initId);
+    expect((await engine.status(KEY)).staged.map((x) => x.id)).toEqual(['u1', 'a1']);
+    await engine.commit(KEY);
+    expect((await engine.status(KEY)).staged).toEqual([]);
+    await engine.snapshot(snap([user('u1'), bot('a1', 'changed')], { capturedAt: at(10) }), 'manual');
+    expect((await engine.status(KEY)).staged.map((x) => x.id)).toEqual(['a1']);
+    expect((await engine.status(KEY)).staged.map((x) => x.id)).toEqual(['a1']);
   });
 });

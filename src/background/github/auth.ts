@@ -76,7 +76,10 @@ export class DeviceFlow {
     if (!clientId) {
       throw new GitchatError('"Sign in with GitHub" is not available in this build. Use a personal access token, or set an OAuth client ID under Advanced.', 'no-client-id');
     }
+    const generation = this.generation;
     const data = await this.post(DEVICE_CODE_URL, { client_id: clientId, scope: SCOPE });
+    // cancelled (or another sign-in started) while GitHub answered: this code must not become pending
+    if (generation !== this.generation) throw new GitchatError('The sign-in was cancelled.', 'cancelled');
     if (!data.device_code || !data.user_code || !data.verification_uri) throw signInError(data);
     const expiresIn = Number(data.expires_in) || 900;
     const pending: Pending = { id: crypto.randomUUID(), clientId, deviceCode: data.device_code, interval: Number(data.interval) || 5, expiresAt: this.now() + expiresIn * 1000 };

@@ -38,12 +38,17 @@ chat page DOM ──adapter──► CapturedMessage[] ──► ChatSnapshot �
   are an **upsert**: they may hold only the part of a long chat that is in the DOM, so absent messages
   are kept and new ids are added. A live snapshot with `atEnd: true` (the capture reaches the last
   message) that shows unknown ids after a known one is an edit or a regenerated answer: it is
-  authoritative from its first known message, and the turns that vanished are dropped. Only init
-  snapshots (`complete: true`) replace the whole list; an empty or answer-less one is refused.
+  authoritative from its first known message, and the turns that vanished are dropped. Init
+  snapshots (`complete: true`) are authoritative from their first message on; they replace the whole
+  list only when the capture is known to start at the chat's first message (`startConfirmed`: the
+  transcript fit on screen). Otherwise older saved messages stay (older history may not have loaded),
+  and a capture that shares nothing with the saved chat is added next to it. An empty or answer-less
+  complete snapshot is refused.
 - **Page reads**: per message, the chat record keeps what this device last read on the page
-  (`pageReads`: content hash, when it was first read, the page views that read it). A message the page
-  still shows exactly as read before keeps the stored version, which may hold another device's edit
-  merged since. Each live snapshot names its page view (`view`: a random id per tab document and
+  (`pageReads`: content hash, when it was first read, the page views that read it, and each of those
+  views' own last reading). A message a page view still shows exactly as that view read it before
+  keeps the stored version, which may hold another device's edit merged since; a view that never read
+  it compares with the device's latest reading. Each live snapshot names its page view (`view`: a random id per tab document and
   visit of the chat, and when the visit started); it may only drop messages that view could have
   shown — read on this device before the visit started, or by the view itself. Messages from another
   device's copy, or read later by another tab, are never dropped by their absence.
@@ -55,9 +60,10 @@ chat page DOM ──adapter──► CapturedMessage[] ──► ChatSnapshot �
 - **Capture order**: `capturedAt` is the time the page was read (before any async enrichment). The
   content script sends captures in read order, and the background ignores one older than the last it
   applied for that chat.
-- **Right chat, right turn**: after a navigation, a read that still contains any of the previous
-  chat's message ids is ignored (the page, or a hidden copy of it, still shows the old chat; at most
-  30 s). An `answered` capture re-checks the site's "AI is working" signal right before reading, so it
+- **Right chat, right turn**: after a navigation, a read whose site message ids all belong to the
+  previous chat (or that has none) is ignored: the page, or a hidden copy of it, still shows the old
+  chat. One id the old chat did not have marks the new one, so a chat branched from the old one is
+  accepted. There is no time limit; init waits up to 10 s for the new chat and then fails. An `answered` capture re-checks the site's "AI is working" signal right before reading, so it
   never takes the next turn's beginning. Before Commit/Push, the popup needs the tab's explicit
   `{ok: true}` to its refresh (no reply, a timeout of 8 s or a malformed reply stop the action).
 - **Snapshot reasons**: the content script sends `sent` when the AI starts working (the user's
@@ -137,7 +143,10 @@ headings outside code fences.
 - On a non-fast-forward rejection: re-read the remote head and replay the local commits on top
   (rebase), then retry (bounded attempts).
 - A `409 Conflict` on the ref update is treated like a non-fast-forward. Automatic pushes retry with
-  backoff after the immediate attempts.
+  backoff after the immediate attempts. The wait (rate-limit reset or backoff) and the attempt count
+  are stored, so a restarted service worker does not push early; a manual push does not wait, and a
+  successful push clears them. Choosing or changing the repository clears the previous sync error and
+  pushes waiting commits when auto-push is on.
 - If the remote copy of a chat file changed since our base, the two are merged **three-way** per
   message id against the base (`baseRefs`: the message hashes of the file as of our last push or
   adoption): a message only one side changed takes that side's version; a message both changed takes
@@ -193,6 +202,18 @@ virtualized list visualizations are serialized at each step), restores the scrol
 one complete snapshot. If loading never settles within 10 minutes, init fails instead of saving a
 partial history. If the AI is still answering, init waits for the answer and re-reads the end.
 Progress is reported as: loading older messages (count) → reading (0–100%). It can be cancelled.
+
+- A message row counts as read only once its body has content; a row whose body renders late is
+  visited again (twice at most) before it counts as an empty message. A row never seen fails the
+  coverage check.
+- Reading that makes no progress (no scrolling, no new messages) for 25 s fails as stalled.
+- The snapshot says `startConfirmed` only when the whole transcript fit on screen once loading
+  stopped, or the chat has at most 8 messages (no site loads so few in batches). The background then
+  may replace everything; otherwise saved messages above the capture stay.
+- A failure stays visible on the widget (its panel opens even for an untracked chat) and in the
+  popup until the next action.
+- The content script watches the page (AI observer, card clicks, theme) only while a chat of an
+  enabled service is shown, and shuts itself down when the extension is reloaded or removed.
 
 An init session is owned by one tab: `chat/init/start` returns an `initId` that progress, done and
 cancel must carry. A second tab gets `busy`; a session whose tab goes away (port closed, or no
