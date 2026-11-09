@@ -44,3 +44,14 @@ describe('claude adapter (live-site fixtures)', () => {
     expect(claude.chatId(new URL('https://claude.ai/new'))).toBeNull();
   });
 });
+
+describe('claude row positions', () => {
+  it('reports the position of every row, also rows that are not messages', () => {
+    load('long-top.html');
+    const positions = claude.rowPositions!(document);
+    expect(positions.length).toBeGreaterThan(0);
+    const msgs = claude.messages(document);
+    expect(msgs.every((m) => claude.positionOf!(m) !== null)).toBe(true);
+    expect(positions).toEqual(expect.arrayContaining(msgs.map((m) => claude.positionOf!(m)!)));
+  });
+});

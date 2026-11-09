@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assetDir, chatPath, encodePath, findChatFile, localDate, shortId, slugify } from '../../src/background/paths';
+import { assetDir, chatFileCandidates, chatPath, encodePath, freePath, localDate, repoId, shortId, slugify } from '../../src/background/paths';
 
 describe('slugify', () => {
   it('lower-cases and joins words with dashes', () => {
@@ -36,10 +36,22 @@ describe('paths', () => {
     expect(shortId('???')).toMatch(/^[a-z0-9]{1,8}$/);
   });
 
-  it('finds a chat file written by any device by its id suffix', () => {
-    const paths = ['README.md', 'claude/2026-01-02-old-title--1f2e3d4c.md', 'claude/x--1f2e3d4c.assets/viz.html', 'gemini/2026-01-02-a--1f2e3d4c.md'];
-    expect(findChatFile(paths, 'claude', '1f2e3d4c-aaaa')).toBe('claude/2026-01-02-old-title--1f2e3d4c.md');
-    expect(findChatFile(paths, 'chatgpt', '1f2e3d4c-aaaa')).toBeUndefined();
+  it('lists the files that may belong to a chat, by id suffix', () => {
+    const paths = ['README.md', 'claude/2026-01-02-old-title--1f2e3d4c.md', 'claude/x--1f2e3d4c.assets/viz.html', 'gemini/2026-01-02-a--1f2e3d4c.md', 'claude/b--1f2e3d4c-aaaa.md', 'claude/c--1f2e3d4c-bbbb.md'];
+    expect(chatFileCandidates(paths, 'claude', '1f2e3d4c-aaaa')).toEqual(['claude/b--1f2e3d4c-aaaa.md', 'claude/2026-01-02-old-title--1f2e3d4c.md']);
+    expect(chatFileCandidates(paths, 'chatgpt', '1f2e3d4c-aaaa')).toEqual([]);
+    expect(chatFileCandidates(['claude/a--c1.md'], 'claude', 'c1')).toEqual(['claude/a--c1.md']);
+  });
+
+  it('uses a longer id suffix when another chat has the name', () => {
+    const created = new Date(2026, 10, 9, 12).toISOString();
+    const taken = new Set(['claude/2026-11-09-t--deadbeef.md']);
+    expect(freePath('claude', 'T', 'deadbeef-1111-2222', created, (p) => taken.has(p))).toBe('claude/2026-11-09-t--deadbeef-1111-22.md');
+  });
+
+  it('identifies a repository by owner, name and branch', () => {
+    expect(repoId({ owner: 'Octo', name: 'Chats', branch: 'main' })).toBe('octo/chats@main');
+    expect(repoId(null)).toBeNull();
   });
 
   it('derives the asset folder and encodes URL paths', () => {

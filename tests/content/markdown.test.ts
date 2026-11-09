@@ -65,3 +65,67 @@ describe('toMarkdown', () => {
     expect(r.kinds).toContain('viz');
   });
 });
+
+describe('normalize keeps fenced code intact', () => {
+  it('only closes a fence with one at least as long as the opener', () => {
+    const r = md('<pre><code>```\nnested\n\n\n\nkeep these blank lines\n```</code></pre><p>after</p>');
+    expect(r.markdown).toContain('nested\n\n\n\nkeep these blank lines');
+    expect(r.markdown.endsWith('````\n\nafter')).toBe(true);
+  });
+
+  it('protects fences inside list items and quotes', () => {
+    const r = md('<ul><li><p>step</p><pre><code class="language-sh">a\n\n\n\nb</code></pre></li></ul><blockquote><pre><code>x\n\n\n\ny</code></pre></blockquote>');
+    expect(r.markdown).toMatch(/ {2}```sh\n {2}a\n\n\n\n {2}b\n {2}```/);
+    expect(r.markdown).toMatch(/> ```\n> x\n>\n>\n>\n> y\n> ```/);
+  });
+});
+
+describe('plain text stays plain', () => {
+  it('escapes text that would turn into HTML or emphasis', () => {
+    const r = md('<p>Use &lt;Widget&gt; and *literal* or __init__ here</p>');
+    expect(r.markdown).toBe('Use \\<Widget> and \\*literal\\* or \\_\\_init\\_\\_ here');
+  });
+
+  it('leaves ordinary prose alone', () => {
+    const r = md('<p>snake_case_name, a * b, array[0], see [1], costs $5, x &lt; y</p>');
+    expect(r.markdown).toBe('snake_case_name, a * b, array[0], see [1], costs $5, x < y');
+  });
+
+  it('escapes paired dollars, backticks and link-like brackets', () => {
+    const r = md('<p>from $5 to $10, `tick`, [text](not a link)</p>');
+    expect(r.markdown).toBe('from \\$5 to \\$10, \\`tick\\`, [text\\](not a link)');
+  });
+
+  it('escapes line starts that would become a heading, list or quote', () => {
+    expect(md('<p>1. not a list</p>').markdown).toBe('1\\. not a list');
+    expect(md('<p># not a heading</p>').markdown).toBe('\\# not a heading');
+    expect(md('<p>- not a bullet<br>&gt; not a quote</p>').markdown).toBe('\\- not a bullet  \n\\> not a quote');
+  });
+
+  it('encodes parentheses in link destinations', () => {
+    const r = md('<p><a href="https://example.com/a)b(c">go</a></p>');
+    expect(r.markdown).toBe('[go](https://example.com/a%29b%28c)');
+  });
+
+  it('lets a render hook report what it found', () => {
+    const r = md('<div data-x="1">raw</div>', { render: (el: Element, _c: unknown, kind: (k: string) => void) => (el.hasAttribute('data-x') ? (kind('code'), '```\nraw\n```') : null) });
+    expect(r.kinds).toContain('code');
+  });
+});
+
+describe('code fences (N14 / R2-M8)', () => {
+  it('chooses a fence longer than any backtick run, also indented ones', () => {
+    const code = 'before\n   ````\n\n\n\nafter';
+    const r = md(`<pre><code>${code}</code></pre>`);
+    expect(r.markdown).toBe(`\`\`\`\`\`\n${code}\n\`\`\`\`\``);
+  });
+
+  it('does the same for ChatGPT code widgets', async () => {
+    const { chatgpt } = await import('../../src/content/adapters/chatgpt');
+    const el = document.createElement('div');
+    el.innerHTML = '<div data-chatgpt-copy-code="x"></div>';
+    el.firstElementChild!.setAttribute('data-chatgpt-copy-code', 'a\n  ```\n\n\n\nb');
+    const r = toMarkdown(el, chatgpt.markdown);
+    expect(r.markdown).toBe('````\na\n  ```\n\n\n\nb\n````');
+  });
+});

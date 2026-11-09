@@ -267,7 +267,7 @@
     "message": "リポジトリ名"
   },
   "repoNotEmptyWarn": {
-    "message": "このリポジトリにはすでにファイルがあります。gitchat はその横にフォルダを追加します。"
+    "message": "このリポジトリにはすでにファイルがあります。gitchat が使えるのは、gitchat の保存先として使われているリポジトリだけです。"
   },
   "repoPrivate": {
     "message": "非公開"
@@ -289,12 +289,6 @@
   },
   "retry": {
     "message": "もう一度"
-  },
-  "saveImages": {
-    "message": "画像を保存"
-  },
-  "saveImagesHint": {
-    "message": "ダウンロードできる場合、チャット内の画像も一緒に保存します。"
   },
   "saveVisualizations": {
     "message": "可視化を保存"
@@ -386,9 +380,6 @@
   "syncState": {
     "message": "同期"
   },
-  "tokenHelp": {
-    "message": "Contents の読み書きだけを許可し、チャット用リポジトリに限定した fine-grained トークンを作成してください。トークンはこの端末にだけ保存されます。"
-  },
   "tokenTitle": {
     "message": "個人アクセストークン"
   },
@@ -415,5 +406,62 @@
   },
   "errRepoNotEmpty": {
     "message": "このリポジトリには gitchat 以外のファイルがあります。空のリポジトリを選ぶか、gitchat に新しく作らせてください。"
+  },
+  "tokenStepRepo": {
+    "message": "チャット用に、空の非公開リポジトリを作成します。"
+  },
+  "createRepoOnGitHub": {
+    "message": "GitHub でリポジトリを作成"
+  },
+  "tokenStepToken": {
+    "message": "fine-grained トークンを作成します。Repository access で Only select repositories を選び、そのリポジトリを指定してください。Contents の権限は入力済みです。"
+  },
+  "tokenStepPaste": {
+    "message": "トークンをここに貼り付けます。トークンはこの端末にだけ保存されます。"
+  },
+  "repoPatNote": {
+    "message": "対象リポジトリを限定したトークンでは、リポジトリを作成できません。GitHub でリポジトリを作成してトークンにアクセスを許可し、「既存のリポジトリ」から選んでください。"
+  },
+  "repoMissingHint": {
+    "message": "一覧にない場合は、トークンがそのリポジトリにアクセスできるか確認するか、上の欄に owner/name を入力してください。"
+  },
+  "widgetName": {
+    "message": "gitchat: このチャットの保存状態"
+  },
+  "errInitIncomplete": {
+    "message": "チャット全体を読み込めなかったため、保存しませんでした。もう一度お試しください。"
+  },
+  "errInitBusy": {
+    "message": "回答の生成が続いています。終わってからもう一度保存を始めてください。"
+  },
+  "errInitEmpty": {
+    "message": "このチャットに回答が見つからなかったため、保存しませんでした。"
+  },
+  "errInitOtherTab": {
+    "message": "このチャットは別のタブで保存中です。"
+  },
+  "errInitStale": {
+    "message": "この取り込みはキャンセルまたは置き換えられました。もう一度始めてください。"
+  },
+  "lookUpTyped": {
+    "message": "$REPO$ を確認",
+    "placeholders": {
+      "repo": {
+        "content": "$1",
+        "example": "octocat/ai-chats"
+      }
+    }
+  },
+  "errRefresh": {
+    "message": "チャットを読み取れなかったため、コミットもプッシュもしませんでした。"
+  },
+  "rescan": {
+    "message": "チャット全体を読み直す"
+  },
+  "errCaptureFailed": {
+    "message": "最新のメッセージを読み取れなかったため、コミットもプッシュもしませんでした。もう一度お試しください。"
+  },
+  "errInitCoverage": {
+    "message": "一部のメッセージを読み取れなかったため、保存しませんでした。もう一度お試しください。"
   }
 }

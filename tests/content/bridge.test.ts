@@ -37,7 +37,38 @@ describe('UiStore (status → widget events)', () => {
     store.applyStatus(status({ commits: [{ id: 'k1', n: 1, t: 1, pushed: false }], aheadTotal: 1 }));
     store.applyStatus(status({ commits: [{ id: 'k1', n: 1, t: 1, pushed: false }], aheadTotal: 1, phase: 'pushing' }));
     store.applyStatus(status({ commits: [{ id: 'k1', n: 1, t: 1, pushed: true }], aheadTotal: 0 }));
-    expect(events.map(([t]) => t).filter((t) => t !== 'status')).toEqual(['committed', 'pushStart', 'pushed']);
+    expect(events.map(([t]) => t).filter((t) => t !== 'status')).toEqual(['committed', 'pushStart', 'pushed', 'pushEnd']);
+    expect(events.find(([t]) => t === 'pushEnd')?.[1]).toEqual({ ok: true, pushed: 1 });
+  });
+
+  it('ends a push that sent nothing (every commit superseded) with pushEnd', () => {
+    const { store, events } = setup(status({ commits: [{ id: 'k1', n: 1, t: 1, pushed: false }], aheadTotal: 1 }));
+    store.applyStatus(status({ commits: [{ id: 'k1', n: 1, t: 1, pushed: false }], aheadTotal: 1, phase: 'pushing' }));
+    store.applyStatus(status({ commits: [], aheadTotal: 0 }));
+    expect(events.map(([t]) => t).filter((t) => t !== 'status')).toEqual(['pushStart', 'pushEnd']);
+    expect(events.find(([t]) => t === 'pushEnd')?.[1]).toEqual({ ok: true, pushed: 0 });
+  });
+
+  it('ends a failed push with error, then pushEnd ok:false', () => {
+    const { store, events } = setup(status({ commits: [{ id: 'k1', n: 1, t: 1, pushed: false }], aheadTotal: 1, phase: 'pushing' }));
+    store.applyStatus(status({ commits: [{ id: 'k1', n: 1, t: 1, pushed: false }], aheadTotal: 1, phase: 'error', error: 'offline' }));
+    expect(events.map(([t]) => t).filter((t) => t !== 'status')).toEqual(['error', 'pushEnd']);
+    expect(events.find(([t]) => t === 'pushEnd')?.[1]).toEqual({ ok: false, pushed: 0 });
+  });
+
+  it('follows the global pending count, so Push works in a clean tab', () => {
+    const { store, events } = setup(status());
+    store.setAhead(3);
+    expect(store.ahead).toBe(3);
+    expect(events.at(-1)?.[0]).toBe('status');
+  });
+
+  it('shows an init failure on an untracked chat', () => {
+    const { store, events } = setup(status({ tracked: false }));
+    store.initFailed('Could not load the whole chat');
+    expect(store.state.phase).toBe('error');
+    expect(store.state.error).toBe('Could not load the whole chat');
+    expect(events.map(([t, d]) => `${t}:${d.action ?? ''}`)).toContain('error:init');
   });
 
   it('reports captured when a chat becomes tracked', () => {
@@ -46,13 +77,20 @@ describe('UiStore (status → widget events)', () => {
     expect(events[0]?.[0]).toBe('captured');
   });
 
-  it('refuses a commit with nothing staged and a push with nothing pending', () => {
+  it('hands commit and push to the controller, which re-reads the page first and may answer nope', () => {
     const { store, actions, events } = setup(status());
     store.commit();
     store.push();
+    expect(actions.commit).toHaveBeenCalled();
+    expect(actions.push).toHaveBeenCalled();
+    store.nope('commit');
+    expect(events.map(([t, d]) => `${t}:${d.action}`)).toEqual(['nope:commit']);
+  });
+
+  it('does not commit an untracked chat or during init', () => {
+    const { store, actions } = setup(status({ tracked: false }));
+    store.commit();
     expect(actions.commit).not.toHaveBeenCalled();
-    expect(actions.push).not.toHaveBeenCalled();
-    expect(events.map(([t, d]) => `${t}:${d.action}`)).toEqual(['nope:commit', 'nope:push']);
   });
 
   it('push commits staged work too (it is allowed with staged items only)', () => {

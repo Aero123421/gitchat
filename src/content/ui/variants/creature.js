@@ -18,7 +18,7 @@
 //   git: gulps on commit, watches its dots leave on push, shivers then eyes the button on
 //     error, shakes its head when there is nothing to do, nods when a setting changes.
 
-import { Spring, onFrame, clamp, smooth, lerp } from '../core/spring.js';
+import { Spring, onFrame, clamp, smooth, lerp, FULL, moving, motion, wake as wakeFrames } from '../core/spring.js';
 import { pointer } from '../core/pointer.js';
 import { glassCSS } from '../core/glass.js';
 import { createPanel, panelCSS } from '../core/panel.js';
@@ -60,6 +60,9 @@ const css = `
 .flyd { fill: var(--body); stroke: var(--edge-c); stroke-width: .7; }
 .prog-t { fill: none; stroke: var(--ink-4); stroke-width: 1; }
 .prog { fill: none; stroke: var(--accent); stroke-width: 1.4; stroke-linecap: round; }
+.kb { all: unset; position: absolute; left: ${HX - R0 - 4}px; top: ${HY - R0 - 4}px; width: ${(R0 + 4) * 2}px; height: ${(R0 + 4) * 2}px;
+  border-radius: 50%; pointer-events: none; }
+.kb:focus-visible { outline: 1.5px solid var(--accent); outline-offset: 2px; }
 .count { position: absolute; left: 0; top: 0; font: 500 10.5px/1 var(--mono); color: var(--ink-2); font-variant-numeric: tabular-nums;
   white-space: nowrap; pointer-events: none; opacity: 0; transform: translateX(-50%); }
 `;
@@ -68,6 +71,7 @@ export function mountCreature(host, store, options = {}) {
   const root = host.attachShadow({ mode: 'open' });
   setHTML(root, `<style>${glassCSS}${panelCSS}${actionsCSS}${css}</style>
   <div class="box">
+    <button class="kb" type="button"></button>
     <div class="frost"></div>
     <svg class="sl" viewBox="0 0 ${BOX} ${BOX}">
       <defs>
@@ -535,12 +539,17 @@ export function mountCreature(host, store, options = {}) {
         return r ? { x: r.x, y: r.y } : { x: geo.cx, y: geo.cy - 80 };
       }, 900);
       later(800, () => setMood('content', 900));
+    } else if (type === 'pushEnd') {
+      // also ends a push that sent nothing (everything was already on GitHub)
+      sqx.set(1);
+      sqy.set(1);
     } else if (type === 'error') {
       sqx.set(1);
       sqy.set(1);
       acts.shiver();
-      // then glance at the push button
-      later(600, () => follow(() => ({ x: geo.cx + BTN / 2 + BTN_GAP / 2, y: geo.btnY + BTN / 2 }), 900));
+      // then glance at the button that failed: start (init) or push
+      const at = d?.action === 'init' ? () => ({ x: geo.cx, y: geo.btnY + BTN / 2 }) : () => ({ x: geo.cx + BTN / 2 + BTN_GAP / 2, y: geo.btnY + BTN / 2 });
+      later(600, () => follow(at, 900));
     } else if (type === 'nope') {
       acts.shake();
     } else if (type === 'settings') {
@@ -584,6 +593,7 @@ export function mountCreature(host, store, options = {}) {
     lastScroll.set(el, el.scrollTop);
     if (!dy) return;
     onActivity();
+    wakeFrames(900);
     scrollImpulse += -dy * 3.5;
     look(-0.7, dy < 0 ? -0.85 : 0.75, 450);
   };
@@ -594,6 +604,7 @@ export function mountCreature(host, store, options = {}) {
     const el = e.composedPath()[0];
     if (!(el instanceof Element) || !el.matches('input, textarea, [contenteditable=""], [contenteditable="true"]')) return;
     onActivity();
+    wakeFrames(1800);
     const r = el.getBoundingClientRect();
     lastInputRect = r;
     follow(() => {
@@ -657,14 +668,30 @@ export function mountCreature(host, store, options = {}) {
   hit.addEventListener('pointerup', release);
   hit.addEventListener('pointercancel', release);
 
+  // keyboard: a focusable handle over the body (pointer input goes to the SVG hit area)
+  const kb = $('.kb');
+  kb.setAttribute('aria-label', options.label?.('widgetName') ?? 'gitchat');
+  kb.addEventListener('click', () => {
+    wakeFrames();
+    if (panelOpen) closePanel();
+    else if (!store.state.tracked || store.state.phase === 'capturing') {
+      acts.nod();
+      actions.focusFirst();
+    } else openPanel(true);
+  });
+
   const bodyRect = () => ({ left: innerWidth - BOX + bx.value - R0, top: anchor.value - HY + by.value - R0, width: R0 * 2, height: R0 * 2 });
-  function openPanel() {
+  function openPanel(focus = false) {
     panelOpen = true;
-    panel.open(bodyRect(), { right: BOX - HX + R0 + 14, centerY: anchor.value });
+    panel.open(bodyRect(), { right: BOX - HX + R0 + 14, centerY: anchor.value }, { focus });
   }
   function closePanel() {
     if (!panel.isOpen) return;
-    panel.close(bodyRect()).then(() => (panelOpen = false));
+    const hadFocus = panel.el.contains(root.activeElement);
+    panel.close(bodyRect()).then(() => {
+      panelOpen = false;
+      if (hadFocus) kb.focus();
+    });
   }
 
   // ---- frame
@@ -715,7 +742,8 @@ export function mountCreature(host, store, options = {}) {
     // AI thinking: a little taller, head slowly tilting side to side
     const thinking = aiPhase === 'thinking' && !sleeping;
     const streaming = aiPhase === 'streaming' && !sleeping;
-    tilt.set(thinking ? Math.sin(t * 0.5) * 5 : 0);
+    const still = motion.reduced;
+    tilt.set(thinking && !still ? Math.sin(t * 0.5) * 5 : 0);
     poseX.set(thinking ? 0.97 : 1);
     poseY.set(thinking ? 1.04 : 1);
     poseX.step(dt);
@@ -726,7 +754,7 @@ export function mountCreature(host, store, options = {}) {
 
     // body
     breathPh += dt * (sleeping ? 1.1 : 1.8) * breathK;
-    const breath = Math.sin(breathPh) * (sleeping || dozeLevel ? 0.022 : 0.012);
+    const breath = still ? 0 : Math.sin(breathPh) * (sleeping || dozeLevel ? 0.022 : 0.012);
     const vx = bx.velocity;
     const vy = by.velocity;
     const stretch = Math.min(0.16, Math.hypot(vx, vy) * 0.0005);
@@ -756,9 +784,9 @@ export function mountCreature(host, store, options = {}) {
     const onBody = d < R + 6;
     const onBtns = reveal.value > 0.2 && actions.covers(px, py);
     const hovered = pointer.active && !panelOpen && !dragging && (onBody || onBtns);
-    reveal.set(hovered || now < pinUntil || st.phase === 'capturing' ? 1 : 0);
+    reveal.set(hovered || now < pinUntil || st.phase === 'capturing' || (actions.focused && !panelOpen) ? 1 : 0);
     reveal.step(dt);
-    actions.frame(dt, { reveal: reveal.value, x: cx, y: btnY, dir: 'row' });
+    const buttonsMoving = actions.frame(dt, { reveal: reveal.value, x: cx, y: btnY, dir: 'row' });
 
     // init on a long chat takes a while: a quiet counter under the body
     if (st.phase === 'capturing') {
@@ -772,7 +800,7 @@ export function mountCreature(host, store, options = {}) {
     if (lastPx !== null && dt > 0 && pointer.active) {
       const mv = Math.hypot(px - lastPx, py - lastPy);
       const speed = mv / dt;
-      if (!sleeping && !panelOpen && !dragging && !pressed && speed > 2200 && d < 120 && d > R && now > startleCool) {
+      if (!still && !sleeping && !panelOpen && !dragging && !pressed && speed > 2200 && d < 120 && d > R && now > startleCool) {
         acts.startle(dx > 0 ? -1 : 1);
         startleCool = now + 3000;
       }
@@ -810,7 +838,7 @@ export function mountCreature(host, store, options = {}) {
     lxS.step(dt);
     lyS.step(dt);
     // while the AI thinks, the gloss circles the body like a loading shimmer
-    orbitL.set(thinking ? 1 : 0);
+    orbitL.set(thinking && !still ? 1 : 0);
     orbitL.step(dt);
     const ok = clamp(orbitL.value, 0, 1);
     const la = t * 2.4;
@@ -827,8 +855,8 @@ export function mountCreature(host, store, options = {}) {
         sats.splice(i, 1);
         continue;
       }
-      s.a += dt * s.w;
-      const r = Math.max(0, s.rad.value + Math.sin(t * 1.9 + s.ph) * 3.5);
+      if (!still) s.a += dt * s.w;
+      const r = Math.max(0, s.rad.value + (still ? 0 : Math.sin(t * 1.9 + s.ph) * 3.5));
       s.el.setAttribute('cx', (cx + Math.cos(s.a) * r).toFixed(2));
       s.el.setAttribute('cy', (cy + Math.sin(s.a) * r * 0.9).toFixed(2));
     }
@@ -838,7 +866,7 @@ export function mountCreature(host, store, options = {}) {
       if (streaming) {
         const el = now - aiT0;
         forming.r.set(2 + 5.6 * (1 - Math.exp(-el / (aiStreamMs * 0.45))));
-        if (now > nextPulse) {
+        if (now > nextPulse && !still) {
           forming.r.kick(5);
           sqx.kick(0.22);
           nextPulse = now + 360 + Math.random() * 280;
@@ -856,7 +884,7 @@ export function mountCreature(host, store, options = {}) {
     pearls.forEach((p, i) => {
       p.s.step(dt);
       const a = ((66 - i * 17) * Math.PI) / 180;
-      const rr = R * 0.7 + Math.sin(t * 1.4 + i * 0.8) * 0.3;
+      const rr = R * 0.7 + (still ? 0 : Math.sin(t * 1.4 + i * 0.8) * 0.3);
       p.x = cx + Math.cos(a) * rr * (rx / R);
       p.y = cy + Math.sin(a) * rr * (ry / R);
       const k = clamp(p.s.value, 0, 1);
@@ -893,7 +921,9 @@ export function mountCreature(host, store, options = {}) {
     if (moodUntil && now > moodUntil) moodUntil = 0;
     if (now > nextIdle) {
       const calm = !panelOpen && !dragging && !pressed && !moodUntil && !incoming && aiPhase === 'idle' && gaze.until < now && (!pointer.active || d > 220);
-      if (calm && st.tracked && st.phase === 'idle' && !dozeLevel) {
+      if (still) {
+        // reduced motion: no idle repertoire
+      } else if (calm && st.tracked && st.phase === 'idle' && !dozeLevel) {
         acts[pick([['glance', 34], ['blink2', 14], ['sigh', 10], ['shift', 10], ['stretch', 7], ['watchDroplet', sats.length ? 16 : 0], ['hop', 3]])]();
       } else if (calm && sleeping && Math.random() < 0.5) acts.sigh();
       nextIdle = now + 3500 + Math.random() * 5000;
@@ -932,9 +962,9 @@ export function mountCreature(host, store, options = {}) {
       }
     } else if (thinking) {
       // gaze drifts up and to the side, as if working something out
-      lxT = 0.45 + Math.sin(t * 0.6) * 0.35;
-      lyT = -0.8 + Math.sin(t * 1.1) * 0.12;
-    } else if (streaming) {
+      lxT = 0.45 + (still ? 0 : Math.sin(t * 0.6) * 0.35);
+      lyT = -0.8 + (still ? 0 : Math.sin(t * 1.1) * 0.12);
+    } else if (streaming && !still) {
       // reads the answer as it appears: left-to-right sweeps, slowly moving down
       const ph = (now % 700) / 700;
       lxT = ph < 0.8 ? -0.95 + ph * 0.75 : -0.95;
@@ -1022,6 +1052,17 @@ export function mountCreature(host, store, options = {}) {
       p.el.setAttribute('opacity', (1 - k).toFixed(3));
     }
     incoming = nextIncoming;
+
+    // How often to draw next. Full rate while the body moves or the user / the AI interacts with it;
+    // eyes, blinks and breathing read fine at a film-like 24 fps, and slower still when drowsy.
+    const engaged =
+      dragging || pressed || panelOpen || st.phase === 'capturing' || parts.length || forming || incoming ||
+      now < shiverUntil || now < pinUntil || buttonsMoving || ((thinking || streaming) && !still) ||
+      moving([anchor, bx, by, sqx, sqy, reach, reachR, tilt, ringO, reveal, poseX, poseY, orbitL], 0.01) ||
+      sats.some((x) => moving([x.rad], 0.05)) || pearls.some((x) => moving([x.s]));
+    if (engaged) return FULL;
+    if (still) return moving([lookX, lookY, lid, lidCap, widen], 0.01) ? 24 : 2; // otherwise only timers
+    return sleeping || dozeLevel === 2 ? 10 : dozeLevel ? 16 : 24;
   });
 
   syncSats();

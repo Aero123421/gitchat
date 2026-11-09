@@ -4,7 +4,7 @@
 // Hover widens it and magnifies the dots under the cursor (dock-style). Click the ring to commit,
 // the hairline to push, anywhere else to open the panel.
 
-import { Spring, onFrame, clamp, smooth, lerp } from '../core/spring.js';
+import { Spring, onFrame, clamp, smooth, lerp, FULL, moving, wake } from '../core/spring.js';
 import { pointer } from '../core/pointer.js';
 import { glassCSS, setLight } from '../core/glass.js';
 import { createActions, actionsCSS, BTN, BTN_GAP } from '../core/actions.js';
@@ -33,6 +33,7 @@ const css = `
 .box { position: fixed; right: 0; top: 0; width: ${BW}px; height: ${BH}px; pointer-events: none; }
 .cap { position: absolute; right: ${MARGIN}px; top: 0; width: ${W_C}px; height: 40px; cursor: pointer; pointer-events: auto; touch-action: none; }
 .box.drag .cap { cursor: grabbing; }
+.cap:focus-visible { outline: 1.5px solid var(--accent); outline-offset: 3px; }
 .cap > .lg-b { -webkit-backdrop-filter: blur(8px) saturate(1.4); backdrop-filter: blur(8px) saturate(1.4); }
 .untracked .cap > .lg-h { box-shadow: inset 0 0 0 .5px var(--ink-3), 0 1px 2px var(--shadow); }
 .marks { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
@@ -60,7 +61,7 @@ export function mountLine(host, store, options = {}) {
   const root = host.attachShadow({ mode: 'open' });
   setHTML(root, `<style>${glassCSS}${panelCSS}${actionsCSS}${css}</style>
   <div class="box">
-    <div class="cap lg"><div class="lg-b"></div><div class="lg-h"></div></div>
+    <div class="cap lg" role="button" tabindex="0"><div class="lg-b"></div><div class="lg-h"></div></div>
     <svg class="marks" viewBox="0 0 ${BW} ${BH}">
       <line class="prog"/>
       <line class="origin"/>
@@ -201,15 +202,30 @@ export function mountLine(host, store, options = {}) {
   cap.addEventListener('pointerup', release);
   cap.addEventListener('pointercancel', release);
 
+  // keyboard: the capsule is the widget's button
+  cap.setAttribute('aria-label', options.label?.('widgetName') ?? 'gitchat');
+  cap.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+    wake();
+    if (panelOpen) closePanel();
+    else if (!store.state.tracked || store.state.phase === 'capturing') actions.focusFirst();
+    else openPanel(true);
+  });
+
   const capRect = () => cap.getBoundingClientRect();
-  function openPanel() {
+  function openPanel(focus = false) {
     panelOpen = true;
-    panel.open(capRect(), { right: MARGIN + W_C + 10, centerY: cY.value });
+    panel.open(capRect(), { right: MARGIN + W_C + 10, centerY: cY.value }, { focus });
   }
   function closePanel() {
     if (!panel.isOpen) return;
     const r = capRect();
-    panel.close({ left: r.left, top: r.top, width: W_C, height: r.height }).then(() => (panelOpen = false));
+    const hadFocus = panel.el.contains(root.activeElement);
+    panel.close({ left: r.left, top: r.top, width: W_C, height: r.height }).then(() => {
+      panelOpen = false;
+      if (hadFocus) cap.focus();
+    });
   }
 
   function showTip(t, x) {
@@ -267,7 +283,7 @@ export function mountLine(host, store, options = {}) {
     const onCap = px > cx - w / 2 - 14 && px < BW && py > y0 - 10 && py < y0 + L + 10;
     // once open, the buttons below the line count as part of it
     const onBtns = e > 0.2 && actions.covers(px, py);
-    const inside = (pointer.active && !panelOpen && (onCap || onBtns)) || performance.now() < pinUntil;
+    const inside = (pointer.active && !panelOpen && (onCap || onBtns)) || performance.now() < pinUntil || (actions.focused && !panelOpen);
     exp.set(inside || dragging ? 1 : 0);
     fy.set(clamp(py, y0, y0 + L));
     fy.step(dt);
@@ -330,7 +346,7 @@ export function mountLine(host, store, options = {}) {
     }
 
     // buttons slide out under the line, one after the other
-    actions.frame(dt, { reveal: Math.max(e, st.phase === 'capturing' ? 1 : 0), x: cx, y: y0 + L + BTN_GAP + 2, dir: 'column' });
+    const buttonsMoving = actions.frame(dt, { reveal: Math.max(e, st.phase === 'capturing' ? 1 : 0), x: cx, y: y0 + L + BTN_GAP + 2, dir: 'column' });
 
     // capture progress: a hairline filling top to bottom
     if (capturing) {
@@ -353,6 +369,11 @@ export function mountLine(host, store, options = {}) {
     }
     showTip(target, cx - w / 2);
     snapNext = false;
+    // the line has no ambient motion: draw only while something moves
+    let beadsMoving = false;
+    for (const b of beads.values()) if (moving([b.y, b.o])) beadsMoving = true;
+    const busy = dragging || buttonsMoving || beadsMoving || performance.now() < pinUntil || moving([cY, exp, fy, len, originY, originO, lx, ly]);
+    return busy ? FULL : 0;
   });
 
   sync();

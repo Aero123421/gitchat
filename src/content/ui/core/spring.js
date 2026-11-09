@@ -39,16 +39,69 @@ export class Spring {
   }
 }
 
+// ---- shared ticker with a frame governor
+//
+// The widgets stay on screen for hours, so frames are not free. Each subscriber returns how many
+// frames per second it wants next: FULL while something moves, a low rate for slow ambient motion
+// (breathing), 0 when it is settled. The ticker runs at the highest rate asked for, and stops when
+// nobody needs frames. Input near a widget, store events and acts call wake() for full rate.
+
+export const FULL = 60;
+
 const subs = new Set();
 let raf = 0;
+let timer = 0;
 let last = 0;
+let wakeUntil = 0;
+
+const reducedQuery = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null;
+/** User preference: no ambient motion, no decorative movement. */
+export const motion = {
+  get reduced() {
+    return !!reducedQuery?.matches;
+  },
+};
 
 function loop(now) {
-  const dt = Math.min(1 / 30, Math.max(0, (now - last) / 1000));
+  raf = 0;
+  // frames can be far apart in the low-rate modes; springs sub-step, so a larger dt is safe
+  const dt = Math.min(0.12, Math.max(0, (now - last) / 1000));
   last = now;
   const t = now / 1000;
-  for (const fn of [...subs]) fn(dt, t);
-  raf = subs.size ? requestAnimationFrame(loop) : 0;
+  let want = now < wakeUntil ? FULL : 0;
+  for (const fn of [...subs]) {
+    const r = fn(dt, t);
+    want = Math.max(want, r === true ? FULL : typeof r === 'number' ? r : 0);
+  }
+  if (subs.size && want > 0) schedule(want);
+}
+
+function schedule(fps) {
+  if (raf) return;
+  if (fps >= 45) {
+    clearTimeout(timer);
+    timer = 0;
+    raf = requestAnimationFrame(loop);
+  } else if (!timer) {
+    timer = setTimeout(() => {
+      timer = 0;
+      if (!raf) raf = requestAnimationFrame(loop);
+    }, 1000 / fps);
+  }
+}
+
+/** Full frame rate for at least `ms` (input, state changes). */
+export function wake(ms = 1200) {
+  wakeUntil = Math.max(wakeUntil, performance.now() + ms);
+  if (!subs.size) return;
+  if (!raf && !timer) last = performance.now();
+  schedule(FULL);
+}
+
+/** True while any of the springs is still moving or away from its target. */
+export function moving(springs, eps = 0.004) {
+  for (const s of springs) if (Math.abs(s.velocity) > eps || Math.abs(s.value - s.target) > eps) return true;
+  return false;
 }
 
 // Debug: run frames by hand (rAF pauses while the page is hidden).
@@ -61,12 +114,13 @@ export function advance(seconds, fps = 60) {
   }
 }
 
+/**
+ * Subscribe to frames. `fn(dt, t)` returns the frame rate it wants next: FULL (or true) while
+ * animating, a small number for slow ambient motion, 0/nothing when settled.
+ */
 export function onFrame(fn) {
   subs.add(fn);
-  if (!raf) {
-    last = performance.now();
-    raf = requestAnimationFrame(loop);
-  }
+  wake(300);
   return () => subs.delete(fn);
 }
 

@@ -35,12 +35,12 @@ describe('renderChat', () => {
         '# State "design": v2',
         '',
         '## User',
-        '<!-- gitchat:message id="m1" -->',
+        '<!-- gitchat:message id="m1" length="26" -->',
         '',
         'How should I design state?',
         '',
         '## Assistant',
-        '<!-- gitchat:message id="m2" -->',
+        `<!-- gitchat:message id="m2" length="${'Use $E=mc^2$.\n\n```ts\nconst a = 1;\n```'.length}" -->`,
         '',
         'Use $E=mc^2$.',
         '',
@@ -101,6 +101,84 @@ describe('renderChat', () => {
   it('uses a placeholder title and keeps ids from breaking the comment', () => {
     const [file] = renderChat(doc({ title: '  \n ', messages: [{ id: 'a-->b', role: 'user', markdown: 'x' }] }), 'claude/x.md');
     expect(file?.content).toContain('# Untitled chat');
-    expect(file?.content).toContain('<!-- gitchat:message id="a-b" -->');
+    expect(file?.content).toContain('<!-- gitchat:message id="a-b" length="1" -->');
+  });
+
+  it('never gives a new file the name another message already uses in the repository', () => {
+    const files = renderChat(
+      doc({
+        messages: [
+          { id: 'm1', role: 'assistant', markdown: '> **Artifact:** [A](x--abc.assets/chart.html)' },
+          {
+            id: 'm2',
+            role: 'assistant',
+            markdown: '> **Artifact:** [B](gitchat-asset:chart.html)',
+            assets: [{ name: 'chart.html', mime: 'text/html', data: '<b>B</b>', encoding: 'utf8' }],
+          },
+        ],
+      }),
+      'claude/x--abc.md',
+    );
+    expect(files.map((f) => f.path)).toEqual(['claude/x--abc.md', 'claude/x--abc.assets/chart-2.html']);
+    expect(files[0]!.content).toContain('[A](x--abc.assets/chart.html)');
+    expect(files[0]!.content).toContain('[B](x--abc.assets/chart-2.html)');
+  });
+});
+
+describe('parseChatFile', () => {
+  const roundTrip = (messages: ChatDoc['messages']) => parseChatFile(renderChat(doc({ messages }), 'claude/x.md')[0]!.content).messages;
+
+  it('keeps a pasted gitchat file inside a message as one message', () => {
+    const pasted = 'Look at this:\n\n## Assistant\n<!-- gitchat:message id="fake" -->\n\nnot a real message';
+    const out = roundTrip([
+      { id: 'u1', role: 'user', markdown: pasted },
+      { id: 'a1', role: 'assistant', markdown: 'ok' },
+    ]);
+    expect(out.map((m) => [m.id, m.markdown])).toEqual([
+      ['u1', pasted],
+      ['a1', 'ok'],
+    ]);
+  });
+
+  it('keeps hard breaks, indentation and empty messages', () => {
+    const out = roundTrip([
+      { id: 'u1', role: 'user', markdown: '    indented code\nline  \nbreak' },
+      { id: 'a1', role: 'assistant', markdown: '' },
+      { id: 'u2', role: 'user', markdown: 'last' },
+    ]);
+    expect(out.map((m) => m.markdown)).toEqual(['    indented code\nline  \nbreak', '', 'last']);
+  });
+
+  it('reads files without lengths, skipping headings inside code blocks', () => {
+    const old = [
+      '---',
+      'gitchat: 1',
+      '---',
+      '',
+      '# T',
+      '',
+      '## User',
+      '<!-- gitchat:message id="u1" -->',
+      '',
+      '````md',
+      '## Assistant',
+      '<!-- gitchat:message id="fake" -->',
+      '````',
+      '',
+      '## Assistant',
+      '<!-- gitchat:message id="a1" -->',
+      '',
+      'answer',
+      '',
+    ].join('\n');
+    expect(parseChatFile(old).messages.map((m) => [m.id, m.markdown])).toEqual([
+      ['u1', '````md\n## Assistant\n<!-- gitchat:message id="fake" -->\n````'],
+      ['a1', 'answer'],
+    ]);
+  });
+
+  it('falls back to scanning when a length no longer fits (edited by hand)', () => {
+    const file = renderChat(doc(), 'claude/x.md')[0]!.content.replace('How should I design state?', 'How should I design my state?');
+    expect(parseChatFile(file).messages.map((m) => m.markdown)).toEqual(['How should I design my state?', 'Use $E=mc^2$.\n\n```ts\nconst a = 1;\n```']);
   });
 });

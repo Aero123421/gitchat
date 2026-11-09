@@ -4,21 +4,36 @@
 import type { BackgroundEvent } from '../shared/protocol';
 import type { ChatKey, ChatStatus } from '../shared/types';
 import type { Emitter } from './engine';
+import { senderService } from './validate';
 
 export class Events implements Emitter {
   /** Port → tab id (undefined for extension pages). */
   private readonly ports = new Map<chrome.runtime.Port, number | undefined>();
   private readonly tabChats = new Map<number, ChatKey>();
 
-  constructor(private readonly isExtensionPage: (sender: chrome.runtime.MessageSender | undefined) => boolean) {}
+  constructor(
+    private readonly isExtensionPage: (sender: chrome.runtime.MessageSender | undefined) => boolean,
+    /** The last port of a tab closed: its page was closed, reloaded or navigated away. */
+    private readonly onTabGone: (tabId: number) => void = () => undefined,
+  ) {}
 
-  attach(port: chrome.runtime.Port): void {
-    const tabId = this.isExtensionPage(port.sender) ? undefined : port.sender?.tab?.id;
+  /** Accepts ports from extension pages and from the top frame of the supported chat sites only. */
+  attach(port: chrome.runtime.Port): boolean {
+    const page = this.isExtensionPage(port.sender);
+    if (!page && !senderService(port.sender)) {
+      port.disconnect();
+      return false;
+    }
+    const tabId = page ? undefined : port.sender?.tab?.id;
     this.ports.set(port, tabId);
     port.onDisconnect.addListener(() => {
       this.ports.delete(port);
-      if (tabId !== undefined && ![...this.ports.values()].includes(tabId)) this.tabChats.delete(tabId);
+      if (tabId !== undefined && ![...this.ports.values()].includes(tabId)) {
+        this.tabChats.delete(tabId);
+        this.onTabGone(tabId);
+      }
     });
+    return true;
   }
 
   setTabChat(tabId: number, key: ChatKey): void {

@@ -270,9 +270,22 @@ function createGraph(svg, store, isOpen) {
     }
   }
 
+  // what the graph shows; a plain status update only redraws when this changed
+  const shownState = () => {
+    const st = store.state;
+    return `${st.staged.length}|${st.commits.map((c) => `${c.id}:${c.pushed ? 1 : 0}`).join(',')}`;
+  };
+  let lastShown = '';
+
   function onEvent(type, d) {
     if (!isOpen()) return;
-    if (type === 'staged') {
+    const shown = shownState();
+    const changed = shown !== lastShown;
+    lastShown = shown;
+    if (type === 'status') {
+      // authoritative state, e.g. staged work that went back to clean without a commit
+      if (changed) sync();
+    } else if (type === 'staged') {
       const w = rows.get('work');
       if (w) {
         labels(w);
@@ -293,6 +306,10 @@ function createGraph(svg, store, isOpen) {
     } else if (type === 'pushed') {
       svg.classList.remove('sending');
       sync();
+    } else if (type === 'pushEnd') {
+      // every push ends with this, also one where nothing was sent (all commits superseded)
+      svg.classList.remove('sending');
+      if (d?.ok) sync();
     } else if (type === 'error') {
       svg.classList.remove('sending');
       svg.classList.add('err');
@@ -308,6 +325,7 @@ function createGraph(svg, store, isOpen) {
     refresh() {
       svg.classList.toggle('sending', store.state.phase === 'pushing');
       svg.classList.toggle('err', store.state.phase === 'error');
+      lastShown = shownState();
       sync(null, true);
     },
   };
@@ -324,13 +342,13 @@ export function createPanel(root, store, { onRequestClose, openSettings, label =
       <svg class="graph" width="${W}" height="40"></svg>
       <div class="msg" role="status"></div>
       <div class="bar">
-        <button class="ib commit" aria-label="コミット" title="コミット">${icon.commit}</button>
-        <button class="ib push" aria-label="プッシュ" title="プッシュ">${icon.push}<svg class="spin" viewBox="-10 -10 20 20"><circle r="8" pathLength="1"/></svg></button>
-        <button class="ib link" aria-label="リンクをコピー" title="リンクをコピー">${icon.link}</button>
-        <button class="ib gear" aria-label="設定" title="設定">${icon.gear}</button>
+        <button class="ib commit" aria-label="Commit" title="Commit">${icon.commit}</button>
+        <button class="ib push" aria-label="Push" title="Push">${icon.push}<svg class="spin" viewBox="-10 -10 20 20"><circle r="8" pathLength="1"/></svg></button>
+        <button class="ib link" aria-label="Copy link" title="Copy link">${icon.link}</button>
+        <button class="ib gear" aria-label="Settings" title="Settings">${icon.gear}</button>
         <span class="sp"></span>
-        <button class="sw" data-k="autoCommit" role="switch" aria-checked="false" aria-label="自動コミット" title="自動コミット">${icon.commit}<span class="tr"><span class="kn"></span></span></button>
-        <button class="sw" data-k="autoPush" role="switch" aria-checked="false" aria-label="自動プッシュ" title="自動プッシュ">${icon.push}<span class="tr"><span class="kn"></span></span></button>
+        <button class="sw" data-k="autoCommit" role="switch" aria-checked="false" aria-label="Auto commit" title="Auto commit">${icon.commit}<span class="tr"><span class="kn"></span></span></button>
+        <button class="sw" data-k="autoPush" role="switch" aria-checked="false" aria-label="Auto push" title="Auto push">${icon.push}<span class="tr"><span class="kn"></span></span></button>
       </div>
     </div>`);
   root.appendChild(el);
@@ -466,7 +484,8 @@ export function createPanel(root, store, { onRequestClose, openSettings, label =
     get isOpen() {
       return open;
     },
-    open(origin, p) {
+    /** @param {{focus?: boolean}} [opts] focus: opened from the keyboard, move focus into the panel */
+    open(origin, p, opts = {}) {
       if (open) return;
       open = true;
       el.getAnimations().forEach((a) => a.cancel());
@@ -491,6 +510,7 @@ export function createPanel(root, store, { onRequestClose, openSettings, label =
         { duration: OPEN.duration, easing: OPEN.easing },
       );
       content.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 180, delay: 80, easing: 'linear', fill: 'backwards' });
+      if (opts.focus) requestAnimationFrame(() => [...el.querySelectorAll('button')].find((b) => !b.hidden && b.offsetParent)?.focus());
     },
     close(target) {
       if (!open) return Promise.resolve();

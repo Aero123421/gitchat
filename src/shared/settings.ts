@@ -7,7 +7,6 @@ export const DEFAULT_SETTINGS: Settings = {
   repo: null,
   services: { chatgpt: true, claude: true, gemini: true },
   saveVisualizations: true,
-  saveImages: false,
   githubClientId: '',
 };
 

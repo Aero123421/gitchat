@@ -14,6 +14,8 @@ export interface CapturedAsset {
   /** Text for utf8, base64 for binary. */
   data: string;
   encoding: 'utf8' | 'base64';
+  /** Git blob SHA of the bytes; filled in by the background so staging notices content changes. */
+  sha?: string;
 }
 
 /**
@@ -41,10 +43,20 @@ export interface ChatSnapshot {
   url: string;
   title: string;
   messages: CapturedMessage[];
-  /** ISO timestamp of the capture. */
+  /**
+   * ISO timestamp of when the page was read (taken at the DOM read, before any async enrichment), so
+   * the background can refuse a capture that is older than one it already applied.
+   */
   capturedAt: string;
   /** True when the whole history was captured (init), false for a partial/live capture. */
   complete: boolean;
+  /**
+   * Live captures only: the capture reaches the end of the conversation (the transcript is scrolled
+   * to its last message). The background then treats the capture as authoritative from its first
+   * already-known message onward, so turns that vanished from the page (a branch edit or a
+   * regenerated answer) are dropped instead of kept.
+   */
+  atEnd?: boolean;
 }
 
 /** Key that identifies a chat across the extension: `${service}:${chatId}`. */
@@ -111,8 +123,6 @@ export interface Settings {
   services: Record<ServiceId, boolean>;
   /** Save the HTML source of interactive visualizations as files next to the chat. */
   saveVisualizations: boolean;
-  /** Save images shown in the conversation (generated images, uploads) when they can be fetched. */
-  saveImages: boolean;
   /** OAuth client ID used for "Sign in with GitHub" (device flow). Empty = use the built-in one. */
   githubClientId: string;
 }

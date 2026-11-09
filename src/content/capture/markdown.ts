@@ -9,9 +9,11 @@ export interface MarkdownHooks {
   ignore?: string[];
   /**
    * Custom rendering for special elements (e.g. an artifact card, a site's own bold span). Runs
-   * before `ignore`. `children` renders the element's content with the normal rules.
+   * before `ignore` and before built-in skipping (so a site's file card can be a <button>).
+   * `children` renders the element's content with the normal rules; `kind` records rich content
+   * found by the hook ("code", "viz" …).
    */
-  render?: (el: Element, children: (el: Element) => string) => string | null;
+  render?: (el: Element, children: (el: Element) => string, kind: (k: string) => void) => string | null;
   /** Markdown heading level for an h1–h6 element when the site shifts levels. */
   headingLevel?: (el: Element) => number;
   /** Label for a link (e.g. drop a "+3" source counter). Return null for the default. */
@@ -78,9 +80,9 @@ function render(node: Node, ctx: Ctx): string {
   if (node.nodeType === Node.TEXT_NODE) return text(node.textContent ?? '', ctx);
   if (node.nodeType !== Node.ELEMENT_NODE) return '';
   const el = node as Element;
-  if (SKIP.has(el.tagName)) return '';
-  const special = ctx.hooks.render?.(el, (x) => renderChildren(x, ctx));
+  const special = ctx.hooks.render?.(el, (x) => renderChildren(x, ctx), (k) => ctx.kinds.add(k));
   if (special != null) return special;
+  if (SKIP.has(el.tagName)) return '';
   if (ctx.ignore && safeMatches(el, ctx.ignore)) return '';
 
   const math = mathOf(el, ctx);
@@ -93,7 +95,7 @@ function render(node: Node, ctx: Ctx): string {
     case 'BR':
       return ctx.pre ? '\n' : '  \n';
     case 'P':
-      return block(inline(el, ctx));
+      return block(escapeLineStarts(inline(el, ctx)));
     case 'H1':
     case 'H2':
     case 'H3':
@@ -144,7 +146,19 @@ function render(node: Node, ctx: Ctx): string {
     case 'SUB':
       return `<sub>${inline(el, ctx)}</sub>`;
     default:
-      return BLOCK.has(el.tagName) ? block(renderChildren(el, ctx)) : renderChildren(el, ctx);
+      if (!BLOCK.has(el.tagName)) return renderChildren(el, ctx);
+      // a block that only holds text and inline elements reads like a paragraph
+      return block(hasBlockChild(el) ? renderChildren(el, ctx) : escapeLineStarts(renderChildren(el, ctx)));
+  }
+}
+
+const BLOCK_SELECTOR = [...BLOCK].map((t) => t.toLowerCase()).join(',');
+
+function hasBlockChild(el: Element): boolean {
+  try {
+    return el.querySelector(BLOCK_SELECTOR) !== null;
+  } catch {
+    return true;
   }
 }
 
@@ -160,7 +174,78 @@ const block = (s: string) => (s.trim() ? `\n\n${s.trim()}\n\n` : '');
 
 function text(s: string, ctx: Ctx): string {
   if (ctx.pre) return s;
-  return s.replace(/[ \t\r\n\f]+/g, ' ');
+  return escapeText(s.replace(/[ \t\r\n\f]+/g, ' '));
+}
+
+const isWordChar = (c: string | undefined) => !!c && /[\p{L}\p{N}]/u.test(c);
+const isSpace = (c: string | undefined) => c === undefined || /\s/.test(c);
+
+/**
+ * Escapes plain text so it stays plain text in Markdown, touching only characters that would
+ * otherwise change the meaning (prose such as "a * b", snake_case or "[1]" is left alone).
+ */
+export function escapeText(s: string): string {
+  const dollars = (s.match(/\$/g) ?? []).length;
+  let out = '';
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i]!;
+    const prev = s[i - 1];
+    const next = s[i + 1];
+    switch (c) {
+      case '\\':
+        out += next && /[!-/:-@[-`{-~]/.test(next) ? '\\\\' : c;
+        break;
+      case '`':
+        out += '\\`';
+        break;
+      case '<':
+        out += next && /[A-Za-z/!?]/.test(next) ? '\\<' : c;
+        break;
+      case '&':
+        out += /^&#?[A-Za-z0-9]+;/.test(s.slice(i)) ? '\\&' : c;
+        break;
+      case '*':
+        // "a * b" is not emphasis; anything touching text could be
+        out += isSpace(prev) && isSpace(next) && prev !== undefined && next !== undefined ? c : '\\*';
+        break;
+      case '_':
+        // intraword underscores (snake_case) never make emphasis in GFM
+        out += isWordChar(prev) && isWordChar(next) ? c : '\\_';
+        break;
+      case '~':
+        out += next === '~' || prev === '~' ? '\\~' : c;
+        break;
+      case '[':
+        out += next === '^' ? '\\[' : c;
+        break;
+      case ']':
+        out += next === '(' || next === '[' ? '\\]' : c;
+        break;
+      case '$':
+        // two dollar signs in one run of text could pair up as math on GitHub
+        out += dollars >= 2 ? '\\$' : c;
+        break;
+      default:
+        out += c;
+    }
+  }
+  return out;
+}
+
+/** Escapes what would turn the start of a text line into a heading, quote, list or rule. */
+export function escapeLineStarts(s: string): string {
+  const lines = s.split('\n');
+  return lines
+    .map((line, i) => {
+      if (/^> \*\*(?:Artifact|File):\*\* /.test(line)) return line; // our own markers
+      let l = line.replace(/^(\s*)(#{1,6})(?=\s|$)/, '$1\\$2');
+      l = l.replace(/^(\s*)>/, '$1\\>');
+      l = l.replace(/^(\s*)([-+])(?=\s)/, '$1\\$2');
+      l = l.replace(/^(\s*)(\d{1,9})([.)])(?=\s|$)/, '$1$2\\$3');
+      if (/^\s*=+\s*$/.test(l) || (i > 0 && lines[i - 1]?.trim() && /^\s*-+\s*$/.test(l))) l = l.replace(/^(\s*)([=-])/, '$1\\$2');
+      return l;
+    })
+    .join('\n');
 }
 
 function inline(el: Element, ctx: Ctx): string {
@@ -226,9 +311,23 @@ function codeBlock(pre: Element, ctx: Ctx): string {
     pre.getAttribute('data-language') ??
     '';
   const body = (code.textContent ?? '').replace(/\n$/, '');
-  const runs = body.match(/^`{3,}/gm) ?? [];
-  const fence = '`'.repeat(Math.max(3, ...runs.map((r) => r.length + 1)));
-  return block(`${fence}${lang.toLowerCase()}\n${body}\n${fence}`);
+  return block(fencedCode(body, lang.toLowerCase()));
+}
+
+/**
+ * A code fence that nothing inside the code can close: longer than every backtick run in it (a
+ * closing fence may be indented, so checking only line starts is not enough).
+ */
+export function codeFence(code: string): string {
+  let longest = 0;
+  for (const run of code.match(/`+/g) ?? []) longest = Math.max(longest, run.length);
+  return '`'.repeat(Math.max(3, longest + 1));
+}
+
+/** A complete fenced code block (no surrounding blank lines). */
+export function fencedCode(code: string, lang = ''): string {
+  const fence = codeFence(code);
+  return `${fence}${lang}\n${code}\n${fence}`;
 }
 
 function languageFromClass(el: Element): string | null {
@@ -263,14 +362,20 @@ function list(el: Element, ctx: Ctx): string {
 // ---------------------------------------------------------------- links, images, iframes
 
 function link(a: HTMLAnchorElement, ctx: Ctx): string {
-  const label = ctx.hooks.linkLabel?.(a) ?? inline(a, ctx);
+  const custom = ctx.hooks.linkLabel?.(a);
+  const label = custom != null ? escapeText(custom) : inline(a, ctx);
   const href = a.getAttribute('href') ?? '';
   if (!href || href.startsWith('javascript:')) return label;
   ctx.kinds.add('link');
   const abs = absolute(href, a.ownerDocument);
-  if (!label) return `<${abs}>`;
-  if (label === abs) return `<${abs}>`;
-  return `[${label.replace(/[[\]]/g, '\\$&')}](${abs.replace(/[()\s]/g, encodeURIComponent)})`;
+  const plain = (custom ?? a.textContent ?? '').trim();
+  if (!label || plain === abs || plain === href) return `<${destination(abs)}>`;
+  return `[${label.replace(/(?<!\\)[[\]]/g, '\\$&')}](${destination(abs)})`;
+}
+
+/** A link destination that cannot end early: parentheses, spaces and angle brackets are encoded. */
+function destination(url: string): string {
+  return url.replace(/[()<>\s]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`);
 }
 
 function absolute(href: string, doc: Document): string {
@@ -294,7 +399,7 @@ function image(img: HTMLImageElement, ctx: Ctx): string {
   if (src.startsWith('data:') && src.length > 2048) return `![${alt || 'image'}](image)`;
   // blob: URLs only live as long as the tab; keep a placeholder instead of a dead link
   if (src.startsWith('blob:')) return `![${alt || 'image'}](image)`;
-  return `![${alt}](${absolute(src, img.ownerDocument)})`;
+  return `![${alt}](${destination(absolute(src, img.ownerDocument))})`;
 }
 
 function iframe(el: HTMLIFrameElement, ctx: Ctx): string {
@@ -345,17 +450,37 @@ function details(el: Element, ctx: Ctx): string {
 
 // ---------------------------------------------------------------- output
 
+/** A fence line, possibly indented (list items) or quoted (blockquotes): prefix, fence, rest. */
+const FENCE = /^([ \t]*(?:>[ \t]?)*[ \t]*)(`{3,}|~{3,})(.*)$/;
+
+/**
+ * Collapses runs of blank lines and strips trailing spaces (keeping two-space hard breaks), but
+ * never inside fenced code: a fence closes only with the same character at least as long as the
+ * one that opened it, and fences inside list items and quotes count too.
+ */
 export function normalize(s: string): string {
-  // Collapse blank lines and trailing spaces, but never inside fenced code blocks.
-  const parts = s.split(/(^`{3,}[^\n]*\n[\s\S]*?^`{3,}[ \t]*$)/m);
-  return parts
-    .map((part, i) =>
-      i % 2 === 1
-        ? part
-        : part
-            .replace(/[ \t]+\n/g, (m) => (m === '  \n' ? m : '\n'))
-            .replace(/\n{3,}/g, '\n\n'),
-    )
-    .join('')
-    .trim();
+  const out: string[] = [];
+  let fence: { ch: string; len: number } | null = null;
+  let blanks = 0;
+  for (const line of s.split('\n')) {
+    const m = FENCE.exec(line);
+    if (fence) {
+      out.push(line);
+      if (m && m[2]![0] === fence.ch && m[2]!.length >= fence.len && !m[3]!.trim()) fence = null;
+      continue;
+    }
+    if (m && !(m[2]![0] === '`' && m[3]!.includes('`'))) {
+      fence = { ch: m[2]![0]!, len: m[2]!.length };
+      blanks = 0;
+      out.push(line.replace(/[ \t]+$/, ''));
+      continue;
+    }
+    if (!line.trim()) {
+      if (++blanks === 1) out.push('');
+      continue;
+    }
+    blanks = 0;
+    out.push(/\S {2}$/.test(line) ? line : line.replace(/[ \t]+$/, ''));
+  }
+  return out.join('\n').trim();
 }

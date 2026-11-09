@@ -195,29 +195,23 @@ export function createSettingsView(opts: { preview: WidgetPreview; onReset: () =
     });
     return { id, sw };
   });
-  const boolSwitch = (key: 'saveVisualizations' | 'saveImages') => {
-    const sw = createSwitch({
-      label: t(key),
-      checked: app.settings[key],
-      describedBy: `gc-hint-${key}`,
-      onChange: async (v) => {
-        sw.set(v);
-        try {
-          await patchSettings(key === 'saveVisualizations' ? { saveVisualizations: v } : { saveImages: v });
-        } catch (e) {
-          sw.set(!v);
-          onError(errorText(e));
-        }
-      },
-    });
-    return sw;
-  };
-  const vizSw = boolSwitch('saveVisualizations');
-  const imgSw = boolSwitch('saveImages');
+  const vizSw = createSwitch({
+    label: t('saveVisualizations'),
+    checked: app.settings.saveVisualizations,
+    describedBy: 'gc-hint-saveVisualizations',
+    onChange: async (v) => {
+      vizSw.set(v);
+      try {
+        await patchSettings({ saveVisualizations: v });
+      } catch (e) {
+        vizSw.set(!v);
+        onError(errorText(e));
+      }
+    },
+  });
   on('settings', () => {
     for (const { id, sw } of svcSwitches) if (sw.get() !== app.settings.services[id]) sw.set(app.settings.services[id]);
     if (vizSw.get() !== app.settings.saveVisualizations) vizSw.set(app.settings.saveVisualizations);
-    if (imgSw.get() !== app.settings.saveImages) imgSw.set(app.settings.saveImages);
   });
 
   // ---------------------------------------------------------------- advanced
@@ -295,7 +289,6 @@ export function createSettingsView(opts: { preview: WidgetPreview; onReset: () =
       'div',
       { class: 'rows' },
       row(t('saveVisualizations'), t('saveVisualizationsHint'), vizSw.el, 'gc-hint-saveVisualizations'),
-      row(t('saveImages'), t('saveImagesHint'), imgSw.el, 'gc-hint-saveImages'),
     ),
   );
   const content = h(

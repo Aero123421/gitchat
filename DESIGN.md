@@ -33,23 +33,37 @@ chat page DOM ──adapter──► CapturedMessage[] ──► ChatSnapshot �
 ```
 
 - **Staging**: the background keeps the last committed message list per chat. A snapshot is diffed by
-  message `id` + content hash; new or changed messages are the `staged` items. Only tracked chats are
-  staged. Live snapshots (`complete: false`) are an **upsert**: they may hold only the part of a long
-  chat that is in the DOM, so absent messages are kept and new ids are appended. Only init snapshots
-  (`complete: true`) replace the whole list.
+  message `id` + content hash (the Markdown body plus the git blob SHA of each asset); new or changed
+  messages are the `staged` items. Only tracked chats are staged. Live snapshots (`complete: false`)
+  are an **upsert**: they may hold only the part of a long chat that is in the DOM, so absent messages
+  are kept and new ids are added. A live snapshot with `atEnd: true` (the capture reaches the last
+  message) that shows unknown ids after a known one is an edit or a regenerated answer: it is
+  authoritative from its first known message, and the turns that vanished are dropped. Only init
+  snapshots (`complete: true`) replace the whole list; an empty or answer-less one is refused.
+- **Capture order**: `capturedAt` is the time the page was read (before any async enrichment). The
+  content script sends captures in read order, and the background ignores one older than the last it
+  applied for that chat.
 - **Snapshot reasons**: the content script sends `sent` when the AI starts working (the user's
   message appears in the widget right away), `answered` when the answer is finished, `manual`
   otherwise. Auto-commit runs only for `answered`, so a commit never splits a question from its answer.
 - **Assets**: interactive visualizations (Claude artifacts, ChatGPT inline visualizations, Gemini
   Canvas) live in cross-origin iframes. `src/frame/` runs inside those frames and returns the rendered
-  HTML when the chat page asks. Message Markdown links to them as `gitchat-asset:<name>`, which the
-  background rewrites to `<file>.assets/<name>`.
-- **Commit**: renders the chat file (front matter + messages) and stores a local commit
-  `{id, key, path, files[], message, createdAt}`. Several local commits can wait for one push.
+  HTML when the chat page asks. Each artifact carries its owning message id and a stable key; its file
+  name is `<title slug>-<key fingerprint>.html`, so recapturing one message never renames another's
+  asset. Message Markdown links to them as `gitchat-asset:<name>`, which the background rewrites to
+  `<file>.assets/<name>`. A later capture that cannot reach the frame (panel closed) keeps the saved
+  link and file.
+- **Commit**: renders the chat file (front matter + messages) and stores a local commit for the
+  current repository (`owner/name@branch`). The commit record, its sequence number and the chat's
+  committed refs are written in one IndexedDB transaction; the document payload lives in its own
+  store so status queries stay cheap. Several local commits can wait for one push.
 - **Push**: pushes all local commits in order. If anything is staged for the current chat, it is
   committed first (pressing push never leaves work behind).
-- **Auto**: auto-commit runs after the AI finishes an answer (never mid-answer). Auto-push needs
-  auto-commit: turning auto-push on turns auto-commit on; turning auto-commit off turns auto-push off.
+- **Auto**: auto-commit runs after the AI finishes an answer (never mid-answer): a chat is eligible
+  only when its last applied capture was settled (`answered`, `manual`, a complete init or an
+  adoption), never after `sent`. Auto-push needs auto-commit: turning auto-push on turns auto-commit on; turning
+  auto-commit off turns auto-push off (and cancels a push that was about to run). Pending automatic
+  work resumes whenever the service worker starts.
 
 ## Repository layout written by gitchat
 
@@ -61,9 +75,10 @@ claude/2026-11-09-react-hooks--9f8e7d6c.assets/viz-1.html
 gemini/...
 ```
 
-- File name: `<date of first capture>-<title slug>--<first 8 chars of the chat id>.md`. The name is
-  fixed once created (renaming a chat later does not move the file). Other devices find an existing
-  file by its `--<id8>.md` suffix.
+- File name: `<date of first capture>-<title slug>--<first 8 chars of the chat id>.md` (more id
+  characters if another chat already uses those 8). The name is fixed once created (renaming a chat
+  later does not move the file). Other devices find an existing file by its `--<id8>.md` suffix and
+  confirm the service and chat id in its front matter.
 - File format:
 
 ```markdown
@@ -81,15 +96,19 @@ messages: 14
 # State design
 
 ## User
-<!-- gitchat:message id="..." -->
+<!-- gitchat:message id="..." length="123" -->
 
 ...markdown...
 
 ## Assistant
-<!-- gitchat:message id="..." -->
+<!-- gitchat:message id="..." length="4567" -->
 
 ...markdown...
 ```
+
+`length` is the body's length in characters, so a message that itself contains a gitchat file (or a
+`## Assistant` heading in a code block) is read back correctly. Files without it are parsed by
+headings outside code fences.
 
 ## Sync rules (multi-device, no manual conflicts)
 
@@ -97,9 +116,28 @@ messages: 14
   force-pushed.
 - On a non-fast-forward rejection: re-read the remote head and replay the local commits on top
   (rebase), then retry (bounded attempts).
-- If the remote copy of a chat file changed since our base, keep whichever capture is newer
-  (`captured` in front matter, then message count). The chat service is the real source of truth, so
-  the newer capture contains everything; the older content stays in git history.
+- A `409 Conflict` on the ref update is treated like a non-fast-forward. Automatic pushes retry with
+  backoff after the immediate attempts.
+- If the remote copy of a chat file changed since our base, the two are merged **three-way** per
+  message id against the base (`baseRefs`: the message hashes of the file as of our last push or
+  adoption): a message only one side changed takes that side's version; a message both changed takes
+  the newer capture (`captured`, then message count); a message only one side added is kept; a
+  message one side deleted and the other left unchanged is deleted. Without a known base nothing is
+  dropped. A local commit whose content the remote copy already has is skipped ("superseded"). The
+  chat is then rebased on the result, with the pushed batch as the base, so commits made during the
+  push and unstaged work survive, and a later push cannot delete what only the other device had.
+- A live capture can only prune messages this device has seen in a capture; messages that arrived
+  by merge or adoption stay until a local capture has seen them.
+- Reading a chat file from the repository also downloads its asset files, so a chat always carries
+  its visualizations and can move to another repository.
+- Starting to track (or rescanning) a chat whose file already exists reads that file: if it is
+  newer, the two are combined; otherwise the new capture replaces it (removed messages show as staged
+  removals). Edits made while an init runs are kept over the older capture.
+- An empty repository initialized by two devices at once: the loser continues from the winner's
+  first commit.
+- Commits, paths and baselines belong to one repository. Switching repository drops the old
+  repository's unpushed commits (their content is still in the chats) and stages every tracked chat
+  in full for the new one; it waits for a push in flight.
 - No shared index files, so different chats never conflict.
 
 ## Site adapters (durable by design)
@@ -108,11 +146,11 @@ What the sites look like (verified on the live sites, 2026-11; details in the ad
 
 | | ChatGPT (new app shell + classic) | Claude | Gemini |
 | --- | --- | --- | --- |
-| Message hook | `[data-chatgpt-search-unit-key$=":user"/":assistant"]` (classic: `data-message-author-role`) | `[data-testid=user-message/assistant-message]` | `user-query` / `model-response` |
+| Message hook | `[data-chatgpt-search-unit-key$=":user"/":assistant"]` or `data-content-search-unit-key` (classic: `data-message-author-role`) | `[data-testid=user-message/assistant-message]` | `user-query` / `model-response` |
 | Stable id | `data-chatgpt-search-message-ids` | `data-turn-key` | `.conversation-container#<16hex>` |
 | Thinking / streaming | `[data-response-starting]` / `[data-talvt-turn-state=in_progress]` | stop button / `data-is-streaming=true` | `pending-request` / `.markdown[aria-busy=true]` |
 | Long chats | virtualized (~11 turns), +5 turns per load | virtualized (~20 rows), +32 rows per load | +10 turns per load, `content-visibility:auto` |
-| Start of chat | none (stability) | `aria-posinset="1"` | none (stability) |
+| Start of chat | none (stability) | `aria-posinset="1"` marks the first *loaded* row only: stability decides | none (stability) |
 | Visualization frames | `*.web-sandbox.oaiusercontent.com` | `*.claudeusercontent.com` | `*.scf.usercontent.goog` |
 
 Never match localized text (aria-labels, button captions): all three sites translate them.
@@ -126,7 +164,13 @@ Selector sets are tested against sanitized DOM fixtures in `tests/fixtures/`.
 ## Init (tracking an existing chat)
 
 Long chats load older messages lazily. Init scrolls the chat's scroll container to the very top,
-waits for each batch to load (adapter signals + generic "no new messages and no spinner for N ms"),
-then reads top to bottom, merging messages by id (works with virtualized lists), restores the scroll
-position and sends one complete snapshot. Progress is reported as: loading older messages (count) →
-reading (0–100%). It can be cancelled.
+waits for each batch to load (stable count, height and scroll position, no spinner, for the site's
+quiet period), then reads top to bottom, merging messages by id (works with virtualized lists; on a
+virtualized list visualizations are serialized at each step), restores the scroll position and sends
+one complete snapshot. If loading never settles within 10 minutes, init fails instead of saving a
+partial history. If the AI is still answering, init waits for the answer and re-reads the end.
+Progress is reported as: loading older messages (count) → reading (0–100%). It can be cancelled.
+
+An init session is owned by one tab: `chat/init/start` returns an `initId` that progress, done and
+cancel must carry. A second tab gets `busy`; a session whose tab goes away (port closed, or no
+progress for 2 minutes) ends, and a late `done` gets `stale-init`.

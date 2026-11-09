@@ -84,34 +84,87 @@ export function captureVisible(adapter: Adapter, doc: Document): CapturedMessage
   );
 }
 
+/** What one read of the page saw, frozen at the moment of the read. */
+export interface PageRead {
+  messages: CapturedMessage[];
+  url: string;
+  title: string;
+  /** ISO time of the DOM read (not of any later enrichment). */
+  capturedAt: string;
+}
+
+/** Reads the visible messages and the page's identity in one synchronous step. */
+export function readPage(adapter: Adapter, doc: Document): PageRead {
+  return {
+    messages: captureVisible(adapter, doc),
+    url: location.href.split('#')[0] ?? location.href,
+    title: adapter.title(doc),
+    capturedAt: new Date().toISOString(),
+  };
+}
+
 /**
- * Attach visualization HTML to the message whose artifact card has the same title, and turn the
- * card into a link. `gitchat-asset:<name>` is resolved to the chat's asset folder by the background.
+ * True when the transcript shows its last message: everything after the first message we already
+ * know is on the page, so turns missing from the capture really are gone (a branch edit). Lists
+ * that keep every loaded message in the DOM always qualify.
+ */
+export function isAtEnd(adapter: Adapter, doc: Document): boolean {
+  if (!adapter.virtualized) return true;
+  const sc = adapter.scrollContainer(doc);
+  if (!sc) return false;
+  const remaining = sc.scrollHeight - sc.scrollTop - sc.clientHeight;
+  return remaining <= Math.max(40, sc.clientHeight * 0.5);
+}
+
+/** File name of a visualization's asset: readable, and fixed by the artifact's identity. */
+export function artifactAssetName(art: CapturedArtifact): string {
+  return `${assetSlug(art.title)}-${fingerprint(art.key)}.html`;
+}
+
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** Turns the first plain "**Artifact:** <title>" (or "**File:**") line into a link to the asset. */
+function linkMarker(md: string, title: string, name: string): string | null {
+  const re = new RegExp(`^(> \\*\\*(?:Artifact|File):\\*\\* )${escapeRe(title)}[ \\t]*$`, 'm');
+  if (!re.test(md)) return null;
+  const label = title.replace(/[[\]]/g, '\\$&');
+  return md.replace(re, (_m, prefix: string) => `${prefix}[${label}](gitchat-asset:${name})`);
+}
+
+/**
+ * Attach visualization HTML to the message that shows its card, and turn the card into a link.
+ * The owner is found by message ID; only artifacts without a known owner fall back to the newest
+ * answer with exactly that card title. `gitchat-asset:<name>` is resolved by the background.
  */
 export function attachArtifacts(messages: CapturedMessage[], artifacts: CapturedArtifact[]): CapturedMessage[] {
   if (!artifacts.length) return messages;
   const out = messages.map((m) => ({ ...m, assets: [...(m.assets ?? [])] }));
+  const byId = new Map(out.map((m) => [m.id, m]));
   for (const art of artifacts) {
-    const name = `${assetSlug(art.title)}.html`;
-    const marker = `**Artifact:** ${art.title}`;
-    const msg = [...out].reverse().find((m) => m.role === 'assistant' && m.markdown.includes(marker));
-    if (!msg) continue;
-    msg.markdown = msg.markdown.replace(marker, `**Artifact:** [${art.title}](gitchat-asset:${name})`);
-    msg.assets = msg.assets.filter((a) => a.name !== name);
-    msg.assets.push({ name, mime: 'text/html', data: art.html, encoding: 'utf8' });
-    msg.kinds = [...new Set([...(msg.kinds ?? []), 'viz'])];
+    const name = artifactAssetName(art);
+    const owner = art.messageId
+      ? byId.get(art.messageId)
+      : [...out].reverse().find((m) => m.role === 'assistant' && linkMarker(m.markdown, art.title, name) !== null);
+    if (!owner) continue;
+    const linked = linkMarker(owner.markdown, art.title, name);
+    if (linked === null) continue;
+    owner.markdown = linked;
+    owner.assets = owner.assets.filter((a) => a.name !== name);
+    owner.assets.push({ name, mime: 'text/html', data: art.html, encoding: 'utf8' });
+    owner.kinds = [...new Set([...(owner.kinds ?? []), 'viz'])];
   }
   return out;
 }
 
-export function makeSnapshot(adapter: Adapter, doc: Document, chatId: string, messages: CapturedMessage[], complete: boolean): ChatSnapshot {
+export function makeSnapshot(adapter: Adapter, chatId: string, read: PageRead, messages: CapturedMessage[], complete: boolean, atEnd = false): ChatSnapshot {
   return {
     service: adapter.service,
     chatId,
-    url: location.href.split('#')[0] ?? location.href,
-    title: adapter.title(doc),
+    url: read.url,
+    title: read.title,
     messages,
-    capturedAt: new Date().toISOString(),
+    capturedAt: read.capturedAt,
     complete,
+    ...(complete ? {} : { atEnd }),
   };
 }

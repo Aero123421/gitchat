@@ -4,7 +4,7 @@
 //   blue ticks on the ring = unpushed commits; they sweep back to 12 o'clock when pushed
 // Motion is near-critically damped: it follows the cursor a few pixels and never bounces.
 
-import { Spring, onFrame, clamp, smooth } from '../core/spring.js';
+import { Spring, onFrame, clamp, smooth, FULL, moving, wake } from '../core/spring.js';
 import { pointer } from '../core/pointer.js';
 import { glassCSS, applyLens, setLight } from '../core/glass.js';
 import { createPanel, panelCSS, rollText } from '../core/panel.js';
@@ -56,7 +56,7 @@ export function mountDot(host, store, options = {}) {
   const root = host.attachShadow({ mode: 'open' });
   setHTML(root, `<style>${glassCSS}${panelCSS}${actionsCSS}${css}</style>
   <div class="dock">
-    <div class="orb lg" role="button" tabindex="0" aria-label="Git の状態">
+    <div class="orb lg" role="button" tabindex="0">
       <div class="lg-b"></div>
       <svg class="in" viewBox="${-R} ${-R} ${S} ${S}">
         <circle class="trk" r="${RING}"/>
@@ -77,6 +77,7 @@ export function mountDot(host, store, options = {}) {
   const actions = createActions(root, dock, store, options.label);
   let pinUntil = 0; // keep the buttons out for a moment after a click (touch / untracked)
   const orb = $('.orb');
+  orb.setAttribute('aria-label', options.label?.('widgetName') ?? 'gitchat');
   const arc = $('.arc');
   const num = $('.num');
   const ticksG = $('.ticks');
@@ -194,21 +195,25 @@ export function mountDot(host, store, options = {}) {
   orb.addEventListener('pointercancel', release);
   orb.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+    wake();
     if (panelOpen) closePanel();
-    else if (!store.state.tracked || store.state.phase === 'capturing') pinUntil = performance.now() + 3000;
-    else openPanel();
+    else if (!store.state.tracked || store.state.phase === 'capturing') actions.focusFirst();
+    else openPanel(true);
   });
 
-  function openPanel() {
+  function openPanel(focus = false) {
     panelOpen = true;
     sc.set(0);
-    panel.open(orbRect(), { right: EDGE - 2, centerY: anchorY });
+    panel.open(orbRect(), { right: EDGE - 2, centerY: anchorY }, { focus });
   }
   function closePanel() {
     if (!panel.isOpen) return;
+    const hadFocus = panel.el.contains(root.activeElement);
     panel.close(orbRect()).then(() => {
       panelOpen = false;
       sc.set(1);
+      if (hadFocus) orb.focus();
     });
   }
 
@@ -226,9 +231,9 @@ export function mountDot(host, store, options = {}) {
     const lx0 = pointer.x - (innerWidth - EDGE - S);
     const ly0 = pointer.y - (cy - R);
     const onBtns = reveal.value > 0.2 && actions.covers(lx0, ly0);
-    reveal.set((hovered || onBtns || performance.now() < pinUntil || store.state.phase === 'capturing') && !panelOpen && !dragging ? 1 : 0);
+    reveal.set((hovered || onBtns || performance.now() < pinUntil || store.state.phase === 'capturing' || actions.focused) && !panelOpen && !dragging ? 1 : 0);
     reveal.step(dt);
-    actions.frame(dt, { reveal: reveal.value, x: R, y: S + 8, dir: 'column' });
+    const buttonsMoving = actions.frame(dt, { reveal: reveal.value, x: R, y: S + 8, dir: 'column' });
 
     if (dragging) {
       ox.set(pointer.x - grab.x - cx);
@@ -269,6 +274,9 @@ export function mountDot(host, store, options = {}) {
       t.el.setAttribute('cy', (Math.sin(a) * RING).toFixed(2));
       t.el.setAttribute('opacity', clamp(t.o.value, 0, 1).toFixed(3));
     }
+    // a dial has no ambient motion: draw only while something moves
+    const busy = dragging || buttonsMoving || performance.now() < pinUntil || moving([ox, oy, sc, reveal, lx, ly]) || ticks.some((x) => moving([x.a, x.o]));
+    return busy ? FULL : 0;
   });
 
   render();

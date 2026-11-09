@@ -25,6 +25,7 @@ export interface FakeRepo {
 
 type Req = { method: string; url: URL; body: Record<string, unknown> | null; auth: string | null };
 type Injection = { match: (r: Req) => boolean; respond: (r: Req) => Response; times: number };
+type Pause = { match: (r: Req) => boolean; reached: () => void; gate: Promise<void> };
 
 const json = (status: number, body: unknown, headers: Record<string, string> = {}) =>
   new Response(body === null ? null : JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...headers } });
@@ -40,11 +41,25 @@ export class FakeGitHub {
   /** Runs once right before the next ref update (to simulate another device pushing). */
   beforeRefUpdate: ((repo: FakeRepo) => Promise<void>) | null = null;
   private injections: Injection[] = [];
+  private pauses: Pause[] = [];
   private seq = 0;
 
   /** Make the next `times` matching requests return a custom response. */
   inject(match: (r: Req) => boolean, respond: (r: Req) => Response, times = 1): void {
     this.injections.push({ match, respond, times });
+  }
+
+  /**
+   * Holds the next matching request until `release()` (it then proceeds normally). `reached`
+   * resolves when the request arrives — a way to act while a push or lookup is in flight.
+   */
+  pause(match: (r: Req) => boolean): { reached: Promise<void>; release: () => void } {
+    let release!: () => void;
+    let reached!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const arrived = new Promise<void>((r) => (reached = r));
+    this.pauses.push({ match, reached, gate });
+    return { reached: arrived, release };
   }
 
   addRepo(name: string, opts: Partial<Pick<FakeRepo, 'owner' | 'private' | 'push' | 'defaultBranch'>> = {}): FakeRepo {
@@ -136,6 +151,12 @@ export class FakeGitHub {
     const headers = new Headers(init?.headers);
     const req: Req = { method, url, body, auth: headers.get('authorization') };
     this.calls.push(`${method} ${url.pathname}`);
+    const pause = this.pauses.find((x) => x.match(req));
+    if (pause) {
+      this.pauses.splice(this.pauses.indexOf(pause), 1);
+      pause.reached();
+      await pause.gate;
+    }
     const inj = this.injections.find((i) => i.times > 0 && i.match(req));
     if (inj) {
       inj.times--;
@@ -166,7 +187,9 @@ export class FakeGitHub {
         const r = this.addRepo(name, { private: body?.private !== false });
         return json(201, this.repoJson(r));
       }
-      return json(200, [...this.repos.values()].map((r) => this.repoJson(r)));
+      const per = Number(url.searchParams.get('per_page') ?? 30);
+      const page = Number(url.searchParams.get('page') ?? 1);
+      return json(200, [...this.repos.values()].slice((page - 1) * per, page * per).map((r) => this.repoJson(r)));
     }
     if (p[0] !== 'repos' || p.length < 3) return json(404, { message: 'Not Found' });
     const repo = this.repos.get(`${p[1]}/${p[2]}`);
@@ -232,6 +255,9 @@ export class FakeGitHub {
 
   private async contents(repo: FakeRepo, req: Req, path: string): Promise<Response> {
     if (req.method === 'PUT') {
+      // Like GitHub: replacing an existing file needs its current blob SHA.
+      const existing = this.headTree(repo)?.get(path);
+      if (existing && req.body?.sha !== existing) return json(422, { message: 'Invalid request.\n\n"sha" wasn\'t supplied.' });
       const base64 = String(req.body?.content);
       const blob = await this.putBlob(repo, base64);
       const head = repo.branches.get(repo.defaultBranch);

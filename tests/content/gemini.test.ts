@@ -49,8 +49,8 @@ describe('gemini adapter (live-site fixtures)', () => {
   it('marks Canvas previews as artifacts', () => {
     load('artifact.html');
     const answer = captureVisible(gemini, document).find((m) => m.role === 'assistant');
-    expect(answer?.markdown).toMatch(/\*\*Artifact:\*\* Canvas \S+-1/);
-    expect(answer?.kinds ?? []).not.toContain('viz-missing');
+    expect(answer?.markdown).toMatch(/^> \*\*Artifact:\*\* Canvas$/m);
+    expect(answer?.kinds ?? []).toContain('viz');
   });
 
   it('reads every turn of a long chat even when they are off-screen', () => {

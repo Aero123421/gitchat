@@ -2,16 +2,17 @@
 // shows. Network and Chrome APIs come in through EngineDeps, so this runs the same in tests.
 
 import { GitchatError, type BackgroundEvent, type SnapshotReason, type SyncStatus } from '../shared/protocol';
-import { chatKey, type ChatKey, type ChatPhase, type ChatSnapshot, type ChatStatus, type CommitInfo, type ServiceId, type Settings } from '../shared/types';
+import { chatKey, type CapturedMessage, type ChatKey, type ChatPhase, type ChatSnapshot, type ChatStatus, type CommitInfo, type ServiceId, type Settings } from '../shared/types';
 import { log } from '../shared/log';
 import { toGitchatError } from './errors';
 import { RateLimitError, type GitHub } from './github/client';
-import type { ChatRecord, LocalCommit, SyncMeta } from './model';
-import { chatPath, encodePath } from './paths';
-import { chatTitle, parseChatFile } from './render';
-import { diffStaged, mergeSnapshot, refsOf } from './stage';
+import { gitBlobSha } from './hash';
+import type { ChatDoc, ChatRecord, CommitWithDoc, LocalCommit, SyncMeta } from './model';
+import { chatPath, encodePath, repoId } from './paths';
+import { chatTitle } from './render';
+import { diffStaged, hashesOf, keepChangesSince, mergeSnapshot, messageHash, refsOf, threeWayMerge, unionMessages, uniqueIds } from './stage';
 import type { Db } from './store/db';
-import { findRemoteChat, pushCommits, type PushOutcome } from './sync';
+import { findRemoteChat, oursIsNewer, pushCommits, type PushOutcome } from './sync';
 
 export interface Emitter {
   status(status: ChatStatus): void;
@@ -25,6 +26,28 @@ export interface SettingsStore {
   save(settings: Settings): Promise<void>;
 }
 
+/** The tab (and document) running an init, so another tab cannot interfere with it. */
+export interface InitOwner {
+  tabId?: number;
+  documentId?: string;
+}
+
+/** An init session as stored, so it survives the service worker being restarted. */
+export interface StoredInit {
+  key: ChatKey;
+  id: string;
+  owner?: InitOwner;
+  progress: number;
+  touchedAt: number;
+  /** id → hash of every message when the init started. */
+  base: [string, string][];
+}
+
+export interface InitStore {
+  load(): Promise<StoredInit[]>;
+  save(inits: StoredInit[]): Promise<void>;
+}
+
 export interface EngineDeps {
   db: Db;
   settings: SettingsStore;
@@ -34,30 +57,63 @@ export interface EngineDeps {
   now?: () => number;
   /** Delay before an automatic push, to batch several commits. */
   pushDelayMs?: number;
-  /** Ask to be woken up (retry()) after a failed automatic push. */
+  /**
+   * Ask to be woken up (retry()) later: after a failed automatic push, and as a safety net while an
+   * automatic push is waiting (timers do not survive the service worker being stopped).
+   */
   scheduleRetry?: (delayMs: number) => void;
+  /** Nothing is waiting any more: cancel the wake-up. */
+  clearRetry?: () => void;
   keepAlive?: <T>(fn: () => Promise<T>) => Promise<T>;
+  /** Where running init sessions are kept across worker restarts (chrome.storage.session). */
+  initStore?: InitStore;
 }
+
+interface InitSession {
+  id: string;
+  owner?: InitOwner;
+  progress: number;
+  touchedAt: number;
+  /** Message hashes when the capture started; anything changed since is kept over the capture. */
+  base: Map<string, string>;
+  /** When progress was last written to the store (it is reported every half second). */
+  savedAt?: number;
+}
+
+type PushKind = 'manual' | 'auto';
 
 const RECENT_COMMITS = 12;
 const REMOTE_MISS_TTL = 5 * 60_000;
-const RETRYABLE = new Set(['network', 'rate-limit', 'github']);
+/** An init that reports no progress for this long is considered abandoned. */
+const INIT_IDLE_MS = 2 * 60_000;
+const RETRYABLE = new Set(['network', 'rate-limit', 'github', 'non-fast-forward', 'conflict']);
+const REPO_META = 'repo';
 
 function splitKey(key: ChatKey): { service: ServiceId; chatId: string } {
   const i = key.indexOf(':');
   return { service: key.slice(0, i) as ServiceId, chatId: key.slice(i + 1) };
 }
 
+/** A commit belongs to the current repository, or was made before any repository was chosen. */
+const inRepo = (c: LocalCommit, repo: string | null) => c.repo === repo || c.repo === null;
+const isPending = (c: LocalCommit, repo: string | null) => !c.pushed && !c.superseded && inRepo(c, repo);
+const isOlder = (a: string, b: string | undefined) => !!b && Date.parse(a) < Date.parse(b);
+const later = (a: string, b: string) => (isOlder(a, b) ? b : a);
+
 export class Engine {
-  private readonly capturing = new Map<ChatKey, number>();
+  private readonly inits = new Map<ChatKey, InitSession>();
+  private initsLoaded: Promise<void> | null = null;
+  private initSaving: Promise<unknown> = Promise.resolve();
   private readonly chatErrors = new Map<ChatKey, string>();
   private readonly remoteMisses = new Map<ChatKey, number>();
   private readonly adopting = new Set<ChatKey>();
   private pushing: Promise<void> | null = null;
-  private pushAgain = false;
+  /** Work requested while a push was running: a manual push, or an automatic one. */
+  private readonly again = { manual: false, auto: false };
   private pushTimer: ReturnType<typeof setTimeout> | undefined;
   private retries = 0;
   private queue: Promise<unknown> = Promise.resolve();
+  private repoQueue: Promise<unknown> = Promise.resolve();
 
   constructor(private readonly deps: EngineDeps) {}
 
@@ -74,6 +130,24 @@ export class Engine {
     const run = this.queue.then(fn, fn);
     this.queue = run.catch(() => undefined);
     return run;
+  }
+
+  /** Pushing and switching repositories never overlap (a push must finish against the repository it started with). */
+  private withRepoLock<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.repoQueue.then(fn, fn);
+    this.repoQueue = run.catch(() => undefined);
+    return run;
+  }
+
+  private async currentRepo(): Promise<string | null> {
+    return repoId((await this.deps.settings.get()).repo);
+  }
+
+  /** Aligns stored state with the chosen repository before working with it (it may have changed elsewhere). */
+  private async ensureRepo(): Promise<void> {
+    const repo = await this.currentRepo();
+    if (repo === null || (await this.deps.db.getMeta<string>(REPO_META)) === repo) return;
+    await this.withRepoLock(async () => this.syncRepoLocked(await this.currentRepo()));
   }
 
   // ---- chats
@@ -94,44 +168,59 @@ export class Engine {
     return this.status(key);
   }
 
-  /** A chat saved by another device is tracked here too, continuing from the repository's copy. */
+  /**
+   * A chat saved by another device is tracked here too, continuing from the repository's copy. The
+   * lookup is network work outside any lock; the result is only stored if the repository it came
+   * from is still the chosen one (otherwise it is looked up again in the new one).
+   */
   private async adoptRemote(key: ChatKey, p: { service: ServiceId; chatId: string; url: string; title: string }): Promise<void> {
     const missedAt = this.remoteMisses.get(key);
     if (this.adopting.has(key) || (missedAt !== undefined && this.now() - missedAt < REMOTE_MISS_TTL)) return;
     this.adopting.add(key);
     try {
-      const { repo } = await this.deps.settings.get();
-      if (!repo) return;
-      const gh = await this.deps.github().catch(() => null);
-      if (!gh) return;
-      const found = await findRemoteChat(gh, repo, p.service, p.chatId, true);
-      if (!found?.text) {
-        this.remoteMisses.set(key, this.now());
-        return;
-      }
-      const { front, messages } = parseChatFile(found.text);
-      const adopted = await this.exclusive(async () => {
-        if (await this.deps.db.getChat(key)) return false;
-        const at = this.iso();
-        await this.deps.db.putChat({
-          key,
-          service: p.service,
-          chatId: p.chatId,
-          url: p.url,
-          title: p.title || front.title || '',
-          tracked: true,
-          path: found.path,
-          pathConfirmed: true,
-          remoteBlob: found.sha,
-          createdAt: front.created || at,
-          capturedAt: front.captured || at,
-          messages,
-          committed: refsOf(messages),
-          updatedAt: this.now(),
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const { repo } = await this.deps.settings.get();
+        if (!repo) return;
+        const id = repoId(repo);
+        const gh = await this.deps.github().catch(() => null);
+        if (!gh) return;
+        const found = await findRemoteChat(gh, repo, p.service, p.chatId);
+        const result = await this.withRepoLock(async () => {
+          if ((await this.currentRepo()) !== id) return 'stale';
+          await this.syncRepoLocked(id);
+          if (!found) {
+            this.remoteMisses.set(key, this.now());
+            return 'missing';
+          }
+          return this.exclusive(async () => {
+            if (await this.deps.db.getChat(key)) return 'known';
+            const at = this.iso();
+            await this.deps.db.putChat({
+              key,
+              service: p.service,
+              chatId: p.chatId,
+              url: p.url,
+              title: p.title || found.front.title || '',
+              tracked: true,
+              repo: id,
+              path: found.path,
+              pathConfirmed: true,
+              remoteBlob: found.sha,
+              baseRefs: refsOf(found.messages),
+              createdAt: found.front.created || at,
+              capturedAt: found.front.captured || at,
+              messages: found.messages,
+              committed: refsOf(found.messages),
+              seen: [],
+              settled: true,
+              updatedAt: this.now(),
+            });
+            return 'adopted';
+          });
         });
-        return true;
-      });
-      if (adopted) await this.emitStatus(key);
+        if (result === 'adopted') await this.emitStatus(key);
+        if (result !== 'stale') return;
+      }
     } catch (e) {
       log.debug('remote lookup failed', e);
     } finally {
@@ -139,20 +228,30 @@ export class Engine {
     }
   }
 
-  /** Applies a capture of a tracked chat. Auto-commit only runs once the AI finished answering. */
+  /**
+   * Applies a capture of a tracked chat. A capture read from the page before one we already applied
+   * is ignored (captures can arrive out of order). Auto-commit only runs once the AI finished answering.
+   */
   async snapshot(snap: ChatSnapshot, reason: SnapshotReason = 'answered'): Promise<ChatStatus> {
     const key = chatKey(snap.service, snap.chatId);
+    await this.ensureRepo();
+    const messages = uniqueIds(await withAssetShas(snap.messages));
     const committed = await this.exclusive(async () => {
       const rec = await this.deps.db.getChat(key);
-      if (!rec?.tracked) return false;
-      const merged = mergeSnapshot(rec.messages, snap);
+      if (!rec?.tracked || isOlder(snap.capturedAt, rec.seenAt)) return false;
+      const seen = new Set(rec.seen ?? rec.messages.map((m) => m.id));
+      const merged = mergeSnapshot(rec.messages, { ...snap, messages }, seen);
       if (!merged.ok) {
         this.chatErrors.set(key, merged.message);
         return false;
       }
       this.chatErrors.delete(key);
+      for (const m of messages) seen.add(m.id);
       rec.messages = merged.messages;
+      rec.seen = merged.messages.filter((m) => seen.has(m.id)).map((m) => m.id);
+      rec.settled = reason !== 'sent';
       rec.capturedAt = snap.capturedAt || this.iso();
+      rec.seenAt = rec.capturedAt;
       rec.title = snap.title || rec.title;
       rec.url = snap.url || rec.url;
       rec.updatedAt = this.now();
@@ -163,63 +262,159 @@ export class Engine {
     return this.emitStatus(key);
   }
 
-  async initStart(key: ChatKey): Promise<ChatStatus> {
-    this.capturing.set(key, 0);
-    this.chatErrors.delete(key);
-    return this.emitStatus(key);
+  // ---- init (tracking a chat, or rescanning a tracked one: one complete capture of its history)
+
+  private loadInits(): Promise<void> {
+    return (this.initsLoaded ??= (async () => {
+      const stored = (await this.deps.initStore?.load().catch(() => [])) ?? [];
+      for (const s of stored) {
+        if (this.inits.has(s.key)) continue;
+        const session: InitSession = { id: s.id, progress: s.progress, touchedAt: s.touchedAt, base: new Map(s.base) };
+        if (s.owner) session.owner = s.owner;
+        this.inits.set(s.key, session);
+      }
+    })());
   }
 
-  async initProgress(key: ChatKey, progress: number): Promise<null> {
-    if (this.capturing.has(key)) {
-      this.capturing.set(key, Math.min(1, Math.max(0, progress)));
-      await this.emitStatus(key);
+  private persistInits(): void {
+    const store = this.deps.initStore;
+    if (!store) return;
+    const list: StoredInit[] = [...this.inits].map(([key, s]) => ({ key, id: s.id, ...(s.owner ? { owner: s.owner } : {}), progress: s.progress, touchedAt: s.touchedAt, base: [...s.base] }));
+    this.initSaving = this.initSaving.then(() => store.save(list)).catch(() => undefined);
+  }
+
+  private activeInit(key: ChatKey): InitSession | undefined {
+    const s = this.inits.get(key);
+    if (s && this.now() - s.touchedAt > INIT_IDLE_MS) {
+      this.endInit(key, s.id);
+      return undefined;
     }
+    return s;
+  }
+
+  /** Ends the init `id` (only that one: a newer init of the same chat is left alone). */
+  private endInit(key: ChatKey, id?: string): void {
+    const s = this.inits.get(key);
+    if (!s || (id !== undefined && s.id !== id)) return;
+    this.inits.delete(key);
+    this.persistInits();
+  }
+
+  /** The session `initId` of `key`, when it is still running and belongs to the caller. */
+  private ownSession(key: ChatKey, initId: string, owner?: InitOwner): InitSession {
+    const s = this.activeInit(key);
+    if (!s || s.id !== initId || (s.owner && owner && !sameOwner(s.owner, owner))) throw staleInit();
+    return s;
+  }
+
+  /**
+   * Starts an init owned by the calling tab; a tracked chat can be rescanned the same way. Another
+   * tab's running init is not taken over. Checking and reserving happen without a pause in between,
+   * so two tabs starting at once cannot both get it.
+   */
+  async initStart(key: ChatKey, owner?: InitOwner): Promise<{ status: ChatStatus; initId: string }> {
+    await this.loadInits();
+    const current = this.activeInit(key);
+    if (current && !sameOwner(current.owner, owner)) throw new GitchatError('This chat is already being saved in another tab.', 'busy');
+    const session: InitSession = { id: crypto.randomUUID(), progress: 0, touchedAt: this.now(), base: new Map() };
+    if (owner) session.owner = owner;
+    this.inits.set(key, session);
+    this.chatErrors.delete(key);
+    // The baseline is read in order with every other change to the chat.
+    await this.exclusive(async () => {
+      const rec = await this.deps.db.getChat(key);
+      session.base = new Map((rec?.messages ?? []).map((m) => [m.id, messageHash(m)]));
+    });
+    this.persistInits();
+    return { status: await this.emitStatus(key), initId: session.id };
+  }
+
+  async initProgress(key: ChatKey, initId: string, progress: number, owner?: InitOwner): Promise<null> {
+    await this.loadInits();
+    const s = this.ownSession(key, initId, owner);
+    s.progress = Math.min(1, Math.max(0, progress));
+    s.touchedAt = this.now();
+    if (this.now() - (s.savedAt ?? 0) > 20_000) {
+      s.savedAt = this.now();
+      this.persistInits();
+    }
+    await this.emitStatus(key);
     return null;
   }
 
-  /** A complete capture: the chat becomes tracked and everything new is staged. */
-  async initDone(snap: ChatSnapshot): Promise<ChatStatus> {
+  /**
+   * A complete capture: the chat becomes tracked (or is replaced, for a rescan) and the differences
+   * are staged. The session is checked again right before the change is applied, in order with
+   * cancellation and every other change; changes applied since the init started are kept.
+   */
+  async initDone(snap: ChatSnapshot, initId: string, owner?: InitOwner): Promise<ChatStatus> {
     const key = chatKey(snap.service, snap.chatId);
-    const committed = await this.exclusive(async () => {
-      const merged = mergeSnapshot([], { ...snap, complete: true });
-      if (!merged.ok) {
-        this.chatErrors.set(key, merged.message);
-        return false;
-      }
-      const at = snap.capturedAt || this.iso();
-      const rec: ChatRecord = (await this.deps.db.getChat(key)) ?? {
-        key,
-        service: snap.service,
-        chatId: snap.chatId,
-        url: snap.url,
-        title: snap.title,
-        tracked: true,
-        pathConfirmed: false,
-        createdAt: at,
-        capturedAt: at,
-        messages: [],
-        committed: [],
-        updatedAt: this.now(),
-      };
-      rec.tracked = true;
-      rec.messages = merged.messages;
-      rec.capturedAt = at;
-      rec.url = snap.url || rec.url;
-      rec.title = snap.title || rec.title;
-      rec.updatedAt = this.now();
-      if (!rec.path) await this.assignPath(rec);
-      this.chatErrors.delete(key);
-      await this.deps.db.putChat(rec);
-      return this.autoCommit(rec);
-    });
-    this.capturing.delete(key);
-    if (committed) this.afterCommit();
+    await this.loadInits();
+    this.ownSession(key, initId, owner);
+    await this.ensureRepo();
+    const messages = uniqueIds(await withAssetShas(snap.messages));
+    try {
+      const committed = await this.exclusive(async () => {
+        const session = this.ownSession(key, initId, owner);
+        const existing = await this.deps.db.getChat(key);
+        const merged = mergeSnapshot(existing?.messages ?? [], { ...snap, messages, complete: true });
+        if (!merged.ok) {
+          this.chatErrors.set(key, merged.message);
+          return false;
+        }
+        const list = existing ? keepChangesSince(merged.messages, existing.messages, session.base) : merged.messages;
+        const at = snap.capturedAt || this.iso();
+        const rec: ChatRecord = existing ?? {
+          key,
+          service: snap.service,
+          chatId: snap.chatId,
+          url: snap.url,
+          title: snap.title,
+          tracked: true,
+          pathConfirmed: false,
+          createdAt: at,
+          capturedAt: at,
+          messages: [],
+          committed: [],
+          updatedAt: this.now(),
+        };
+        const seen = new Set([...messages.map((m) => m.id), ...(existing?.seen ?? [])]);
+        rec.tracked = true;
+        rec.messages = list;
+        rec.seen = list.filter((m) => seen.has(m.id)).map((m) => m.id);
+        rec.settled = true;
+        rec.capturedAt = later(at, rec.capturedAt);
+        rec.seenAt = rec.seenAt ? later(at, rec.seenAt) : at;
+        rec.url = snap.url || rec.url;
+        rec.title = snap.title || rec.title;
+        rec.updatedAt = this.now();
+        if (!rec.path) await this.assignPath(rec);
+        this.chatErrors.delete(key);
+        await this.deps.db.putChat(rec);
+        return this.autoCommit(rec);
+      });
+      if (committed) this.afterCommit();
+    } finally {
+      this.endInit(key, initId);
+    }
     return this.emitStatus(key);
   }
 
-  async initCancel(key: ChatKey): Promise<ChatStatus> {
-    this.capturing.delete(key);
+  /** Ends an init. Without an id (the user pressed Cancel anywhere), whichever init runs is ended. */
+  async initCancel(key: ChatKey, initId?: string): Promise<ChatStatus> {
+    await this.loadInits();
+    this.endInit(key, initId);
     return this.emitStatus(key);
+  }
+
+  /** A tab closed or navigated away: the inits it was running end with it. */
+  async ownerGone(tabId: number): Promise<void> {
+    await this.loadInits();
+    for (const [key, s] of [...this.inits]) {
+      if (s.owner?.tabId !== tabId) continue;
+      this.endInit(key, s.id);
+      await this.emitStatus(key);
+    }
   }
 
   async untrack(key: ChatKey): Promise<ChatStatus> {
@@ -231,26 +426,34 @@ export class Engine {
         await this.deps.db.putChat(rec);
       }
     });
-    this.capturing.delete(key);
+    this.endInit(key);
     this.chatErrors.delete(key);
     return this.emitStatus(key);
   }
 
-  /** New file name, or the file another device already created for this chat. */
+  /**
+   * File name of a newly tracked chat. When another device already saved it, continue from that
+   * copy: the newer capture wins for what both have, and nothing only the repository has is lost
+   * unless our capture is newer (then it shows as removed in staging).
+   */
   private async assignPath(rec: ChatRecord): Promise<void> {
     rec.path = chatPath(rec.service, rec.title, rec.chatId, rec.createdAt);
     rec.pathConfirmed = false;
     try {
       const { repo } = await this.deps.settings.get();
+      rec.repo = repoId(repo);
       if (!repo) return;
-      const found = await findRemoteChat(await this.deps.github(), repo, rec.service, rec.chatId, false);
-      if (found) {
-        rec.path = found.path;
-        rec.remoteBlob = found.sha;
-      }
+      const found = await findRemoteChat(await this.deps.github(), repo, rec.service, rec.chatId);
+      if (!found) return; // the push picks a free name then
+      rec.path = found.path;
       rec.pathConfirmed = true;
+      rec.remoteBlob = found.sha;
+      rec.baseRefs = refsOf(found.messages);
+      rec.createdAt = found.front.created || rec.createdAt;
+      if (!oursIsNewer(rec, found.front)) rec.messages = unionMessages(found.messages, rec.messages);
+      rec.committed = refsOf(found.messages);
     } catch (e) {
-      // Offline or signed out: the path is confirmed when pushing.
+      // Offline or signed out: the path is checked when pushing.
       log.debug('path lookup failed', e);
     }
   }
@@ -258,6 +461,7 @@ export class Engine {
   // ---- commits
 
   async commit(key: ChatKey): Promise<ChatStatus> {
+    await this.ensureRepo();
     const c = await this.exclusive(async () => {
       const rec = await this.deps.db.getChat(key);
       return rec?.tracked ? this.commitLocked(rec) : null;
@@ -266,30 +470,34 @@ export class Engine {
     return this.emitStatus(key);
   }
 
+  /** Automatic commits never split a question from its answer: the last capture must have been settled. */
   private async autoCommit(rec: ChatRecord): Promise<boolean> {
     const s = await this.deps.settings.get();
-    return s.autoCommit && !!(await this.commitLocked(rec));
+    return s.autoCommit && rec.settled !== false && !!(await this.commitLocked(rec));
   }
 
   private async commitLocked(rec: ChatRecord): Promise<LocalCommit | null> {
     const staged = diffStaged(rec.messages, rec.committed);
     if (!staged.length) return null;
+    const repo = await this.currentRepo();
     rec.path ??= chatPath(rec.service, rec.title, rec.chatId, rec.createdAt);
-    const commit: LocalCommit = {
-      id: crypto.randomUUID(),
-      key: rec.key,
-      seq: await this.deps.db.nextSeq(),
-      message: `${rec.service}: ${chatTitle(rec.title)} (+${staged.length})`,
-      n: staged.length,
-      createdAt: this.now(),
-      doc: { service: rec.service, chatId: rec.chatId, url: rec.url, title: rec.title, createdAt: rec.createdAt, capturedAt: rec.capturedAt, messages: rec.messages },
-      pushed: false,
-    };
-    await this.deps.db.putCommits([commit]);
+    rec.repo ??= repo;
+    const doc: ChatDoc = { service: rec.service, chatId: rec.chatId, url: rec.url, title: rec.title, createdAt: rec.createdAt, capturedAt: rec.capturedAt, messages: rec.messages };
     rec.committed = refsOf(rec.messages);
     rec.updatedAt = this.now();
-    await this.deps.db.putChat(rec);
-    return commit;
+    return this.deps.db.addCommit(
+      {
+        id: crypto.randomUUID(),
+        key: rec.key,
+        repo,
+        message: `${rec.service}: ${chatTitle(rec.title)} (+${staged.length})`,
+        n: staged.length,
+        createdAt: this.now(),
+        pushed: false,
+      },
+      doc,
+      rec,
+    );
   }
 
   private afterCommit(): void {
@@ -301,8 +509,9 @@ export class Engine {
 
   // ---- push
 
-  /** Commits anything staged for `key`, then pushes every pending commit. */
+  /** Commits anything staged for `key`, then pushes every pending commit of the current repository. */
   async push(key?: ChatKey): Promise<ChatStatus | null> {
+    await this.ensureRepo();
     if (key) {
       const c = await this.exclusive(async () => {
         const rec = await this.deps.db.getChat(key);
@@ -310,25 +519,36 @@ export class Engine {
       });
       if (c) void this.emitSync();
     }
-    clearTimeout(this.pushTimer);
-    await this.runPush();
+    this.cancelScheduledPush();
+    await this.runPush('manual');
     return key ? this.emitStatus(key) : null;
   }
 
-  private runPush(): Promise<void> {
+  /**
+   * One push at a time. A request arriving meanwhile runs right after it: a manual one always, an
+   * automatic one only if auto-push is still on by then.
+   */
+  private runPush(kind: PushKind): Promise<void> {
     if (this.pushing) {
-      this.pushAgain = true;
+      this.again[kind] = true;
       return this.pushing;
     }
     const run = (async () => {
       try {
-        do {
-          this.pushAgain = false;
-          await this.pushOnce();
-        } while (this.pushAgain);
+        for (;;) {
+          await this.withRepoLock(() => this.pushOnce());
+          if (this.again.manual) {
+            this.again.manual = this.again.auto = false;
+            continue;
+          }
+          if (!this.again.auto) break;
+          this.again.auto = false;
+          if (!(await this.deps.settings.get()).autoPush) break;
+        }
       } finally {
         this.pushing = null;
         await this.emitAll();
+        await this.emitSync();
       }
     })();
     this.pushing = run;
@@ -336,47 +556,90 @@ export class Engine {
   }
 
   private async pushOnce(): Promise<void> {
-    const pending = (await this.deps.db.allCommits()).filter((c) => !c.pushed && !c.superseded).sort((a, b) => a.seq - b.seq);
-    if (!pending.length) return;
+    const { repo } = await this.deps.settings.get();
+    const id = repoId(repo);
+    await this.syncRepoLocked(id);
+    const commits = await this.deps.db.allCommits();
+    const pending = commits.filter((c) => isPending(c, id)).sort((a, b) => a.seq - b.seq);
+    if (!repo && commits.some((c) => !c.pushed && !c.superseded)) {
+      const err = new GitchatError('Choose a repository in the gitchat settings first.', 'no-repo');
+      await this.setSyncMeta({ lastError: err.message });
+      throw err;
+    }
+    if (!repo || !pending.length) {
+      this.deps.clearRetry?.();
+      return;
+    }
     let outcome: PushOutcome;
+    let items: CommitWithDoc[];
     try {
-      const { repo } = await this.deps.settings.get();
-      if (!repo) throw new GitchatError('Choose a repository in the gitchat settings first.', 'no-repo');
       await this.emitAll();
+      const docs = await this.deps.db.getDocs(pending.map((c) => c.id));
+      items = pending.flatMap((commit) => {
+        const doc = docs.get(commit.id);
+        return doc ? [{ commit, doc }] : [];
+      });
       const gh = await this.deps.github();
-      const run = () => pushCommits(gh, repo, pending, (k) => this.deps.db.getChat(k));
+      const run = () => pushCommits(gh, repo, items, (k) => this.deps.db.getChat(k));
       outcome = await (this.deps.keepAlive ? this.deps.keepAlive(run) : run());
     } catch (e) {
       const err = toGitchatError(e);
       await this.setSyncMeta({ lastError: err.message });
       throw err;
     }
-    await this.exclusive(async () => {
-      for (const c of pending) {
-        const sha = outcome.pushed.get(c.id);
-        if (sha) {
-          c.pushed = true;
-          c.sha = sha;
-          delete c.doc;
-        } else if (outcome.superseded.has(c.id)) {
-          c.superseded = true;
-          delete c.doc;
-        }
-      }
-      await this.deps.db.putCommits(pending);
-      for (const [key, info] of outcome.chats) {
-        const rec = await this.deps.db.getChat(key);
-        if (!rec) continue;
-        rec.path = info.path;
-        rec.pathConfirmed = true;
-        rec.remoteBlob = info.remoteBlob;
-        rec.updatedAt = this.now();
-        await this.deps.db.putChat(rec);
-      }
-      await this.prune();
-    });
+    await this.exclusive(() => this.applyPush(pending, items, outcome, id));
     await this.setSyncMeta({ lastPushAt: this.now() });
     this.retries = 0;
+    this.deps.clearRetry?.();
+  }
+
+  /**
+   * Records a push: receipts, final paths and bases. Where the repository copy had changes from
+   * another device, the chat is rebased on it: the pushed batch's last document is the common base,
+   * and both the working messages and the commits made while the push ran keep their own changes.
+   */
+  private async applyPush(pending: LocalCommit[], items: CommitWithDoc[], outcome: PushOutcome, repo: string | null): Promise<void> {
+    const sent = new Set(items.map((i) => i.commit.id));
+    const batch = new Map(items.map((i) => [i.commit.key, i.doc])); // last document per chat (seq order)
+    const done: string[] = [];
+    for (const c of pending) {
+      const sha = outcome.pushed.get(c.id);
+      if (sha) {
+        c.pushed = true;
+        c.sha = sha;
+      } else if (outcome.superseded.has(c.id) || !sent.has(c.id)) {
+        c.superseded = true; // a commit whose document is missing has nothing left to send
+      } else continue;
+      c.repo = repo;
+      done.push(c.id);
+    }
+    await this.deps.db.putCommits(pending);
+    await this.deps.db.deleteDocs(done);
+    for (const [key, res] of outcome.chats) {
+      const rec = await this.deps.db.getChat(key);
+      if (!rec) continue;
+      const pushedDoc = batch.get(key);
+      if (res.merged && pushedDoc) {
+        const base = hashesOf(refsOf(pushedDoc.messages));
+        const newer = (at: string) => !isOlder(at, res.capturedAt);
+        rec.messages = threeWayMerge(base, rec.messages, res.messages, newer(rec.capturedAt));
+        const waiting = (await this.deps.db.commitsFor(key)).filter((c) => !c.pushed && !c.superseded && !sent.has(c.id)).sort((a, b) => a.seq - b.seq);
+        const docs = await this.deps.db.getDocs(waiting.map((c) => c.id));
+        for (const doc of docs.values()) doc.messages = threeWayMerge(base, doc.messages, res.messages, newer(doc.capturedAt));
+        await this.deps.db.putDocs(docs);
+        const last = waiting.length ? docs.get(waiting.at(-1)!.id) : undefined;
+        rec.committed = refsOf(last ? last.messages : res.messages);
+        rec.capturedAt = later(rec.capturedAt, res.capturedAt);
+      }
+      rec.baseRefs = refsOf(res.messages);
+      rec.repo = repo;
+      rec.path = res.path;
+      rec.pathConfirmed = true;
+      rec.remoteBlob = res.remoteBlob;
+      rec.updatedAt = this.now();
+      await this.deps.db.putChat(rec);
+    }
+    await this.prune();
   }
 
   /** Keeps the most recent pushed commits per chat (for the graph); older ones live in git. */
@@ -404,11 +667,25 @@ export class Engine {
       this.pushTimer = undefined;
       void this.autoPush();
     }, delay);
+    // If the worker is stopped before the timer fires, the alarm wakes it up to push.
+    this.deps.scheduleRetry?.(delay + 30_000);
+  }
+
+  /** Drops automatic work that has not started yet (a running push finishes). */
+  private cancelScheduledPush(): void {
+    clearTimeout(this.pushTimer);
+    this.pushTimer = undefined;
+    this.again.auto = false;
   }
 
   private async autoPush(): Promise<void> {
+    // The setting may have been turned off while the push was waiting.
+    if (!(await this.deps.settings.get()).autoPush) {
+      this.deps.clearRetry?.();
+      return;
+    }
     try {
-      await this.runPush();
+      await this.runPush('auto');
     } catch (e) {
       const err = toGitchatError(e);
       if (!RETRYABLE.has(err.code)) return;
@@ -418,42 +695,71 @@ export class Engine {
     }
   }
 
-  /** Woken up after a failed automatic push. */
+  /** Woken up by the alarm: after a failed automatic push, or because the worker was restarted. */
   async retry(): Promise<void> {
-    if ((await this.deps.settings.get()).autoPush) await this.autoPush();
+    await this.autoPush();
   }
 
-  /** On start, after sign-in, etc.: push what is waiting when auto-push is on. */
+  /** On every start of the worker, after sign-in, etc.: push what is waiting when auto-push is on. */
   async resume(): Promise<void> {
-    if ((await this.deps.settings.get()).autoPush && (await this.pendingCount()) > 0) this.schedulePush(1000);
+    await this.ensureRepo();
+    const s = await this.deps.settings.get();
+    if (s.autoPush && (await this.pendingCount()) > 0) this.schedulePush(Math.min(1000, this.deps.pushDelayMs ?? 1000));
   }
 
   // ---- settings
 
   async settingsChanged(prev: Settings, next: Settings): Promise<void> {
-    const repoChanged = JSON.stringify(prev.repo) !== JSON.stringify(next.repo);
-    if (repoChanged) {
-      // Paths must be re-checked against the new repository.
-      await this.exclusive(async () => {
-        for (const rec of await this.deps.db.allChats()) {
-          rec.pathConfirmed = false;
-          delete rec.remoteBlob;
-          await this.deps.db.putChat(rec);
-        }
-      });
-      this.remoteMisses.clear();
-      await this.clearError();
+    if (!next.autoPush) {
+      this.cancelScheduledPush();
+      if (prev.autoPush) this.deps.clearRetry?.();
     }
+    const repoChanged = repoId(prev.repo) !== repoId(next.repo);
+    if (repoChanged) await this.withRepoLock(() => this.syncRepoLocked(repoId(next.repo)));
     let committed = false;
     if (next.autoCommit && !prev.autoCommit) {
       committed = await this.exclusive(async () => {
         let any = false;
-        for (const rec of await this.deps.db.allChats()) if (rec.tracked && (await this.commitLocked(rec))) any = true;
+        for (const rec of await this.deps.db.allChats()) if (rec.tracked && (await this.autoCommit(rec))) any = true;
         return any;
       });
     }
     if (next.autoPush && (committed || !prev.autoPush) && (await this.pendingCount()) > 0) this.schedulePush();
-    if (committed || repoChanged) await this.emitAll();
+    if (committed || repoChanged) {
+      await this.emitAll();
+      await this.emitSync();
+    }
+  }
+
+  /**
+   * Makes the stored state match the chosen repository. When it changed (here, or synced from
+   * another device while this worker was asleep): commits for other repositories are dropped — their
+   * content is still in the chats, assets included — and chats saved to another repository are
+   * staged in full again, so the next commit writes them to this one.
+   */
+  private async syncRepoLocked(repo: string | null): Promise<void> {
+    // No repository (e.g. settings were reset): nothing to align with until one is chosen again.
+    if (repo === null) return;
+    const stored = await this.deps.db.getMeta<string>(REPO_META);
+    if (stored === repo) return;
+    await this.exclusive(async () => {
+      const commits = await this.deps.db.allCommits();
+      const drop = commits.filter((c) => c.repo !== null && c.repo !== repo).map((c) => c.id);
+      if (drop.length) await this.deps.db.deleteCommits(drop);
+      for (const rec of await this.deps.db.allChats()) {
+        if (rec.repo === repo) continue;
+        if (rec.repo) rec.committed = [];
+        rec.repo = repo;
+        rec.pathConfirmed = false;
+        delete rec.remoteBlob;
+        delete rec.baseRefs;
+        rec.updatedAt = this.now();
+        await this.deps.db.putChat(rec);
+      }
+      await this.deps.db.setMeta(REPO_META, repo);
+    });
+    this.remoteMisses.clear();
+    if (stored !== undefined) await this.clearError();
   }
 
   /** Forget the last push error (e.g. after signing in again). */
@@ -464,6 +770,7 @@ export class Engine {
   // ---- status
 
   async status(key: ChatKey): Promise<ChatStatus> {
+    await this.loadInits();
     const [rec, mine, all, settings, meta] = await Promise.all([
       this.deps.db.getChat(key),
       this.deps.db.commitsFor(key),
@@ -471,18 +778,20 @@ export class Engine {
       this.deps.settings.get(),
       this.deps.db.getMeta<SyncMeta>('sync'),
     ]);
+    const repo = repoId(settings.repo);
     const { service, chatId } = rec ?? splitKey(key);
     const tracked = !!rec?.tracked;
     const commits = mine
-      .filter((c) => !c.superseded)
+      .filter((c) => !c.superseded && inRepo(c, repo))
       .sort((a, b) => b.seq - a.seq)
       .slice(0, RECENT_COMMITS);
     const aheadHere = commits.some((c) => !c.pushed);
     const chatError = this.chatErrors.get(key);
     const pushError = aheadHere ? meta?.lastError : undefined;
+    const init = this.activeInit(key);
 
     let phase: ChatPhase = 'idle';
-    if (this.capturing.has(key)) phase = 'capturing';
+    if (init) phase = 'capturing';
     else if (this.pushing && aheadHere) phase = 'pushing';
     else if (chatError || pushError) phase = 'error';
 
@@ -493,13 +802,14 @@ export class Engine {
       tracked,
       staged: tracked && rec ? diffStaged(rec.messages, rec.committed) : [],
       commits: commits.map(toInfo),
-      aheadTotal: all.filter((c) => !c.pushed && !c.superseded).length,
+      aheadTotal: all.filter((c) => isPending(c, repo)).length,
       phase,
     };
     if (rec?.path) status.path = rec.path;
-    if (phase === 'capturing') status.progress = this.capturing.get(key) ?? 0;
+    if (init) status.progress = init.progress;
     if (phase === 'error') status.error = chatError ?? pushError;
-    if (rec?.path && settings.repo) {
+    // Only link to a file that exists in this repository.
+    if (rec?.path && rec.remoteBlob && rec.repo === repo && settings.repo) {
       const { owner, name, branch } = settings.repo;
       status.webUrl = `https://github.com/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/blob/${encodePath(branch)}/${encodePath(rec.path)}`;
     }
@@ -515,7 +825,8 @@ export class Engine {
   }
 
   private async pendingCount(): Promise<number> {
-    return (await this.deps.db.allCommits()).filter((c) => !c.pushed && !c.superseded).length;
+    const repo = await this.currentRepo();
+    return (await this.deps.db.allCommits()).filter((c) => isPending(c, repo)).length;
   }
 
   private async setSyncMeta(patch: SyncMeta): Promise<void> {
@@ -544,4 +855,22 @@ export class Engine {
 
 function toInfo(c: LocalCommit): CommitInfo {
   return c.sha ? { id: c.id, n: c.n, t: c.createdAt, pushed: c.pushed, sha: c.sha } : { id: c.id, n: c.n, t: c.createdAt, pushed: c.pushed };
+}
+
+function sameOwner(a: InitOwner | undefined, b: InitOwner | undefined): boolean {
+  if (!a || !b) return !a && !b;
+  return a.tabId === b.tabId && (!a.documentId || !b.documentId || a.documentId === b.documentId);
+}
+
+function staleInit(message = 'This capture was cancelled or replaced. Start again.'): GitchatError {
+  return new GitchatError(message, 'stale-init');
+}
+
+/** Git blob SHAs of the captured assets (recomputed: never trust a SHA sent by a page). */
+async function withAssetShas(messages: CapturedMessage[]): Promise<CapturedMessage[]> {
+  return Promise.all(
+    messages.map(async (m) =>
+      m.assets?.length ? { ...m, assets: await Promise.all(m.assets.map(async (a) => ({ ...a, sha: await gitBlobSha(a.data, a.encoding) }))) } : m,
+    ),
+  );
 }

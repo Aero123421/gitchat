@@ -44,8 +44,34 @@ export interface Adapter {
   composer(doc: Document): Element | null;
   /** Light or dark page theme, for the widget's glass. */
   theme(doc: Document): 'light' | 'dark';
-  /** Rendered HTML of visualizations that are open right now (e.g. an artifact side panel). */
-  artifacts?(doc: Document): Promise<CapturedArtifact[]>;
+  /**
+   * Rendered HTML of visualizations that are open right now (e.g. an artifact side panel). Frames
+   * whose `key` is in `skip` are not asked again (init collects them step by step).
+   */
+  artifacts?(doc: Document, opts?: { skip?: ReadonlySet<string> }): Promise<CapturedArtifact[]>;
+  /**
+   * True when the site removes off-screen messages from the DOM (a virtualized list). Init then has
+   * to harvest while scrolling; otherwise every loaded message is in the DOM and one read is enough.
+   */
+  readonly virtualized: boolean;
+  /** Extra attributes whose changes tell the AI observer to look again (busy/turn-state flags). */
+  readonly watchAttributes?: readonly string[];
+  /**
+   * Identity of the turn the AI is working on right now, when the site exposes it. The observer
+   * remembers it, so a virtualized list that unmounts the busy turn is not mistaken for "done".
+   */
+  activeTurnId?(doc: Document): string | null;
+  /** Whether the turn with this identity is currently in the DOM (see `activeTurnId`). */
+  hasTurn?(doc: Document, id: string): boolean;
+  /**
+   * 1-based position of a message among all loaded messages, when the site exposes it (Claude's
+   * aria-posinset). Init then checks that every position up to `loadedCount` was read.
+   */
+  positionOf?(node: MessageNode): number | null;
+  /** Positions of every numbered row in the DOM now, messages or not (coverage counts all rows). */
+  rowPositions?(doc: Document): number[];
+  /** Start listening to the page (e.g. which preview card the user opens). Called once per page. */
+  watch?(doc: Document): void;
   /** How long the page must stay idle before an answer counts as finished (default 700 ms). */
   readonly doneQuietMs?: number;
   /** Init: how long nothing may change at the top before we call it the start (default 2500 ms). */
@@ -53,7 +79,15 @@ export interface Adapter {
 }
 
 export interface CapturedArtifact {
-  /** Title shown on the artifact's card in the message, used to match the two. */
+  /**
+   * Stable identity of the visualization: the site's artifact id, or the owning message id plus the
+   * frame's position in it. Names the saved asset, so a recapture never renames or overwrites
+   * another visualization's file.
+   */
+  key: string;
+  /** ID of the message that shows the artifact's card, when known; otherwise matched by title. */
+  messageId: string | null;
+  /** Label of the card in the message (the text after "**Artifact:**" / "**File:**"). */
   title: string;
   html: string;
 }

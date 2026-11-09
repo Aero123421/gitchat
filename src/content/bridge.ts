@@ -21,6 +21,8 @@ export interface UiState {
   webUrl: string;
   error: string;
   ai: AiPhase;
+  /** The AI's turn made no progress for a long time (shown as idle, but not finished). */
+  stalled: boolean;
 }
 
 export interface UiActions {
@@ -46,6 +48,7 @@ const emptyState = (): UiState => ({
   webUrl: '',
   error: '',
   ai: 'idle',
+  stalled: false,
 });
 
 export class UiStore {
@@ -74,16 +77,21 @@ export class UiStore {
 
   // ---- actions called by the widgets
 
+  // Commit and push first read the page again (it may show more than was last captured); the
+  // controller answers with `nope()` when there turns out to be nothing to do.
   commit(): void {
     if (!this.state.tracked || this.state.phase === 'capturing') return;
-    if (!this.state.staged.length) return this.emit('nope', { action: 'commit' });
     this.actions.commit();
   }
 
   push(): void {
     if (this.state.phase === 'pushing' || this.state.phase === 'capturing') return;
-    if (!this.state.staged.length && !this.aheadTotal && this.state.phase !== 'error') return this.emit('nope', { action: 'push' });
     this.actions.push();
+  }
+
+  /** The action had nothing to do (the widget gives a small "no" shake). */
+  nope(action: 'commit' | 'push'): void {
+    this.emit('nope', { action });
   }
 
   init(): void {
@@ -106,7 +114,7 @@ export class UiStore {
     this.key = key;
     this.capturingHere = false;
     const s = this.state;
-    Object.assign(s, emptyState(), { settings: s.settings, ai: s.ai });
+    Object.assign(s, emptyState(), { settings: s.settings, ai: s.ai, stalled: s.stalled });
     if (status) this.copy(status);
     this.emit('reset');
   }
@@ -138,7 +146,36 @@ export class UiStore {
     if (prev.phase !== 'pushing' && s.phase === 'pushing') this.emit('pushStart', { commits: s.commits.filter((c) => !c.pushed) });
     if (nowPushed.length) this.emit('pushed', { commits: nowPushed });
     if (prev.phase !== 'error' && s.phase === 'error') this.emit('error', { action: 'push' });
+    // a push always ends with one event, also when nothing was sent (e.g. every commit was superseded)
+    if (prev.phase === 'pushing' && s.phase !== 'pushing') this.emit('pushEnd', { ok: s.phase !== 'error', pushed: nowPushed.length });
     this.emit('status');
+  }
+
+  /** Unpushed commits across all chats changed (another tab committed or pushed). */
+  setAhead(n: number): void {
+    if (n === this.aheadTotal) return;
+    this.aheadTotal = n;
+    this.emit('status');
+  }
+
+  /** An action failed (init, or the fresh capture before a commit/push): show why until the next status. */
+  fail(action: 'init' | 'commit' | 'push', message: string): void {
+    const s = this.state;
+    s.phase = 'error';
+    s.error = message;
+    this.emit('error', { action, message });
+    this.emit('status');
+  }
+
+  /** Init could not finish on an untracked chat. */
+  initFailed(message: string): void {
+    if (!this.state.tracked) this.fail('init', message);
+  }
+
+  /** A rescan of a tracked chat ended (the tracked flag never changes, so say it explicitly). */
+  captureDone(ok: boolean): void {
+    if (ok) this.emit('captured', { items: this.state.staged });
+    else this.emit('captureCancel');
   }
 
   applySettings(settings: Settings): void {
@@ -159,6 +196,12 @@ export class UiStore {
     this.emit('ai', { phase, ms });
   }
 
+  setStalled(on: boolean): void {
+    if (this.state.stalled === on) return;
+    this.state.stalled = on;
+    this.emit('stalled', { on });
+  }
+
   setCapture(p: InitProgress | null): void {
     const s = this.state;
     if (!p) {
@@ -168,6 +211,7 @@ export class UiStore {
     const starting = s.phase !== 'capturing';
     this.capturingHere = true;
     s.phase = 'capturing';
+    s.error = '';
     s.captureStage = p.stage;
     s.captureCount = p.count;
     s.progress = p.progress;

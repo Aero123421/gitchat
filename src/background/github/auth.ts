@@ -14,6 +14,18 @@ const DEVICE_CODE_URL = 'https://github.com/login/device/code';
 const TOKEN_URL = 'https://github.com/login/oauth/access_token';
 const SCOPE = 'repo';
 
+/**
+ * Keeps the token out of reach of content scripts: chrome.storage.local is readable from them by
+ * default. Older Chrome versions only support this for session storage; nothing else depends on it.
+ */
+export async function restrictStorage(): Promise<void> {
+  try {
+    await chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' });
+  } catch {
+    // not supported for this storage area here
+  }
+}
+
 export async function loadAuth(): Promise<AuthState | null> {
   const got = await chrome.storage.local.get(AUTH_KEY);
   const a = got[AUTH_KEY] as AuthState | undefined;
@@ -41,6 +53,8 @@ export async function identify(token: string, opts: ClientOptions = {}): Promise
 }
 
 interface Pending {
+  /** Identifies this sign-in attempt; a token is only saved while it is still the pending one. */
+  id: string;
   clientId: string;
   deviceCode: string;
   interval: number;
@@ -65,27 +79,29 @@ export class DeviceFlow {
     const data = await this.post(DEVICE_CODE_URL, { client_id: clientId, scope: SCOPE });
     if (!data.device_code || !data.user_code || !data.verification_uri) throw signInError(data);
     const expiresIn = Number(data.expires_in) || 900;
-    const pending: Pending = { clientId, deviceCode: data.device_code, interval: Number(data.interval) || 5, expiresAt: this.now() + expiresIn * 1000 };
+    const pending: Pending = { id: crypto.randomUUID(), clientId, deviceCode: data.device_code, interval: Number(data.interval) || 5, expiresAt: this.now() + expiresIn * 1000 };
     this.generation++;
     // Session storage survives a service-worker restart while the user approves the code.
     await chrome.storage.session.set({ [PENDING_KEY]: pending });
     return { userCode: data.user_code, verificationUri: data.verification_uri, expiresIn, interval: pending.interval };
   }
 
-  /** Polls GitHub until the user approves the code; returns the access token. */
-  async wait(): Promise<string> {
+  /**
+   * Polls GitHub until the user approves the code. Returns the access token and the attempt it
+   * belongs to; the caller saves the token only if `claim(flowId)` still succeeds afterwards.
+   */
+  async wait(): Promise<{ token: string; flowId: string }> {
     const generation = this.generation;
     const p = (await chrome.storage.session.get(PENDING_KEY))[PENDING_KEY] as Pending | undefined;
     if (!p) throw new GitchatError('The sign-in expired. Start again.', 'expired');
+    const cancelled = () => new GitchatError('The sign-in was cancelled.', 'cancelled');
     let interval = p.interval;
     while (this.now() < p.expiresAt) {
       await this.sleep(interval * 1000);
-      if (generation !== this.generation) throw new GitchatError('A newer sign-in was started.', 'cancelled');
+      if (generation !== this.generation) throw cancelled();
       const data = await this.post(TOKEN_URL, { client_id: p.clientId, device_code: p.deviceCode, grant_type: 'urn:ietf:params:oauth:grant-type:device_code' });
-      if (data.access_token) {
-        await chrome.storage.session.remove(PENDING_KEY);
-        return data.access_token;
-      }
+      if (generation !== this.generation) throw cancelled();
+      if (data.access_token) return { token: data.access_token, flowId: p.id };
       if (data.error === 'authorization_pending') continue;
       if (data.error === 'slow_down') {
         interval = Number(data.interval) || interval + 5;
@@ -98,6 +114,20 @@ export class DeviceFlow {
     }
     await chrome.storage.session.remove(PENDING_KEY);
     throw new GitchatError('The sign-in code expired. Start again.', 'expired');
+  }
+
+  /** Ends the pending sign-in (cancel, sign-out, or a token signed in instead): its approval is ignored. */
+  async cancel(): Promise<void> {
+    this.generation++;
+    await chrome.storage.session.remove(PENDING_KEY);
+  }
+
+  /** True (once) when `flowId` is still the pending sign-in; a stale approval returns false. */
+  async claim(flowId: string): Promise<boolean> {
+    const p = (await chrome.storage.session.get(PENDING_KEY))[PENDING_KEY] as Pending | undefined;
+    if (p?.id !== flowId) return false;
+    await chrome.storage.session.remove(PENDING_KEY);
+    return true;
   }
 
   private async post(url: string, params: Record<string, string>): Promise<TokenReply> {

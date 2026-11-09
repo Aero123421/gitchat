@@ -1,6 +1,6 @@
 // Toolbar popup: the current chat's git status and quick actions, or a way into setup.
 
-import { request, type ContentCurrent, type ResOf, type SyncStatus, type ToContent } from '../shared/protocol';
+import { request, type ContentCurrent, type RefreshResult, type ResOf, type SyncStatus, type ToContent } from '../shared/protocol';
 import { t } from '../shared/i18n';
 import { chatKey, type ChatStatus, type ServiceId, type Settings } from '../shared/types';
 import { h, icon, midTrunc, mount, spinner } from '../options/kit/dom';
@@ -33,6 +33,19 @@ async function contentCurrent(tabId: number): Promise<ContentCurrent | null> {
   } catch {
     return null;
   }
+}
+
+/**
+ * Ask the chat tab to read the page once more, so a commit/push includes answers that finished while
+ * nothing was watching. Bounded: a busy or orphaned tab must not block the button.
+ */
+async function refreshPage(tabId: number): Promise<RefreshResult | null> {
+  const msg: ToContent = { gitchat: 1, type: 'content/refresh' };
+  const reply = await Promise.race([
+    chrome.tabs.sendMessage(tabId, msg).catch(() => null) as Promise<RefreshResult | null>,
+    new Promise<null>((r) => setTimeout(() => r(null), 4000)),
+  ]);
+  return reply && typeof reply === 'object' && 'ok' in reply ? reply : null;
 }
 
 function card(...children: (Node | null)[]): HTMLElement {
@@ -136,6 +149,12 @@ function chatView(tabId: number, cur: ContentCurrent & { chatId: string }, setti
     error = '';
     render();
     try {
+      // stage what the page shows now; if it can't be read, committing would save stale data
+      const read = await refreshPage(tabId);
+      if (read && !read.ok) {
+        error = read.error || t('errRefresh');
+        return;
+      }
       const next = await fn();
       if (next) status = next;
     } catch (e) {
@@ -235,6 +254,34 @@ function chatView(tabId: number, cur: ContentCurrent & { chatId: string }, setti
         items.push(h('span', { class: 'auto' }, [settings.autoCommit ? t('autoCommit') : '', settings.autoPush ? t('autoPush') : ''].filter(Boolean).join(' · ')));
     }
     items.push(h('span', { class: 'sp' }));
+    // read the whole chat again (e.g. after switching to another branch of an edited conversation)
+    if (s.tracked && s.phase !== 'capturing')
+      items.push(
+        h(
+          'button',
+          {
+            class: 'ib',
+            type: 'button',
+            title: t('rescan'),
+            'aria-label': t('rescan'),
+            disabled: busy !== null || s.phase === 'pushing',
+            onClick: async () => {
+              busy = 'track';
+              error = '';
+              render();
+              try {
+                const msg: ToContent = { gitchat: 1, type: 'content/rescan' };
+                await chrome.tabs.sendMessage(tabId, msg);
+              } catch (e) {
+                error = errorText(e);
+              }
+              busy = null;
+              await refresh();
+            },
+          },
+          icon('refresh'),
+        ),
+      );
     if (s.webUrl) {
       const linkBtn: HTMLButtonElement = h(
         'button',

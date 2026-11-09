@@ -6,13 +6,19 @@ import type { RepoRef } from '../shared/types';
 import { h, icon, mount, spinner } from './kit/dom';
 import { errorText } from './kit/errors';
 import { createSwitch } from './kit/switch';
+import { NEW_REPO_URL } from './connect';
+import { app } from './state';
 
 type Mode = 'create' | 'existing';
 const NAME_RE = /^[A-Za-z0-9._-]{1,100}$/;
+const FULL_NAME_RE = /^([A-Za-z0-9-]{1,39})\/([A-Za-z0-9._-]{1,100})$/;
 
 export function createRepoChooser(onDone: (repo: RepoRef) => void): HTMLElement {
   const root = h('div', { class: 'repo-chooser' });
-  let mode: Mode = 'create';
+  // A personal access token is usually limited to one repository that already exists, and such a
+  // token can't create repositories: start on the list instead.
+  const limitedToken = app.auth?.method === 'pat';
+  let mode: Mode = limitedToken ? 'existing' : 'create';
   let name = 'ai-chats';
   let priv = true;
   let busy = false;
@@ -52,6 +58,8 @@ export function createRepoChooser(onDone: (repo: RepoRef) => void): HTMLElement 
   }
 
   const note = (msg: string) => (msg ? h('div', { class: 'note err', role: 'alert' }, icon('alert'), h('span', null, msg)) : null);
+  const githubLink = () =>
+    h('a', { class: 'btn small', href: NEW_REPO_URL, target: '_blank', rel: 'noopener noreferrer' }, h('span', null, t('createRepoOnGitHub')), icon('external'));
 
   function render(): void {
     mount(body, mode === 'create' ? renderCreate() : renderExisting());
@@ -108,6 +116,8 @@ export function createRepoChooser(onDone: (repo: RepoRef) => void): HTMLElement 
     return h(
       'div',
       { class: 'stack fade' },
+      limitedToken ? h('div', { class: 'note' }, icon('alert'), h('span', null, t('repoPatNote'))) : null,
+      limitedToken ? githubLink() : null,
       h('div', null, h('label', { class: 'lbl', for: 'gc-repo-name' }, t('repoName')), h('div', { class: 'inline' }, input, createBtn)),
       h('div', { class: 'row tight' }, h('div', { class: 'text' }, h('div', { class: 'title' }, icon('lock'), t('repoPrivateLabel'))), privSwitch.el),
       priv ? null : h('div', { class: 'note err' }, icon('alert'), h('span', null, t('repoPublicWarn'))),
@@ -135,7 +145,51 @@ export function createRepoChooser(onDone: (repo: RepoRef) => void): HTMLElement 
     const detail = h('div', { class: 'stack' });
     const shown = () => repos!.filter((r) => `${r.owner}/${r.name}`.toLowerCase().includes(filter.toLowerCase()));
 
+    const typed = h('div', { class: 'stack' });
+    // A repository that isn't listed (the list is capped, or the token can't list it) can be typed.
+    const fillTyped = () => {
+      const m = FULL_NAME_RE.exec(filter.trim());
+      const listed = m && repos!.some((r) => `${r.owner}/${r.name}`.toLowerCase() === filter.trim().toLowerCase());
+      if (!m || listed) {
+        mount(typed);
+        return;
+      }
+      const [, owner, name] = m as unknown as [string, string, string];
+      // Look it up first, so a typed repository gets the same checks (public, not empty) as a listed one.
+      const btn = h(
+        'button',
+        {
+          class: 'btn small',
+          type: 'button',
+          disabled: busy,
+          onClick: async () => {
+            busy = true;
+            error = '';
+            btn.setAttribute('disabled', '');
+            btn.replaceChildren(spinner(), h('span', null, t('lookUpTyped', `${owner}/${name}`)));
+            try {
+              const info = await request('repo/info', { owner, name });
+              busy = false;
+              const id = `${info.owner}/${info.name}`.toLowerCase();
+              const known = repos!.find((r) => `${r.owner}/${r.name}`.toLowerCase() === id);
+              if (!known) repos!.unshift(info);
+              filter = `${info.owner}/${info.name}`;
+              search.value = filter;
+              select(known ?? info);
+            } catch (e) {
+              error = errorText(e);
+              busy = false;
+              fillTyped();
+            }
+          },
+        },
+        h('span', null, t('lookUpTyped', `${owner}/${name}`)),
+      );
+      mount(typed, h('div', null, btn), selected ? null : note(error));
+    };
+
     const fill = () => {
+      fillTyped();
       const items = shown();
       if (!items.length) {
         mount(list, h('div', { class: 'empty muted' }, t('noRepos')));
@@ -225,7 +279,16 @@ export function createRepoChooser(onDone: (repo: RepoRef) => void): HTMLElement 
     });
     fill();
     renderDetail();
-    return h('div', { class: 'stack fade' }, search, list, detail);
+    return h(
+      'div',
+      { class: 'stack fade' },
+      search,
+      typed,
+      list,
+      detail,
+      h('p', { class: 'muted hint' }, t('repoMissingHint')),
+      limitedToken ? githubLink() : null,
+    );
   }
 
   async function loadRepos(): Promise<void> {
@@ -246,5 +309,6 @@ export function createRepoChooser(onDone: (repo: RepoRef) => void): HTMLElement 
 
   root.append(seg, body);
   render();
+  if (mode === 'existing') void loadRepos();
   return root;
 }

@@ -6,7 +6,10 @@
 // - An answer can have several `.standard-markdown` segments interleaved with tool-use groups.
 import type { MessageNode } from './types';
 import { defineAdapter, idFromPath } from './define';
-import { requestFrameHtml } from '../capture/frames';
+import { serializeFrames, type FrameRequest } from '../capture/frames';
+
+const CARD = '[data-testid="frame-card-open"]';
+const cardTitle = (card: Element) => (card.textContent ?? '').trim() || 'Artifact';
 
 /** Text segments and artifact cards of an answer, in order, without tool-use chrome. */
 function answerBody(node: MessageNode): Element {
@@ -23,27 +26,60 @@ export const claude = defineAdapter({
   service: 'claude',
   siteNames: ['Claude'],
   chatId: (url) => idFromPath(url, /^\/chat\/([0-9a-f-]{36})/i),
+  // ~20 rows in the DOM at a time
+  virtualized: true,
   selectors: {
     user: ['[data-testid="user-message"]'],
     assistant: ['[data-testid="assistant-message"]'],
     generating: ['[data-testid="chat-input-stop"]', '[data-testid="assistant-message"][data-is-streaming="true"]'],
     composer: ['[data-testid="chat-input"]', 'div[contenteditable="true"].ProseMirror'],
     scroller: ['[data-autoscroll-container]'],
+    // the first *loaded* row (positions are rebased after each batch): a hint, never proof of the start
     start: ['[data-testid="transcript-row"] [role="article"][aria-posinset="1"]'],
     dark: ['html[data-mode="dark"]'],
   },
   // user: data-turn-key=<turn uuid>, assistant: <turn uuid>-hub-reply — stable across reloads
   idOf: (el) => el.getAttribute('data-turn-key') ?? el.closest('[data-turn-key]')?.getAttribute('data-turn-key') ?? null,
   bodyOf: (node) => (node.role === 'assistant' ? answerBody(node) : null),
+  // each message is one transcript row with its position among all loaded rows
+  positionOf(el) {
+    const n = Number(el.closest('[aria-posinset]')?.getAttribute('aria-posinset') ?? el.querySelector('[aria-posinset]')?.getAttribute('aria-posinset'));
+    return Number.isInteger(n) && n > 0 ? n : null;
+  },
+  rowPositions: (doc) =>
+    Array.from(doc.querySelectorAll('[data-testid="transcript-row"] [aria-posinset]'))
+      .map((el) => Number(el.getAttribute('aria-posinset')))
+      .filter((n) => Number.isInteger(n) && n > 0),
+  cardOf: (target) => target.closest(CARD),
+  cardTitle,
   loadedCount(doc) {
     const n = Number(doc.querySelector('[data-testid="transcript-row"] [role="article"][aria-setsize]')?.getAttribute('aria-setsize'));
     return Number.isFinite(n) && n > 0 ? n : null;
   },
   // The open artifact lives in a same-origin wrapper iframe that holds a cross-origin frame on
-  // <uuid>.frame.claudeusercontent.com; gitchat's frame script there returns the rendered HTML.
-  async artifacts(doc) {
-    const out = [];
+  // <uuid>.frame.claudeusercontent.com; gitchat's frame script there returns the rendered HTML. The
+  // card of the open artifact carries aria-current="true", which ties the panel to its message.
+  async artifacts(doc, ctx) {
+    const requests: FrameRequest[] = [];
+    const cards = Array.from(doc.querySelectorAll(CARD));
+    const current = cards.filter((c) => c.getAttribute('aria-current') === 'true').pop() ?? null;
+    /** Owner of the open panel: the current card, else the card the user clicked, else the only card with that title. */
+    const ownerOf = (panelTitle: string): { messageId: string | null; title: string } | null => {
+      const owner = (title: string, messageId: string | null) =>
+        // without a message id the title has to point at exactly one card
+        messageId || cards.filter((c) => cardTitle(c) === title).length === 1 ? { messageId, title } : null;
+      if (current) return owner(cardTitle(current), ctx.ownerId(current));
+      const opened = ctx.opened();
+      if (opened && opened.title === panelTitle) return owner(opened.title, opened.messageId);
+      const same = cards.filter((c) => cardTitle(c) === panelTitle);
+      return same.length === 1 ? owner(panelTitle, ctx.ownerId(same[0]!)) : null;
+    };
     for (const outer of Array.from(doc.querySelectorAll<HTMLIFrameElement>('iframe[src*="/code/artifact/"]'))) {
+      const id = /\/code\/artifact\/([^/?#]+)/.exec(outer.getAttribute('src') ?? '')?.[1];
+      const owner = ownerOf((outer.getAttribute('title') ?? '').trim());
+      if (!owner) continue; // can't tell which message opened it: don't guess
+      const key = id ? `artifact:${id}` : `${owner.messageId ?? owner.title}:artifact`;
+      if (ctx.skip(key)) continue;
       let inner: HTMLIFrameElement | null = null;
       try {
         inner = outer.contentDocument?.querySelector<HTMLIFrameElement>('iframe[src*="claudeusercontent.com"]') ?? null;
@@ -51,10 +87,9 @@ export const claude = defineAdapter({
         // not readable (should be same-origin, but stay safe)
       }
       if (!inner?.contentWindow) continue;
-      const got = await requestFrameHtml(inner.contentWindow);
-      if (got) out.push({ title: (outer.getAttribute('title') ?? '').trim() || got.title, html: got.html });
+      requests.push({ key, messageId: owner.messageId, title: owner.title, win: inner.contentWindow });
     }
-    return out;
+    return serializeFrames(requests);
   },
   aiPhase(doc) {
     const msgs = doc.querySelectorAll('[data-testid="assistant-message"]');
@@ -74,10 +109,10 @@ export const claude = defineAdapter({
     ],
     // `##` renders as <h3>: the site shifts headings down one level
     headingLevel: (el) => Number(el.tagName[1]) - 1,
-    render(el) {
+    render(el, _children, kind) {
       if (el.getAttribute('data-testid') !== 'frame-card-open') return null;
-      const title = (el.textContent ?? '').trim() || 'Artifact';
-      return `\n\n> **Artifact:** ${title}\n\n`;
+      kind('viz');
+      return `\n\n> **Artifact:** ${cardTitle(el)}\n\n`;
     },
     // citation pills read "Source title +3": keep the title only
     linkLabel(a) {

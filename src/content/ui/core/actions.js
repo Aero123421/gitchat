@@ -9,7 +9,7 @@
 
 import { icon } from './icons.js';
 import { applyLens } from './glass.js';
-import { Spring, clamp } from './spring.js';
+import { Spring, clamp, moving, wake } from './spring.js';
 import { setHTML } from './html.js';
 
 export const BTN = 26;
@@ -47,6 +47,8 @@ export function createActions(root, parent, store, label = (k) => LABELS[k] ?? k
     const text = label(kind === 'start' ? 'track' : kind);
     b.setAttribute('aria-label', text);
     b.title = text;
+    // reachable by keyboard only while the widget has focus (they are invisible otherwise)
+    b.tabIndex = -1;
     setHTML(b, `<div class="lg-b"></div><div class="lg-h"></div>${glyph}${extra}`);
     parent.appendChild(b);
     applyLens(root, b.querySelector('.lg-b'), { w: BTN, h: BTN, r: BTN / 2, bezel: 8, scale: 12, blur: 0.8, sat: 1.3 });
@@ -61,6 +63,21 @@ export function createActions(root, parent, store, label = (k) => LABELS[k] ?? k
   const show = Object.fromEntries(Object.keys(buttons).map((k) => [k, new Spring(0, { stiffness: 420, damping: 38 })]));
   let order = [];
   let rect = null;
+  let focused = false;
+
+  // Keyboard: focusing the widget reveals its buttons and puts the visible ones in the tab order.
+  const syncFocus = () => {
+    const now = parent.contains(root.activeElement);
+    if (now === focused) return;
+    focused = now;
+    syncTabs();
+    wake();
+  };
+  const syncTabs = () => {
+    for (const [kind, b] of Object.entries(buttons)) b.tabIndex = focused && order.includes(kind) ? 0 : -1;
+  };
+  parent.addEventListener('focusin', syncFocus);
+  parent.addEventListener('focusout', () => queueMicrotask(syncFocus));
 
   buttons.start.addEventListener('click', () => store.init());
   buttons.cancel.addEventListener('click', () => store.cancelInit?.());
@@ -80,6 +97,7 @@ export function createActions(root, parent, store, label = (k) => LABELS[k] ?? k
   function update() {
     const st = store.state;
     order = visible();
+    syncTabs();
     const ahead = store.ahead ?? 0;
     buttons.commit.classList.toggle('dim', !st.staged.length);
     buttons.push.classList.toggle('dim', !st.staged.length && !ahead && st.phase !== 'error');
@@ -91,6 +109,7 @@ export function createActions(root, parent, store, label = (k) => LABELS[k] ?? k
    * Lay the buttons out for this frame.
    * @param {number} dt
    * @param {{reveal:number, x:number, y:number, dir:'row'|'column'}} at  anchor: top-center of the group
+   * @returns {boolean} true while the buttons are still moving
    */
   function frame(dt, at) {
     const n = order.length;
@@ -135,6 +154,7 @@ export function createActions(root, parent, store, label = (k) => LABELS[k] ?? k
       i++;
     }
     rect = n ? { x0, y0, x1, y1 } : null;
+    return moving(Object.values(show));
   }
 
   /** True when (px, py), in the parent's coordinates, is over the visible buttons (with a margin). */
@@ -152,6 +172,8 @@ export function createActions(root, parent, store, label = (k) => LABELS[k] ?? k
   const unsub = store.subscribe((type, d) => {
     update();
     if (type === 'nope') nudge(d.action);
+    // every state change may start an animation in the widget that owns these buttons
+    wake(1500);
   });
   update();
 
@@ -159,6 +181,18 @@ export function createActions(root, parent, store, label = (k) => LABELS[k] ?? k
     frame,
     covers,
     update,
+    /** True while keyboard focus is inside the widget: keep the buttons out. */
+    get focused() {
+      return focused;
+    },
+    /** Focus the first visible button (keyboard users after activating an untracked widget). */
+    focusFirst() {
+      const b = buttons[order[0]];
+      if (b) {
+        b.tabIndex = 0;
+        b.focus();
+      }
+    },
     get count() {
       return order.length;
     },

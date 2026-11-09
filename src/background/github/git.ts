@@ -74,6 +74,12 @@ export async function getBlobText(gh: GitHub, repo: RepoRef, sha: string): Promi
   return r.data.encoding === 'base64' ? base64ToUtf8(r.data.content) : r.data.content;
 }
 
+/** A blob's bytes, base64-encoded (for files that are not necessarily text). */
+export async function getBlobBase64(gh: GitHub, repo: RepoRef, sha: string): Promise<string> {
+  const r = await gh.request<{ content: string; encoding: string }>('GET', `${repoPath(repo)}/git/blobs/${sha}`);
+  return r.data.encoding === 'base64' ? r.data.content.replace(/\s+/g, '') : utf8ToBase64(r.data.content);
+}
+
 export async function createBlob(gh: GitHub, repo: RepoRef, base64: string): Promise<string> {
   const r = await gh.request<{ sha: string }>('POST', `${repoPath(repo)}/git/blobs`, { content: base64, encoding: 'base64' });
   return r.data.sha;
@@ -89,9 +95,17 @@ export async function createCommit(gh: GitHub, repo: RepoRef, message: string, t
   return r.data.sha;
 }
 
-/** Fast-forward the branch; throws code "non-fast-forward" when the remote moved. */
+/**
+ * Fast-forward the branch; throws code "non-fast-forward" when the remote moved. GitHub answers a
+ * concurrent update of the same ref with 409, which means the same thing: re-read and replay.
+ */
 export async function updateRef(gh: GitHub, repo: RepoRef, sha: string): Promise<void> {
-  await gh.request('PATCH', `${repoPath(repo)}/git/refs/heads/${encodePath(repo.branch)}`, { sha, force: false });
+  try {
+    await gh.request('PATCH', `${repoPath(repo)}/git/refs/heads/${encodePath(repo.branch)}`, { sha, force: false });
+  } catch (e) {
+    if (e instanceof GitchatError && e.code === 'conflict') throw new GitchatError('The branch moved on GitHub while pushing.', 'non-fast-forward');
+    throw e;
+  }
 }
 
 /** Creates the first commit of an empty repository (the Git Data API needs one to exist). */

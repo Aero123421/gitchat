@@ -267,7 +267,7 @@
     "message": "Repository name"
   },
   "repoNotEmptyWarn": {
-    "message": "This repository already has files. gitchat will add its folders next to them."
+    "message": "This repository already has files. gitchat can use it only if it already holds a gitchat archive."
   },
   "repoPrivate": {
     "message": "Private"
@@ -289,12 +289,6 @@
   },
   "retry": {
     "message": "Try again"
-  },
-  "saveImages": {
-    "message": "Save images"
-  },
-  "saveImagesHint": {
-    "message": "Store images shown in the chat next to it, when they can be downloaded."
   },
   "saveVisualizations": {
     "message": "Save visualizations"
@@ -386,9 +380,6 @@
   "syncState": {
     "message": "Sync"
   },
-  "tokenHelp": {
-    "message": "Create a fine-grained token with Contents: Read and write, limited to your chat repository. It is stored only on this device."
-  },
   "tokenTitle": {
     "message": "Personal access token"
   },
@@ -415,5 +406,62 @@
   },
   "errRepoNotEmpty": {
     "message": "This repository already has files that gitchat did not create. Choose an empty repository, or let gitchat create a new one."
+  },
+  "tokenStepRepo": {
+    "message": "Create an empty private repository for your chats."
+  },
+  "createRepoOnGitHub": {
+    "message": "Create a repository on GitHub"
+  },
+  "tokenStepToken": {
+    "message": "Create a fine-grained token. Under Repository access, choose Only select repositories and pick that repository. The Contents permission is filled in for you."
+  },
+  "tokenStepPaste": {
+    "message": "Paste the token here. It is stored only on this device."
+  },
+  "repoPatNote": {
+    "message": "A token limited to selected repositories can't create repositories. Create the repository on GitHub, give your token access to it, then choose it under Existing repository."
+  },
+  "repoMissingHint": {
+    "message": "Not in the list? Check that your token has access to it, or type owner/name above."
+  },
+  "widgetName": {
+    "message": "gitchat: saving status of this chat"
+  },
+  "errInitIncomplete": {
+    "message": "Couldn't load the whole chat, so nothing was saved. Try again."
+  },
+  "errInitBusy": {
+    "message": "The answer is still running. Start saving again when it has finished."
+  },
+  "errInitEmpty": {
+    "message": "No answers were found in this chat, so nothing was saved."
+  },
+  "errInitOtherTab": {
+    "message": "This chat is already being saved in another tab."
+  },
+  "errInitStale": {
+    "message": "This capture was cancelled or replaced. Start again."
+  },
+  "lookUpTyped": {
+    "message": "Look up $REPO$",
+    "placeholders": {
+      "repo": {
+        "content": "$1",
+        "example": "octocat/ai-chats"
+      }
+    }
+  },
+  "errRefresh": {
+    "message": "Couldn't read the chat, so nothing was committed or pushed."
+  },
+  "rescan": {
+    "message": "Read the whole chat again"
+  },
+  "errCaptureFailed": {
+    "message": "Couldn't read the latest messages, so nothing was committed or pushed. Try again."
+  },
+  "errInitCoverage": {
+    "message": "Some messages could not be read, so nothing was saved. Try again."
   }
 }

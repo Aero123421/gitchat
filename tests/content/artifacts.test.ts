@@ -1,0 +1,213 @@
+// @vitest-environment happy-dom
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { describe, expect, it, vi } from 'vitest';
+import type { CapturedMessage } from '../../src/shared/types';
+
+// Frames cannot answer in the test DOM: report what each adapter would ask for instead.
+vi.mock('../../src/content/capture/frames', async (orig) => ({
+  ...(await orig<typeof import('../../src/content/capture/frames')>()),
+  serializeFrames: async (reqs: Array<{ key: string; messageId: string | null; title: string }>) =>
+    reqs.map((r) => ({ key: r.key, messageId: r.messageId, title: r.title, html: `<html>${r.key}</html>` })),
+}));
+
+const { attachArtifacts, artifactAssetName, captureVisible } = await import('../../src/content/capture/snapshot');
+const { chatgpt } = await import('../../src/content/adapters/chatgpt');
+const { claude } = await import('../../src/content/adapters/claude');
+const { gemini } = await import('../../src/content/adapters/gemini');
+
+const load = (dir: string, name: string) => {
+  document.body.innerHTML = readFileSync(path.resolve('tests/fixtures', dir, name), 'utf8');
+};
+const a = (id: string, markdown: string): CapturedMessage => ({ id, role: 'assistant', markdown });
+/** The test DOM does not load frames: give them a window to talk to. */
+const withWindows = (frames: Iterable<HTMLIFrameElement>) => {
+  for (const f of frames) Object.defineProperty(f, 'contentWindow', { get: () => window, configurable: true });
+};
+
+describe('attachArtifacts', () => {
+  it('attaches each visualization to the message that owns it, even with equal titles', () => {
+    const msgs = [a('m1', '> **Artifact:** Chart'), a('m2', '> **Artifact:** Chart')];
+    const out = attachArtifacts(msgs, [{ key: 'artifact:x1', messageId: 'm1', title: 'Chart', html: '<p>old</p>' }]);
+    expect(out[0]?.markdown).toMatch(/^> \*\*Artifact:\*\* \[Chart\]\(gitchat-asset:chart-\w+\.html\)$/);
+    expect(out[0]?.assets?.[0]?.data).toBe('<p>old</p>');
+    expect(out[1]?.markdown).toBe('> **Artifact:** Chart');
+  });
+
+  it('matches titles exactly, not by prefix', () => {
+    const msgs = [a('m1', '> **Artifact:** Chart of sales'), a('m2', 'text')];
+    const out = attachArtifacts(msgs, [{ key: 'k', messageId: null, title: 'Chart', html: '<p></p>' }]);
+    expect(out[0]?.assets ?? []).toHaveLength(0);
+  });
+
+  it('names assets by identity, so recapturing one never renames another', () => {
+    const one = artifactAssetName({ key: 'm1:viz1', messageId: 'm1', title: 'Chart', html: '' });
+    const two = artifactAssetName({ key: 'm2:viz1', messageId: 'm2', title: 'Chart', html: '' });
+    expect(one).not.toBe(two);
+    expect(artifactAssetName({ key: 'm1:viz1', messageId: 'm1', title: 'Chart', html: 'changed' })).toBe(one);
+  });
+
+  it('links generated-file cards too', () => {
+    const out = attachArtifacts([a('m1', '> **File:** report.html')], [{ key: 'm1:file:report.html', messageId: 'm1', title: 'report.html', html: '<p></p>' }]);
+    expect(out[0]?.markdown).toMatch(/^> \*\*File:\*\* \[report\.html\]\(gitchat-asset:report-html-\w+\.html\)$/);
+  });
+});
+
+describe('chatgpt fallbacks', () => {
+  it('reads answers that only carry data-content-search-unit-key, with turn-based ids', () => {
+    load('chatgpt', 'long-top.html');
+    const msgs = captureVisible(chatgpt, document);
+    expect(msgs.map((m) => m.role)).toEqual(['user', 'assistant', 'user', 'assistant']);
+    expect(msgs.map((m) => m.id)).toEqual(['TURN_UUID_1', 'TURN_UUID_1:a2', 'TURN_UUID_2', 'TURN_UUID_2:a2']);
+    expect(msgs[1]?.markdown).toBe('1');
+  });
+
+  it('falls back to a descendant id before anything content-derived', () => {
+    load('chatgpt', 'basic.html');
+    for (const el of Array.from(document.querySelectorAll('[data-chatgpt-search-message-ids]'))) el.removeAttribute('data-chatgpt-search-message-ids');
+    const ids = chatgpt.messages(document).map((m) => m.id);
+    expect(ids).toEqual(['98726113-85fe-4de7-aa65-d4a86b38344f', '70b0aef7-c8c2-4b10-adcd-2a1b77bfda5d']);
+  });
+
+  it('reports code for the new code widgets', () => {
+    load('chatgpt', 'code.html');
+    document.body.innerHTML = `<div data-turn-key="t1"><div data-chatgpt-search-unit-key="x:2:assistant"><div data-markdown-text-style="assistant-message">${document.body.innerHTML}</div></div></div>`;
+    const [msg] = captureVisible(chatgpt, document);
+    expect(msg?.kinds).toContain('code');
+  });
+
+  it('turns a generated-file card into a marker and asks for its open preview', async () => {
+    document.body.innerHTML = `
+      <div class="thread-scroll-container"><div data-turn-key="t1">
+        <div data-chatgpt-search-unit-key="x:2:assistant" data-chatgpt-search-message-ids="m-1">
+          <div data-markdown-text-style="assistant-message"><p>Here it is</p>
+            <div><button type="button"><span title="report.html">report.html</span></button><button type="button"></button></div>
+            <div role="group"><iframe title="Bars" src="https://codex-inline-visualization-ab.web-sandbox.oaiusercontent.com/"></iframe></div>
+          </div>
+        </div></div></div>
+      <aside data-app-shell-focus-area="right-panel"><iframe title="report.html" src="https://codex-inline-visualization-cd.web-sandbox.oaiusercontent.com/"></iframe></aside>`;
+    withWindows(document.querySelectorAll('iframe'));
+    const [msg] = captureVisible(chatgpt, document);
+    expect(msg?.markdown).toContain('> **File:** report.html');
+    expect(msg?.markdown).toContain('> **Artifact:** Bars');
+    const arts = await chatgpt.artifacts!(document);
+    expect(arts.map((x) => [x.key, x.messageId, x.title])).toEqual([
+      ['m-1:viz1', 'm-1', 'Bars'],
+      ['m-1:file:report.html', 'm-1', 'report.html'],
+    ]);
+    // already collected frames are not asked for again
+    expect(await chatgpt.artifacts!(document, { skip: new Set(['m-1:viz1', 'm-1:file:report.html']) })).toEqual([]);
+    const linked = attachArtifacts([msg!], arts);
+    expect(linked[0]?.assets?.map((x) => x.name)).toHaveLength(2);
+  });
+});
+
+describe('claude artifacts', () => {
+  it('ties the open panel to the card marked current, keyed by the artifact id', async () => {
+    load('claude', 'artifact.html');
+    const outer = document.querySelector<HTMLIFrameElement>('iframe[src*="/code/artifact/"]')!;
+    const inner = document.createElement('iframe');
+    inner.src = 'https://x.frame.claudeusercontent.com/';
+    withWindows([inner]);
+    Object.defineProperty(outer, 'contentDocument', { get: () => ({ querySelector: () => inner }) });
+    document.querySelector('[data-testid="assistant-message"]')!.setAttribute('data-turn-key', 'turn-9-hub-reply');
+    const arts = await claude.artifacts!(document);
+    expect(arts).toHaveLength(1);
+    expect(arts[0]?.key).toBe('artifact:ARTIFACT_UUID');
+    expect(arts[0]?.messageId).toBe('turn-9-hub-reply');
+    expect(arts[0]?.title).toBe('Four Value Bar Chart');
+    const answer = captureVisible(claude, document).find((m) => m.id === 'turn-9-hub-reply')!;
+    const [linked] = attachArtifacts([answer], arts);
+    expect(linked?.assets).toHaveLength(1);
+    expect(linked?.markdown).toContain('> **Artifact:** [Four Value Bar Chart](gitchat-asset:');
+  });
+});
+
+describe('gemini', () => {
+  it('keeps numbered citation markers', () => {
+    document.body.innerHTML = `<div class="conversation-container" id="abc"><model-response><message-content><div class="markdown-main-panel">
+      <p>Fact one<source-footnote><sup class="superscript" data-turn-source-index="1">1</sup></source-footnote> and two.</p></div></message-content></model-response></div>`;
+    const [msg] = captureVisible(gemini, document);
+    expect(msg?.markdown).toBe('Fact one[1] and two.');
+  });
+
+  it('keys Canvas previews by the full turn id', async () => {
+    load('gemini', 'artifact.html');
+    withWindows(document.querySelectorAll('iframe'));
+    const arts = await gemini.artifacts!(document);
+    const turn = document.querySelector('immersive-entry-chip')!.closest('.conversation-container')!.id;
+    expect(arts[0]?.key).toBe(`${turn}:canvas1`);
+    expect(arts[0]?.messageId).toBe(`${turn}:a`);
+  });
+});
+
+describe('preview ownership (N11)', () => {
+  const twoReports = () => {
+    document.body.innerHTML = `
+      <div class="thread-scroll-container">
+        <div data-turn-key="t1"><div data-chatgpt-search-unit-key="x:2:assistant" data-chatgpt-search-message-ids="old">
+          <div data-markdown-text-style="assistant-message"><button id="old-card" type="button"><span title="report.html">report.html</span></button></div></div></div>
+        <div data-turn-key="t2"><div data-chatgpt-search-unit-key="y:2:assistant" data-chatgpt-search-message-ids="new">
+          <div data-markdown-text-style="assistant-message"><button id="new-card" type="button"><span title="report.html">report.html</span></button></div></div></div>
+      </div>
+      <aside data-app-shell-focus-area="right-panel"><iframe title="report.html" src="https://codex-inline-visualization-cd.web-sandbox.oaiusercontent.com/"></iframe></aside>`;
+    withWindows(document.querySelectorAll('iframe'));
+  };
+
+  it('skips a ChatGPT file preview whose card is ambiguous, and binds it to the card the user opened', async () => {
+    twoReports();
+    chatgpt.watch!(document);
+    expect(await chatgpt.artifacts!(document)).toEqual([]);
+    document.getElementById('old-card')!.querySelector('span')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    const arts = await chatgpt.artifacts!(document);
+    expect(arts.map((x) => [x.key, x.messageId])).toEqual([['old:file:report.html', 'old']]);
+  });
+
+  it('skips a Claude panel when no card is current and the title is ambiguous', async () => {
+    document.body.innerHTML = `
+      <div data-testid="assistant-message" data-turn-key="a1"><span role="button" data-testid="frame-card-open">Chart</span></div>
+      <div data-testid="assistant-message" data-turn-key="a2"><span role="button" data-testid="frame-card-open">Chart</span></div>
+      <iframe title="Chart" src="https://claude.ai/code/artifact/U1"></iframe>`;
+    const outer = document.querySelector<HTMLIFrameElement>('iframe')!;
+    const inner = document.createElement('iframe');
+    withWindows([inner]);
+    Object.defineProperty(outer, 'contentDocument', { get: () => ({ querySelector: () => inner }) });
+    claude.watch!(document);
+    expect(await claude.artifacts!(document)).toEqual([]);
+    document.querySelectorAll<HTMLElement>('[data-testid="frame-card-open"]')[0]!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    const arts = await claude.artifacts!(document);
+    expect(arts.map((x) => [x.key, x.messageId])).toEqual([['artifact:U1', 'a1']]);
+  });
+});
+
+describe('chatgpt Work mode (N15)', () => {
+  it('captures only the final answer, not commentary units of the work log', () => {
+    load('chatgpt', 'work.html');
+    // the documented commentary form: an assistant unit of the same turn outside the final wrapper
+    const log = document.querySelector('[data-local-conversation-item-target-ids]')!;
+    const unit = document.createElement('div');
+    unit.setAttribute('data-chatgpt-search-unit-key', 'fallback-turn-1:1:assistant');
+    unit.setAttribute('data-chatgpt-search-message-ids', 'COMMENTARY_UUID');
+    unit.innerHTML = '<div data-markdown-text-style="assistant-message"><p>Checking the slider ranges.</p></div>';
+    log.appendChild(unit);
+    const msgs = captureVisible(chatgpt, document);
+    expect(msgs.filter((m) => m.role === 'assistant').map((m) => m.id)).toEqual(['ASSISTANT_MESSAGE_UUID']);
+    expect(msgs.map((m) => m.markdown).join('\n')).not.toContain('Checking the slider ranges');
+  });
+
+  it('keeps ordinary chat turns unchanged', () => {
+    load('chatgpt', 'basic.html');
+    expect(captureVisible(chatgpt, document).map((m) => m.role)).toEqual(['user', 'assistant']);
+  });
+});
+
+describe('scroller (N8)', () => {
+  it('uses the explicit chat scroller even before it overflows', () => {
+    document.body.innerHTML = '<infinite-scroller class="chat-history"><div class="conversation-container" id="c1"><user-query><p class="query-text-line">hi</p></user-query></div></infinite-scroller>';
+    const sc = document.querySelector<HTMLElement>('infinite-scroller')!;
+    sc.getBoundingClientRect = () => ({ top: 0, bottom: 600, height: 600, left: 0, right: 800, width: 800, x: 0, y: 0, toJSON() {} }) as DOMRect;
+    Object.defineProperty(sc, 'scrollHeight', { get: () => 600 });
+    Object.defineProperty(sc, 'clientHeight', { get: () => 600 });
+    expect(gemini.scrollContainer(document)).toBe(sc);
+  });
+});

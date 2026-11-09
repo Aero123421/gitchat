@@ -24,6 +24,28 @@ export function requestFrameHtml(target: Window, timeoutMs = 1500): Promise<Fram
   });
 }
 
+/** One frame to serialize, with what the capture needs to know about it. */
+export interface FrameRequest {
+  key: string;
+  messageId: string | null;
+  title: string;
+  win: Window;
+}
+
+/**
+ * Asks several frames at once (each answers or times out on its own), so one slow or blank frame
+ * never holds up the others.
+ */
+export async function serializeFrames(requests: FrameRequest[], timeoutMs = 1500): Promise<Array<{ key: string; messageId: string | null; title: string; html: string }>> {
+  const got = await Promise.all(requests.map((r) => requestFrameHtml(r.win, timeoutMs)));
+  const out = [];
+  for (const [i, r] of requests.entries()) {
+    const html = got[i];
+    if (html) out.push({ key: r.key, messageId: r.messageId, title: r.title || html.title || 'Visualization', html: html.html });
+  }
+  return out;
+}
+
 /** A short, file-name-safe slug. */
 export function assetSlug(title: string): string {
   return (

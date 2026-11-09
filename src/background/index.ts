@@ -1,7 +1,9 @@
 // Service worker entry. Listeners must be registered synchronously on every start (MV3).
-import { onSettingsChanged } from '../shared/settings';
+import { normalizeSettings } from '../shared/settings';
 import { createBackground } from './app';
+import { restrictStorage } from './github/auth';
 
+void restrictStorage();
 const app = createBackground();
 
 chrome.runtime.onMessage.addListener(app.onMessage);
@@ -9,4 +11,9 @@ chrome.runtime.onConnect.addListener(app.onConnect);
 chrome.alarms.onAlarm.addListener(app.onAlarm);
 chrome.runtime.onStartup.addListener(app.onStartup);
 chrome.runtime.onInstalled.addListener(app.onInstalled);
-onSettingsChanged(app.onSettingsStored);
+// The previous value comes along: after a worker restart, it is what the change is compared against.
+chrome.storage.onChanged.addListener((changes, area) => {
+  const c = changes.settings;
+  if (area === 'sync' && c) app.onSettingsStored(c.oldValue === undefined ? undefined : normalizeSettings(c.oldValue));
+});
+app.start();

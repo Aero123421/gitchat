@@ -52,7 +52,7 @@ export function installChrome() {
       getPlatformInfo: vi.fn(async () => ({ os: 'mac' })),
       openOptionsPage: vi.fn(async () => undefined),
     },
-    alarms: { create: vi.fn(async () => undefined) },
+    alarms: { create: vi.fn(async () => undefined), clear: vi.fn(async () => true) },
     i18n: { getMessage: () => '' },
   };
   vi.stubGlobal('chrome', stub);
@@ -60,4 +60,4 @@ export function installChrome() {
 }
 
 export const EXTENSION_PAGE = { id: 'test-ext', url: 'chrome-extension://test-ext/options.html' } as chrome.runtime.MessageSender;
-export const CONTENT_SCRIPT = { id: 'test-ext', url: 'https://claude.ai/chat/abc', tab: { id: 7 } } as chrome.runtime.MessageSender;
+export const CONTENT_SCRIPT = { id: 'test-ext', url: 'https://claude.ai/chat/abc', origin: 'https://claude.ai', frameId: 0, tab: { id: 7 } } as chrome.runtime.MessageSender;

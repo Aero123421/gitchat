@@ -51,12 +51,15 @@ export interface Requests {
    */
   'chat/snapshot': { req: { snapshot: ChatSnapshot; reason?: SnapshotReason }; res: ChatStatus };
   'chat/status': { req: { key: ChatKey }; res: ChatStatus };
-  /** The user started tracking (init) an untracked chat. */
-  'chat/init/start': { req: { key: ChatKey }; res: ChatStatus };
-  'chat/init/progress': { req: { key: ChatKey; progress: number }; res: null };
+  /**
+   * The user started tracking (init) an untracked chat. The background hands out an `initId` owned by
+   * the calling tab; progress/done/cancel must carry it, and a stale or foreign id is refused.
+   */
+  'chat/init/start': { req: { key: ChatKey }; res: { status: ChatStatus; initId: string } };
+  'chat/init/progress': { req: { key: ChatKey; initId: string; progress: number }; res: null };
   /** The full history was captured; the chat becomes tracked and everything is staged. */
-  'chat/init/done': { req: { snapshot: ChatSnapshot }; res: ChatStatus };
-  'chat/init/cancel': { req: { key: ChatKey }; res: ChatStatus };
+  'chat/init/done': { req: { snapshot: ChatSnapshot; initId: string }; res: ChatStatus };
+  'chat/init/cancel': { req: { key: ChatKey; initId?: string }; res: ChatStatus };
   'chat/commit': { req: { key: ChatKey }; res: ChatStatus };
   /** Commits anything staged for `key` first, then pushes all pending commits. */
   'chat/push': { req: { key?: ChatKey }; res: ChatStatus | null };
@@ -70,10 +73,13 @@ export interface Requests {
   'auth/device/start': { req: Record<string, never>; res: DeviceCode };
   /** Resolves when the user has approved the device code (or rejects on expiry/denial). */
   'auth/device/wait': { req: Record<string, never>; res: { login: string } };
+  'auth/device/cancel': { req: Record<string, never>; res: null };
   'auth/pat': { req: { token: string }; res: { login: string } };
   'auth/signout': { req: Record<string, never>; res: null };
 
   'repo/list': { req: Record<string, never>; res: RepoSummary[] };
+  /** One repository by name (for a typed owner/name), so the UI can warn before using it. */
+  'repo/info': { req: { owner: string; name: string }; res: RepoSummary };
   'repo/create': { req: { name: string; private: boolean }; res: RepoRef };
   'repo/use': { req: { owner: string; name: string; branch?: string }; res: RepoRef };
   'sync/status': { req: Record<string, never>; res: SyncStatus };
@@ -100,7 +106,23 @@ export type BackgroundEvent =
   | { type: 'sync'; sync: SyncStatus };
 
 /** Messages the popup sends to the content script of the active tab (chrome.tabs.sendMessage). */
-export type ToContent = { gitchat: 1; type: 'content/current' } | { gitchat: 1; type: 'content/init' };
+/**
+ * Popup → content script. 'content/refresh' re-reads the page (a manual snapshot) and replies when
+ * done, so Commit/Push from the popup include what is on screen right now.
+ */
+export type ToContent =
+  | { gitchat: 1; type: 'content/current' }
+  | { gitchat: 1; type: 'content/init' }
+  /** Re-read a tracked chat from the top (complete capture): fixes what a live capture can't see, e.g. a branch switch. */
+  | { gitchat: 1; type: 'content/rescan' }
+  | { gitchat: 1; type: 'content/refresh' };
+
+/** Reply to 'content/refresh': whether the page was read and staged; Commit/Push stop when it wasn't. */
+export interface RefreshResult {
+  ok: boolean;
+  /** Why not, in the user's language (absent when there was simply nothing to read). */
+  error?: string;
+}
 
 export interface ContentCurrent {
   service: ServiceId;

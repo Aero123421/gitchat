@@ -10,6 +10,10 @@ import { copy } from './kit/util';
 export const PAT_URL =
   'https://github.com/settings/personal-access-tokens/new?name=gitchat&description=gitchat%20chat%20history&contents=write&metadata=read';
 
+/** GitHub's "new repository" form, pre-filled. A token limited to one repository can't create it itself. */
+export const NEW_REPO_URL =
+  'https://github.com/new?name=ai-chats&visibility=private&description=AI%20chat%20archive%20managed%20by%20gitchat';
+
 type View = 'choose' | 'code' | 'token';
 
 export function createConnect(onDone: (login: string) => void): HTMLElement {
@@ -122,6 +126,12 @@ export function createConnect(onDone: (login: string) => void): HTMLElement {
         const r = await request('auth/pat', { token });
         onDone(r.login);
       } catch (e) {
+        // a sign-out or another sign-in replaced this one meanwhile: nothing to report
+        if (errorCode(e) === 'cancelled') {
+          busy = false;
+          render();
+          return;
+        }
         error = errorText(e);
         busy = false;
         render();
@@ -132,18 +142,25 @@ export function createConnect(onDone: (login: string) => void): HTMLElement {
       if (e.key === 'Enter') void submit();
     });
     queueMicrotask(() => input.focus());
+    const link = (href: string, label: string) =>
+      h('a', { class: 'btn small', href, target: '_blank', rel: 'noopener noreferrer' }, h('span', null, label), icon('external'));
+    // The repository comes first: a token limited to one repository can only be pointed at one that exists.
     return h(
       'div',
       { class: 'stack enter' },
       h('div', { class: 'token-head' }, icon('key'), h('strong', null, t('tokenTitle'))),
-      h('p', { class: 'muted', id: 'gc-token-help' }, t('tokenHelp')),
       h(
-        'a',
-        { class: 'btn small', href: PAT_URL, target: '_blank', rel: 'noopener noreferrer' },
-        h('span', null, t('createToken')),
-        icon('external'),
+        'ol',
+        { class: 'howto' },
+        h('li', null, h('p', null, t('tokenStepRepo')), link(NEW_REPO_URL, t('createRepoOnGitHub'))),
+        h('li', null, h('p', null, t('tokenStepToken')), link(PAT_URL, t('createToken'))),
+        h(
+          'li',
+          null,
+          h('p', { class: 'muted', id: 'gc-token-help' }, t('tokenStepPaste')),
+          h('div', null, h('label', { class: 'lbl', for: 'gc-token' }, t('pasteToken')), h('div', { class: 'inline' }, input, connectBtn)),
+        ),
       ),
-      h('div', null, h('label', { class: 'lbl', for: 'gc-token' }, t('pasteToken')), h('div', { class: 'inline' }, input, connectBtn)),
       deviceUnavailable ? null : h('button', { class: 'btn ghost small', type: 'button', onClick: () => go('choose') }, t('signInWithGitHub')),
       note(),
     );
@@ -158,6 +175,8 @@ export function createConnect(onDone: (login: string) => void): HTMLElement {
   }
 
   function cancel(): void {
+    // stop the background polling too, so a late approval of this code can't sign in
+    void request('auth/device/cancel', {}).catch(() => undefined);
     go('choose');
   }
 

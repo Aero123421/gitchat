@@ -7,10 +7,11 @@ import { mountCreature } from '../content/ui/variants/creature.js';
 import { mountDot } from '../content/ui/variants/dot.js';
 import { mountLine } from '../content/ui/variants/line.js';
 import type { WidgetStyle } from '../shared/types';
+import { t } from '../shared/i18n';
 
 type Instance = { destroy(): void };
 type DemoStore = ReturnType<typeof createStore>;
-const MOUNT: Record<WidgetStyle, (host: HTMLElement, store: DemoStore) => Instance> = {
+const MOUNT: Record<WidgetStyle, (host: HTMLElement, store: DemoStore, options?: { label(key: string): string }) => Instance> = {
   creature: mountCreature,
   line: mountLine,
   dot: mountDot,
@@ -57,7 +58,7 @@ export class WidgetPreview {
     document.body.appendChild(host);
     this.host = host;
     this.style = style;
-    this.inst = MOUNT[style](host, this.store);
+    this.inst = MOUNT[style](host, this.store, { label: (k: string) => t(k) });
     document.body.classList.add('previewing');
     this.schedule(1400);
   }

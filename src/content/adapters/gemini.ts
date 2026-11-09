@@ -8,7 +8,7 @@
 // - The page enforces Trusted Types; gitchat never writes HTML into the page itself.
 import type { MessageNode } from './types';
 import { defineAdapter, idFromPath } from './define';
-import { requestFrameHtml } from '../capture/frames';
+import { serializeFrames, type FrameRequest } from '../capture/frames';
 
 const turnOf = (el: Element) => el.closest('.conversation-container');
 
@@ -22,17 +22,25 @@ function codeLanguage(pre: Element): string | null {
   return map[id] ?? id;
 }
 
-/** Stable title for a Canvas preview: its turn id + position (the chip has no title element). */
-function canvasTitle(chip: Element): string {
+/** A Canvas preview's position among the previews of its turn (1-based). */
+function canvasIndex(chip: Element): number {
   const turn = turnOf(chip);
   const chips = turn ? Array.from(turn.querySelectorAll('immersive-entry-chip')) : [chip];
-  return `Canvas ${(turn?.id ?? 'x').slice(0, 6)}-${chips.indexOf(chip) + 1}`;
+  return chips.indexOf(chip) + 1;
+}
+
+/** Card label of a Canvas preview (the chip has no title element): "Canvas", "Canvas 2", … */
+function canvasTitle(chip: Element): string {
+  const n = canvasIndex(chip);
+  return n > 1 ? `Canvas ${n}` : 'Canvas';
 }
 
 export const gemini = defineAdapter({
   service: 'gemini',
   siteNames: ['Google Gemini', 'Gemini'],
   chatId: (url) => idFromPath(url, /^\/app\/([0-9a-f]{12,})/i, /^\/gem\/[^/]+\/([0-9a-f]{12,})/i),
+  // loaded turns stay in the DOM (off-screen ones use content-visibility:auto)
+  virtualized: false,
   selectors: {
     user: ['user-query'],
     assistant: ['model-response'],
@@ -61,15 +69,16 @@ export const gemini = defineAdapter({
     if (!last) return 'idle';
     return (last.textContent ?? '').trim() ? 'streaming' : 'thinking';
   },
-  async artifacts(doc) {
-    const out = [];
+  async artifacts(doc, ctx) {
+    const requests: FrameRequest[] = [];
     for (const chip of Array.from(doc.querySelectorAll('immersive-entry-chip'))) {
       const frame = chip.querySelector<HTMLIFrameElement>('iframe[src*="usercontent.goog"]');
-      if (!frame?.contentWindow) continue;
-      const got = await requestFrameHtml(frame.contentWindow);
-      if (got) out.push({ title: canvasTitle(chip), html: got.html });
+      const turn = turnOf(chip)?.id;
+      const key = `${turn ?? 'canvas'}:canvas${canvasIndex(chip)}`;
+      if (!frame?.contentWindow || ctx.skip(key)) continue;
+      requests.push({ key, messageId: ctx.ownerId(chip), title: canvasTitle(chip), win: frame.contentWindow });
     }
-    return out;
+    return serializeFrames(requests);
   },
   markdown: {
     ignore: [
@@ -83,8 +92,19 @@ export const gemini = defineAdapter({
       'message-actions',
     ],
     codeLanguage,
-    render(el) {
+    render(el, _children, kind) {
+      if (el.tagName === 'SOURCE-FOOTNOTE') {
+        // web-search citation: the URL is not in the page, keep the numbered marker
+        const marks = Array.from(el.querySelectorAll('[data-turn-source-index]'))
+          .map((sup) => {
+            const shown = sup.textContent?.trim() ?? '';
+            return /^\d{1,3}$/.test(shown) ? shown : sup.getAttribute('data-turn-source-index')?.trim() ?? '';
+          })
+          .filter((n) => /^\d{1,3}$/.test(n));
+        return marks.map((n) => `[${n}]`).join('');
+      }
       if (el.tagName !== 'IMMERSIVE-ENTRY-CHIP') return null;
+      kind('viz');
       return `\n\n> **Artifact:** ${canvasTitle(el)}\n\n`;
     },
   },
