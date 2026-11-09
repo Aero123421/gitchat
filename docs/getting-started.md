@@ -18,14 +18,18 @@ The ready-to-load extension is kept on the repository's `dist` branch, updated w
    git clone -b dist https://github.com/Aero123421/gitchat.git ~/gitchat-extension
    ```
 
+   The last part is the folder git creates, so you can put it anywhere — for example `~/Extensions/gitchat` if you keep extensions in one place. The folder must not exist yet (or must be empty). Don't move or rename it afterwards: Chrome knows the extension by its folder, so a moved copy starts over without your sign-in or settings.
+
 2. Open `chrome://extensions` in Chrome and turn on **Developer mode** in the top-right corner.
-3. Click **Load unpacked** and select the `gitchat-extension` folder.
+3. Click **Load unpacked** and select the folder you cloned into (`gitchat-extension` above). On macOS, press ⌘⇧G in the dialog to type its path.
 
 **Updating** is one command, then a reload:
 
 ```sh
 git -C ~/gitchat-extension pull
 ```
+
+Use the folder you cloned into if it is not `~/gitchat-extension`.
 
 Press gitchat's reload button in `chrome://extensions` (or **Reload** in gitchat's settings under **About**), then reload any open chat tabs. Chrome keeps your sign-in, settings and saved chats for as long as gitchat is loaded from the same folder. If you installed from a zip before, clone into the folder you loaded then (after moving the old one aside) to keep your data.
 

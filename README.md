@@ -62,14 +62,18 @@ gitchat requires Chrome 120 or later. It is not on the Chrome Web Store yet, so 
    git clone -b dist https://github.com/Aero123421/gitchat.git ~/gitchat-extension
    ```
 
+   The last part is the folder git creates, so you can put it anywhere — for example `~/Extensions/gitchat` if you keep extensions in one place. The folder must not exist yet (or must be empty). Don't move or rename it afterwards: Chrome knows the extension by its folder, so a moved copy starts over without your sign-in or settings.
+
 2. Open `chrome://extensions` and turn on **Developer mode** (top right).
-3. Click **Load unpacked** and select the `gitchat-extension` folder.
+3. Click **Load unpacked** and select the folder you cloned into (`gitchat-extension` above). On macOS, press ⌘⇧G in the dialog to type its path.
 
 ### Update
 
 ```sh
 git -C ~/gitchat-extension pull
 ```
+
+Use the folder you cloned into if it is not `~/gitchat-extension`.
 
 Then reload gitchat: press its reload button in `chrome://extensions`, or **Reload** in gitchat's settings under **About**. Reload open chat tabs afterwards. Your sign-in, settings and saved chats stay, because Chrome keeps them for as long as the extension is loaded from the same folder.
 

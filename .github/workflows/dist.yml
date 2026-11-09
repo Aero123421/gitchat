@@ -58,7 +58,8 @@ jobs:
           [main](https://github.com/${GITHUB_REPOSITORY}).
 
           Install: \`git clone -b dist https://github.com/${GITHUB_REPOSITORY}.git ~/gitchat-extension\`, then
-          load that folder in \`chrome://extensions\` (Developer mode → Load unpacked).
+          load that folder in \`chrome://extensions\` (Developer mode → Load unpacked). Any folder works; just
+          don't move it afterwards, because Chrome knows the extension by its folder.
 
           Update: \`git -C ~/gitchat-extension pull\`, then press gitchat's reload button in
           \`chrome://extensions\` (or Settings → About → Reload in gitchat).
