@@ -1,0 +1,500 @@
+{
+  "extName": {
+    "message": "gitchat"
+  },
+  "extDescription": {
+    "message": "ChatGPT・Claude・Gemini の会話を Markdown として自分の GitHub リポジトリに保存。git のようにコミットとプッシュ。"
+  },
+  "commit": {
+    "message": "コミット"
+  },
+  "push": {
+    "message": "プッシュ"
+  },
+  "track": {
+    "message": "このチャットの保存を始める"
+  },
+  "cancel": {
+    "message": "キャンセル"
+  },
+  "copyLink": {
+    "message": "GitHub のファイルへのリンクをコピー"
+  },
+  "autoCommit": {
+    "message": "自動コミット"
+  },
+  "autoPush": {
+    "message": "自動プッシュ"
+  },
+  "openSettings": {
+    "message": "設定を開く"
+  },
+  "close": {
+    "message": "閉じる"
+  },
+  "gitStatus": {
+    "message": "Git の状態"
+  },
+  "allPushed": {
+    "message": "すべてプッシュ済み"
+  },
+  "autoCommitHint": {
+    "message": "回答が終わったらコミットします。"
+  },
+  "autoPushHint": {
+    "message": "コミットのたびにプッシュします。自動コミットもオンになります。"
+  },
+  "back": {
+    "message": "戻る"
+  },
+  "branch": {
+    "message": "ブランチ"
+  },
+  "builtIn": {
+    "message": "組み込み"
+  },
+  "captureHeading": {
+    "message": "取り込み"
+  },
+  "change": {
+    "message": "変更"
+  },
+  "clientId": {
+    "message": "GitHub OAuth クライアント ID"
+  },
+  "clientIdHint": {
+    "message": "空欄なら組み込みのアプリを使います。自分で管理する GitHub App / OAuth App でサインインする場合に設定します（Device Flow を有効にしてください）。"
+  },
+  "codeExpired": {
+    "message": "コードの有効期限が切れました。もう一度お試しください。"
+  },
+  "codeExpires": {
+    "message": "残り"
+  },
+  "confirmReset": {
+    "message": "すべてリセットしますか？"
+  },
+  "confirmSignOut": {
+    "message": "サインアウトしますか？"
+  },
+  "connect": {
+    "message": "接続"
+  },
+  "continue": {
+    "message": "次へ"
+  },
+  "copied": {
+    "message": "コピーしました"
+  },
+  "copy": {
+    "message": "コピー"
+  },
+  "create": {
+    "message": "作成"
+  },
+  "createPrivateRepo": {
+    "message": "新しく作る"
+  },
+  "createToken": {
+    "message": "GitHub でトークンを作成"
+  },
+  "defaultTag": {
+    "message": "標準"
+  },
+  "deviceCodeLead": {
+    "message": "GitHub でこのコードを入力してください"
+  },
+  "errAuth": {
+    "message": "GitHub にサインインを受け付けてもらえませんでした。もう一度接続してください。"
+  },
+  "errBadToken": {
+    "message": "このトークンは使えませんでした。トークンと権限を確認してください。"
+  },
+  "errDenied": {
+    "message": "GitHub で拒否されました。"
+  },
+  "errGeneric": {
+    "message": "うまくいきませんでした。もう一度お試しください。"
+  },
+  "errNetwork": {
+    "message": "GitHub に接続できません。ネットワークを確認してください。"
+  },
+  "errNoPermission": {
+    "message": "このアカウントにはそのリポジトリへの書き込み権限がありません。"
+  },
+  "errNoReply": {
+    "message": "gitchat のバックグラウンドが応答しません。もう一度お試しください。"
+  },
+  "errNoRepo": {
+    "message": "先にリポジトリを選んでください。"
+  },
+  "errNotFound": {
+    "message": "GitHub で見つかりませんでした。"
+  },
+  "errRateLimit": {
+    "message": "GitHub の利用制限に達しました。数分後にお試しください。"
+  },
+  "errRepoExists": {
+    "message": "その名前のリポジトリはすでにあります。"
+  },
+  "filterRepos": {
+    "message": "リポジトリを絞り込む"
+  },
+  "goToSettings": {
+    "message": "設定を開く"
+  },
+  "lastPush": {
+    "message": "$AGO$ 前にプッシュ",
+    "placeholders": {
+      "ago": {
+        "content": "$1",
+        "example": "3m"
+      }
+    }
+  },
+  "license": {
+    "message": "ライセンス"
+  },
+  "loadingRepos": {
+    "message": "リポジトリを読み込み中…"
+  },
+  "methodDevice": {
+    "message": "GitHub でサインイン"
+  },
+  "methodPat": {
+    "message": "個人アクセストークン"
+  },
+  "noRepos": {
+    "message": "リポジトリが見つかりません。"
+  },
+  "notSignedIn": {
+    "message": "GitHub に接続していません。"
+  },
+  "obConnectBody": {
+    "message": "選んだリポジトリに書き込めるように、GitHub にサインインします。"
+  },
+  "obConnectTitle": {
+    "message": "GitHub と接続"
+  },
+  "obDoneBody": {
+    "message": "チャットを開き、右端のウィジェットにカーソルを合わせると保存を始められます。"
+  },
+  "obDoneTitle": {
+    "message": "準備ができました"
+  },
+  "obPoint1": {
+    "message": "1 チャット = 1 つの Markdown。数式・コード・可視化もそのまま残ります。"
+  },
+  "obPoint2": {
+    "message": "git と同じ流れ。変更は自動でステージされ、コミットしてプッシュします。"
+  },
+  "obPoint3": {
+    "message": "リンク 1 つで、チャット全体を別の AI エージェントに渡せます。"
+  },
+  "obPrefsBody": {
+    "message": "あとから設定でいつでも変更できます。"
+  },
+  "obPrefsTitle": {
+    "message": "見た目と動き"
+  },
+  "obRepoBody": {
+    "message": "チャットには個人的な内容が含まれやすいため、非公開リポジトリをおすすめします。"
+  },
+  "obRepoTitle": {
+    "message": "保存先のリポジトリ"
+  },
+  "obStart": {
+    "message": "はじめる"
+  },
+  "obWelcomeBody": {
+    "message": "gitchat は ChatGPT・Claude・Gemini の会話を Markdown として保存します。チャットが送られる先は、あなた自身の GitHub リポジトリだけです。"
+  },
+  "obWelcomeTitle": {
+    "message": "AI とのチャットを、自分のリポジトリに"
+  },
+  "openGitHub": {
+    "message": "GitHub を開く"
+  },
+  "openOnGitHub": {
+    "message": "GitHub で開く"
+  },
+  "openService": {
+    "message": "$NAME$ を開く",
+    "placeholders": {
+      "name": {
+        "content": "$1",
+        "example": "Claude"
+      }
+    }
+  },
+  "pasteToken": {
+    "message": "トークン"
+  },
+  "pendingCommits": {
+    "message": "未プッシュ $COUNT$ 件",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "2"
+      }
+    }
+  },
+  "popFinishSetup": {
+    "message": "セットアップを完了"
+  },
+  "popNewChat": {
+    "message": "メッセージを送るとチャットが始まり、ここから保存できます。"
+  },
+  "popOpenChat": {
+    "message": "保存したいチャットを開いてください。"
+  },
+  "popPushing": {
+    "message": "プッシュ中…"
+  },
+  "popSetupLead": {
+    "message": "AI チャットを、自分の GitHub リポジトリに保存します。"
+  },
+  "popUntracked": {
+    "message": "まだ保存していません"
+  },
+  "project": {
+    "message": "プロジェクト"
+  },
+  "repoEmpty": {
+    "message": "空"
+  },
+  "repoName": {
+    "message": "リポジトリ名"
+  },
+  "repoNotEmptyWarn": {
+    "message": "このリポジトリにはすでにファイルがあります。gitchat が使えるのは、gitchat の保存先として使われているリポジトリだけです。"
+  },
+  "repoPrivate": {
+    "message": "非公開"
+  },
+  "repoPrivateLabel": {
+    "message": "非公開"
+  },
+  "repoPublic": {
+    "message": "公開"
+  },
+  "repoPublicWarn": {
+    "message": "このリポジトリは公開されています。チャットを誰でも読めてしまいます。"
+  },
+  "resetAll": {
+    "message": "設定をリセット"
+  },
+  "resetHint": {
+    "message": "この端末でサインアウトし、初期設定に戻します。リポジトリは変更しません。"
+  },
+  "retry": {
+    "message": "もう一度"
+  },
+  "saveVisualizations": {
+    "message": "可視化を保存"
+  },
+  "saveVisualizationsHint": {
+    "message": "インタラクティブなグラフやアーティファクトの HTML をファイルとして保存します。"
+  },
+  "saved": {
+    "message": "保存しました"
+  },
+  "secAbout": {
+    "message": "情報"
+  },
+  "secAccount": {
+    "message": "アカウント"
+  },
+  "secAdvanced": {
+    "message": "詳細"
+  },
+  "secAppearance": {
+    "message": "見た目"
+  },
+  "secBehavior": {
+    "message": "動作"
+  },
+  "secRepository": {
+    "message": "リポジトリ"
+  },
+  "services": {
+    "message": "サービス"
+  },
+  "setUp": {
+    "message": "セットアップ"
+  },
+  "settings": {
+    "message": "設定"
+  },
+  "setupProgress": {
+    "message": "セットアップの進み具合"
+  },
+  "signInWithGitHub": {
+    "message": "GitHub でサインイン"
+  },
+  "signOut": {
+    "message": "サインアウト"
+  },
+  "signedInAs": {
+    "message": "$LOGIN$ としてサインイン済み",
+    "placeholders": {
+      "login": {
+        "content": "$1",
+        "example": "octocat"
+      }
+    }
+  },
+  "stepConnect": {
+    "message": "GitHub"
+  },
+  "stepDone": {
+    "message": "完了"
+  },
+  "stepPrefs": {
+    "message": "スタイル"
+  },
+  "stepRepo": {
+    "message": "リポジトリ"
+  },
+  "stepWelcome": {
+    "message": "ようこそ"
+  },
+  "styleCreature": {
+    "message": "キャラ"
+  },
+  "styleDot": {
+    "message": "ドット"
+  },
+  "styleLine": {
+    "message": "ライン"
+  },
+  "syncError": {
+    "message": "前回のプッシュに失敗: $ERROR$",
+    "placeholders": {
+      "error": {
+        "content": "$1",
+        "example": "network error"
+      }
+    }
+  },
+  "syncState": {
+    "message": "同期"
+  },
+  "theme": {
+    "message": "テーマ"
+  },
+  "themeAuto": {
+    "message": "自動"
+  },
+  "themeDark": {
+    "message": "ダーク"
+  },
+  "themeLight": {
+    "message": "ライト"
+  },
+  "tokenTitle": {
+    "message": "個人アクセストークン"
+  },
+  "untitledChat": {
+    "message": "無題のチャット"
+  },
+  "use": {
+    "message": "使う"
+  },
+  "useExistingRepo": {
+    "message": "既存のリポジトリ"
+  },
+  "useTokenInstead": {
+    "message": "トークンを使う"
+  },
+  "version": {
+    "message": "バージョン"
+  },
+  "waitingForApproval": {
+    "message": "承認を待っています"
+  },
+  "widgetStyle": {
+    "message": "ウィジェット"
+  },
+  "errRepoNotEmpty": {
+    "message": "このリポジトリには gitchat 以外のファイルがあります。空のリポジトリを選ぶか、gitchat に新しく作らせてください。"
+  },
+  "tokenStepRepo": {
+    "message": "チャット用に、空の非公開リポジトリを作成します。"
+  },
+  "createRepoOnGitHub": {
+    "message": "GitHub でリポジトリを作成"
+  },
+  "tokenStepToken": {
+    "message": "fine-grained トークンを作成します。Repository access で Only select repositories を選び、そのリポジトリを指定してください。Contents の権限は入力済みです。"
+  },
+  "tokenStepPaste": {
+    "message": "トークンをここに貼り付けます。トークンはこの端末にだけ保存されます。"
+  },
+  "repoPatNote": {
+    "message": "対象リポジトリを限定したトークンでは、リポジトリを作成できません。GitHub でリポジトリを作成してトークンにアクセスを許可し、「既存のリポジトリ」から選んでください。"
+  },
+  "repoMissingHint": {
+    "message": "一覧にない場合は、トークンがそのリポジトリにアクセスできるか確認するか、上の欄に owner/name を入力してください。"
+  },
+  "widgetName": {
+    "message": "gitchat: このチャットの保存状態"
+  },
+  "errInitIncomplete": {
+    "message": "チャット全体を読み込めなかったため、保存しませんでした。もう一度お試しください。"
+  },
+  "errInitBusy": {
+    "message": "回答の生成が続いています。終わってからもう一度保存を始めてください。"
+  },
+  "errInitEmpty": {
+    "message": "このチャットに回答が見つからなかったため、保存しませんでした。"
+  },
+  "errInitOtherTab": {
+    "message": "このチャットは別のタブで保存中です。"
+  },
+  "errInitStale": {
+    "message": "この取り込みはキャンセルまたは置き換えられました。もう一度始めてください。"
+  },
+  "lookUpTyped": {
+    "message": "$REPO$ を確認",
+    "placeholders": {
+      "repo": {
+        "content": "$1",
+        "example": "octocat/ai-chats"
+      }
+    }
+  },
+  "errRefresh": {
+    "message": "チャットを読み取れなかったため、コミットもプッシュもしませんでした。回答が終わるのを待つか、タブを再読み込みしてから、もう一度お試しください。"
+  },
+  "aiStalled": {
+    "message": "回答が止まっているようです。完了したら保存します。"
+  },
+  "rescan": {
+    "message": "チャット全体を読み直す"
+  },
+  "errCaptureFailed": {
+    "message": "最新のメッセージを読み取れなかったため、コミットもプッシュもしませんでした。もう一度お試しください。"
+  },
+  "errInitCoverage": {
+    "message": "一部のメッセージを読み取れなかったため、保存しませんでした。もう一度お試しください。"
+  },
+  "shotRepo": {
+    "message": "① 名前（入力済み）・② Private・③ Create repository"
+  },
+  "shotAccess": {
+    "message": "① Only select repositories ・ ② 作成したリポジトリを選ぶ"
+  },
+  "shotPermissions": {
+    "message": "① Contents: Read and write と ② Metadata: Read-only は入力済み ・ ③ Generate token を押して、表示されたトークンをコピー"
+  },
+  "openFullSize": {
+    "message": "原寸で開く"
+  },
+  "errInitStalled": {
+    "message": "チャットの読み取りが先に進まなくなったため、保存しませんでした。チャットを少しスクロールしてから、もう一度お試しください。"
+  },
+  "errInitPrevChat": {
+    "message": "ページにまだ前のチャットが表示されていたため、保存しませんでした。このチャットが読み込まれるのを待ってから、もう一度お試しください。"
+  }
+}
