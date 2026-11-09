@@ -505,5 +505,20 @@
   },
   "reloadExtensionHint": {
     "message": "Loads the extension’s files again, for example after updating them with git pull. Reload open chat tabs afterwards."
+  },
+  "useDifferentToken": {
+    "message": "Use a different token"
+  },
+  "signInDifferentAccount": {
+    "message": "Sign in with a different account"
+  },
+  "wrongTokenUseDifferent": {
+    "message": "Wrong token? Use a different one"
+  },
+  "tokenLacksAccess": {
+    "message": "This token probably can't write to this repository (check that it includes the repository and has Contents: Read and write)."
+  },
+  "tokenMayNotSeeRepo": {
+    "message": "This repository wasn't found, or this token can't see it (a token limited to other repositories gets the same answer)."
   }
 }

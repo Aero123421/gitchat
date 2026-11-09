@@ -799,9 +799,9 @@ label.lbl { display: block; font-size: 12px; color: var(--ink-2); margin: 0 0 6p
   // src/options/connect.ts
   var PAT_URL = "https://github.com/settings/personal-access-tokens/new?name=gitchat&description=gitchat%20chat%20history&contents=write&metadata=read";
   var NEW_REPO_URL = "https://github.com/new?name=ai-chats&visibility=private&description=AI%20chat%20archive%20managed%20by%20gitchat";
-  function createConnect(onDone) {
+  function createConnect(onDone, opts) {
     const root = h("div", { class: "connect" });
-    let view = "choose";
+    let view = opts?.tokenFirst ? "token" : "choose";
     let deviceUnavailable = false;
     let code = null;
     let deadline = 0;
@@ -1541,20 +1541,41 @@ button { font: inherit; }
   // src/options/repo.ts
   var NAME_RE = /^[A-Za-z0-9._-]{1,100}$/;
   var FULL_NAME_RE = /^([A-Za-z0-9-]{1,39})\/([A-Za-z0-9._-]{1,100})$/;
-  function createRepoChooser(onDone) {
+  function createRepoChooser(onDone, opts) {
     const root = h("div", { class: "repo-chooser" });
     const limitedToken = app.auth?.method === "pat";
+    const replaceSignIn = opts?.onReplaceSignIn;
     let mode = limitedToken ? "existing" : "create";
     let name = "ai-chats";
     let priv = true;
     let busy = false;
     let error = "";
+    let errorKind = "";
     let repos = null;
     let loading = false;
     let listError = "";
+    let listKind = "";
     let filter = "";
     let selected = null;
     const body = h("div", { class: "stack" });
+    const leave = () => {
+      if (!busy) replaceSignIn?.();
+    };
+    const escapeBtn = replaceSignIn ? h("button", { class: "btn ghost small", type: "button", onClick: leave }, t("wrongTokenUseDifferent")) : null;
+    function escapeButton() {
+      return h("button", { class: "btn small", type: "button", onClick: leave }, t("wrongTokenUseDifferent"));
+    }
+    const HINTS = { forbidden: "tokenLacksAccess", auth: "tokenLacksAccess", "not-found": "tokenMayNotSeeRepo" };
+    function accessHint(code) {
+      const key = HINTS[code];
+      if (!replaceSignIn || !key) return null;
+      return h("div", { class: "token-hint stack" }, h("div", { class: "note" }, icon2("key"), h("span", null, t(key))), escapeButton());
+    }
+    function syncEscape() {
+      if (!escapeBtn) return;
+      escapeBtn.hidden = !!root.querySelector(".token-hint");
+      escapeBtn.disabled = busy;
+    }
     const seg = h(
       "div",
       { class: "seg", role: "tablist", "aria-label": t("obRepoTitle") },
@@ -1572,6 +1593,7 @@ button { font: inherit; }
           onClick: () => {
             mode = m;
             error = "";
+            errorKind = "";
             for (const b of seg.querySelectorAll("button")) b.setAttribute("aria-selected", String(b.dataset.mode === mode));
             render();
             if (m === "existing" && !repos && !loading) void loadRepos();
@@ -1580,10 +1602,16 @@ button { font: inherit; }
         label
       );
     }
-    const note = (msg) => msg ? h("div", { class: "note err", role: "alert" }, icon2("alert"), h("span", null, msg)) : null;
+    const note = (msg, code = "") => {
+      if (!msg) return null;
+      const err = h("div", { class: "note err", role: "alert" }, icon2("alert"), h("span", null, msg));
+      const hint = accessHint(code);
+      return hint ? h("div", { class: "stack" }, err, hint) : err;
+    };
     const githubLink = () => h("a", { class: "btn small", href: NEW_REPO_URL, target: "_blank", rel: "noopener noreferrer" }, h("span", null, t("createRepoOnGitHub")), icon2("external"));
     function render() {
       mount(body, mode === "create" ? renderCreate() : renderExisting());
+      syncEscape();
     }
     function renderCreate() {
       const input = h("input", {
@@ -1610,12 +1638,14 @@ button { font: inherit; }
         if (!valid() || busy) return;
         busy = true;
         error = "";
+        errorKind = "";
         render();
         try {
           const repo = await request("repo/create", { name, private: priv });
           onDone(repo);
         } catch (e) {
           error = errorText(e);
+          errorKind = errorCode(e);
           busy = false;
           render();
         }
@@ -1641,7 +1671,7 @@ button { font: inherit; }
         h("div", null, h("label", { class: "lbl", for: "gc-repo-name" }, t("repoName")), h("div", { class: "inline" }, input, createBtn)),
         h("div", { class: "row tight" }, h("div", { class: "text" }, h("div", { class: "title" }, icon2("lock"), t("repoPrivateLabel"))), privSwitch.el),
         priv ? null : h("div", { class: "note err" }, icon2("alert"), h("span", null, t("repoPublicWarn"))),
-        note(error)
+        note(error, errorKind)
       );
     }
     function renderExisting() {
@@ -1650,7 +1680,7 @@ button { font: inherit; }
         return h(
           "div",
           { class: "stack" },
-          note(listError || t("errGeneric")),
+          note(listError || t("errGeneric"), listError ? listKind : ""),
           h("button", { class: "btn small", type: "button", onClick: () => void loadRepos() }, icon2("refresh"), h("span", null, t("retry")))
         );
       const search = h("input", {
@@ -1669,6 +1699,7 @@ button { font: inherit; }
         const listed = m && repos.some((r) => `${r.owner}/${r.name}`.toLowerCase() === filter.trim().toLowerCase());
         if (!m || listed) {
           mount(typed);
+          syncEscape();
           return;
         }
         const [, owner, name2] = m;
@@ -1680,7 +1711,9 @@ button { font: inherit; }
             disabled: busy,
             onClick: async () => {
               busy = true;
+              syncEscape();
               error = "";
+              errorKind = "";
               btn.setAttribute("disabled", "");
               btn.replaceChildren(spinner(), h("span", null, t("lookUpTyped", `${owner}/${name2}`)));
               try {
@@ -1694,6 +1727,7 @@ button { font: inherit; }
                 select(known ?? info);
               } catch (e) {
                 error = errorText(e);
+                errorKind = errorCode(e);
                 busy = false;
                 fillTyped();
               }
@@ -1701,7 +1735,8 @@ button { font: inherit; }
           },
           h("span", null, t("lookUpTyped", `${owner}/${name2}`))
         );
-        mount(typed, h("div", null, btn), selected ? null : note(error));
+        mount(typed, h("div", null, btn), selected ? null : note(error, errorKind));
+        syncEscape();
       };
       const fill = () => {
         fillTyped();
@@ -1737,6 +1772,7 @@ button { font: inherit; }
       const renderDetail = () => {
         if (!selected) {
           mount(detail);
+          syncEscape();
           return;
         }
         const r = selected;
@@ -1751,7 +1787,9 @@ button { font: inherit; }
             disabled: busy,
             onClick: async () => {
               busy = true;
+              syncEscape();
               error = "";
+              errorKind = "";
               useBtn.setAttribute("disabled", "");
               useBtn.replaceChildren(spinner(), h("span", null, t("use")));
               try {
@@ -1759,6 +1797,7 @@ button { font: inherit; }
                 onDone(repo);
               } catch (e) {
                 error = errorText(e);
+                errorKind = errorCode(e);
                 busy = false;
                 renderDetail();
               }
@@ -1771,8 +1810,9 @@ button { font: inherit; }
           detail,
           warn.map((w) => h("div", { class: "note" }, icon2("alert"), h("span", null, w))),
           h("div", null, useBtn),
-          note(error)
+          note(error, errorKind)
         );
+        syncEscape();
       };
       search.addEventListener("input", () => {
         filter = search.value;
@@ -1805,18 +1845,21 @@ button { font: inherit; }
     async function loadRepos() {
       loading = true;
       listError = "";
+      listKind = "";
       render();
       try {
         repos = await request("repo/list", {});
         repos.sort((a, b) => Number(b.managed) - Number(a.managed) || Number(b.empty) - Number(a.empty) || a.name.localeCompare(b.name));
       } catch (e) {
         listError = errorText(e);
+        listKind = errorCode(e);
       } finally {
         loading = false;
         if (mode === "existing") render();
       }
     }
     root.append(seg, body);
+    if (escapeBtn) root.append(escapeBtn);
     render();
     if (mode === "existing") void loadRepos();
     return root;
@@ -1834,6 +1877,8 @@ button { font: inherit; }
     root.append(steps, card);
     let step = app.auth ? app.settings.repo ? "prefs" : "repo" : "welcome";
     let error = "";
+    let tokenFirst = false;
+    let replacing = false;
     function go(next2) {
       step = next2;
       error = "";
@@ -1869,6 +1914,24 @@ button { font: inherit; }
       h("span", null, label),
       icon2("arrow")
     );
+    async function replaceSignIn() {
+      if (replacing) return;
+      replacing = true;
+      const pasteToken = app.auth?.method === "pat";
+      try {
+        await request("auth/signout", {});
+        app.auth = null;
+        await refreshAuth().catch(() => void 0);
+        tokenFirst = pasteToken;
+        replacing = false;
+        go("connect");
+      } catch (e) {
+        replacing = false;
+        error = errorText(e);
+        render();
+      }
+    }
+    const replaceLabel = () => app.auth?.method === "device" ? t("signInDifferentAccount") : t("useDifferentToken");
     function render() {
       renderSteps();
       if (step === "prefs" || step === "done") opts.preview.show(app.settings.widget);
@@ -1889,14 +1952,19 @@ button { font: inherit; }
           if (app.auth) {
             body.append(
               h("div", { class: "note ok" }, icon2("check"), h("span", null, t("signedInAs", app.auth.login))),
+              h("button", { class: "btn ghost", type: "button", onClick: () => void replaceSignIn() }, replaceLabel()),
+              ...error ? [errNote()] : [],
               nav("welcome", next(t("continue"), "repo"))
             );
           } else {
             body.append(
-              createConnect(async () => {
-                await refreshAuth().catch(() => void 0);
-                go(app.settings.repo ? "prefs" : "repo");
-              }),
+              createConnect(
+                async () => {
+                  await refreshAuth().catch(() => void 0);
+                  go(app.settings.repo ? "prefs" : "repo");
+                },
+                tokenFirst ? { tokenFirst: true } : void 0
+              ),
               nav("welcome", null)
             );
           }
@@ -1911,12 +1979,17 @@ button { font: inherit; }
             );
           } else {
             body.append(
-              createRepoChooser(async (repo) => {
-                await refreshSettings().catch(() => void 0);
-                if (!app.settings.repo) await patchSettings({ repo }).catch(() => void 0);
-                void refreshSync();
-                go("prefs");
-              }),
+              createRepoChooser(
+                async (repo) => {
+                  await refreshSettings().catch(() => void 0);
+                  if (!app.settings.repo) await patchSettings({ repo }).catch(() => void 0);
+                  void refreshSync();
+                  go("prefs");
+                },
+                // Settings already has Sign out; only the wizard needs a way back to the token form.
+                { onReplaceSignIn: () => void replaceSignIn() }
+              ),
+              ...error ? [errNote()] : [],
               nav("connect", null)
             );
           }
@@ -4833,7 +4906,7 @@ button { font: inherit; }
         h(
           "div",
           { class: "rows" },
-          row(t("version"), null, h("span", { class: "mono muted" }, "0.1.4")),
+          row(t("version"), null, h("span", { class: "mono muted" }, "0.1.5")),
           // after `git pull` in the extension folder: load the new files without visiting chrome://extensions
           row(t("reloadExtension"), t("reloadExtensionHint"), h("button", { class: "btn small", type: "button", onClick: () => chrome.runtime.reload() }, t("reloadExtension"))),
           row(t("project"), null, h("a", { class: "mono", href: PROJECT_URL, target: "_blank", rel: "noopener noreferrer" }, PROJECT_URL.replace("https://", ""))),
