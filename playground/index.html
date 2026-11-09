@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="ja" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>gitchat playground</title>
+    <link rel="stylesheet" href="demo.css" />
+  </head>
+  <body>
+    <div class="blobs" aria-hidden="true"></div>
+    <div class="app">
+      <aside class="side">
+        <div class="brand"><span class="mark"></span>Chat</div>
+        <div class="newchat">＋ 新しいチャット</div>
+        <div class="hist">
+          <div class="h on">状態管理の設計</div>
+          <div class="h">フーリエ変換の直感</div>
+          <div class="h">旅行プラン 京都</div>
+          <div class="h">SQL のインデックス設計</div>
+          <div class="h">英文メールの添削</div>
+          <div class="h">Rust の所有権</div>
+          <div class="h">確率分布の可視化</div>
+        </div>
+      </aside>
+
+      <main class="chat">
+        <h1 class="title">状態管理の設計</h1>
+
+        <div class="msg user"><p>React の状態管理、どう設計するのがいい？規模は中くらいで、サーバーのデータが多め。</p></div>
+
+        <div class="msg ai">
+          <p>サーバーのデータが多いなら、まず「サーバー状態」と「UI 状態」を分けるのがおすすめです。</p>
+          <ul>
+            <li><b>サーバー状態</b>: TanStack Query などのキャッシュ層に任せる</li>
+            <li><b>UI 状態</b>: コンポーネント内か、小さなストアで持つ</li>
+            <li><b>URL 状態</b>: フィルタやタブは URL に載せる</li>
+          </ul>
+<pre><code>const useFilters = create((set) => ({
+  tab: 'all',
+  setTab: (tab) => set({ tab }),
+}));
+
+const { data } = useQuery({
+  queryKey: ['todos', tab],
+  queryFn: () => fetchTodos(tab),
+});</code></pre>
+          <p>こうしておくと、再取得や重複排除をライブラリに任せられます。</p>
+        </div>
+
+        <div class="msg user"><p>再レンダリングのコストを式で表せる？</p></div>
+
+        <div class="msg ai">
+          <p>ざっくり言うと、更新 1 回あたりのコストは「再描画されるコンポーネントの数 × 1 つあたりの重さ」です。</p>
+          <div class="math">C = <span class="sum">Σ</span><sub>i∈R</sub> r<sub>i</sub> · w<sub>i</sub> &nbsp;≈&nbsp; |R| · w̄</div>
+          <p>ストアを細かく購読すれば <i>R</i> が小さくなり、メモ化すれば <i>w</i> が小さくなります。</p>
+        </div>
+
+        <div class="msg user"><p>図にして</p></div>
+
+        <div class="msg ai">
+          <div class="viz">
+            <div class="viz-head"><span class="dot"></span>Re-render cost by strategy</div>
+            <svg viewBox="0 0 640 260" role="img" aria-label="戦略ごとの再レンダリングコストの棒グラフ">
+              <defs>
+                <linearGradient id="ga" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ff6b6b" /><stop offset="1" stop-color="#ff9f43" /></linearGradient>
+                <linearGradient id="gb" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#feca57" /><stop offset="1" stop-color="#ff9f43" /></linearGradient>
+                <linearGradient id="gc" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#48dbfb" /><stop offset="1" stop-color="#0abde3" /></linearGradient>
+                <linearGradient id="gd" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1dd1a1" /><stop offset="1" stop-color="#10ac84" /></linearGradient>
+              </defs>
+              <g class="axis"><line x1="60" y1="220" x2="620" y2="220" /><line x1="60" y1="20" x2="60" y2="220" /></g>
+              <rect x="100" y="40" width="90" height="180" rx="8" fill="url(#ga)" />
+              <rect x="230" y="90" width="90" height="130" rx="8" fill="url(#gb)" />
+              <rect x="360" y="140" width="90" height="80" rx="8" fill="url(#gc)" />
+              <rect x="490" y="180" width="90" height="40" rx="8" fill="url(#gd)" />
+              <g class="lbl"><text x="145" y="242">Context</text><text x="275" y="242">Redux</text><text x="405" y="242">Selectors</text><text x="535" y="242">Signals</text></g>
+            </svg>
+          </div>
+          <p>購読の粒度が細かいほど、更新で触るコンポーネントが減ります。</p>
+        </div>
+
+        <div class="msg user"><p>なるほど。じゃあ移行の手順も教えて</p></div>
+        <div class="msg ai">
+          <p>段階的に進めるのが安全です。まずサーバー状態だけをキャッシュ層に移し、次に UI 状態を整理します。最後に Context を細かく分けて、不要な再描画を測定しながら減らしていきます。</p>
+        </div>
+      </main>
+    </div>
+
+    <div class="composer"><input class="cin" placeholder="メッセージを入力…（Enterで送信）" aria-label="メッセージ" /><span class="send">↑</span></div>
+
+    <div class="demo" role="toolbar" aria-label="デモ操作">
+      <div class="seg">
+        <button data-v="creature" title="1">キャラ</button>
+        <button data-v="line" title="2">ライン</button>
+        <button data-v="dot" title="3">ドット</button>
+      </div>
+      <select class="acts" aria-label="しぐさ" hidden>
+        <option value="">しぐさ…</option>
+        <option value="ai-long">AIが長く考える</option>
+        <option value="glance">見回す</option>
+        <option value="blink2">まばたき2回</option>
+        <option value="watchDroplet">自分の滴を目で追う</option>
+        <option value="sigh">ため息</option>
+        <option value="stretch">伸び</option>
+        <option value="shift">重心を移す</option>
+        <option value="hop">小さく跳ねる</option>
+        <option value="nod">うなずく</option>
+        <option value="shake">首を振る</option>
+        <option value="shiver">震える</option>
+        <option value="startle">びくっとする</option>
+        <option value="pet">なでられる</option>
+        <option value="dizzy">目が回る</option>
+        <option value="perk">期待する</option>
+        <option value="doze">うとうと</option>
+      </select>
+      <span class="sep"></span>
+      <button data-act="reply" title="R">＋返答</button>
+      <button data-act="fail">次のpushを失敗</button>
+      <button data-act="untrack">未追跡に</button>
+      <button data-act="sample">初期状態</button>
+      <span class="sep"></span>
+      <button data-act="theme" title="テーマ">◐</button>
+      <button data-act="vivid" title="背景">背景</button>
+    </div>
+
+    <script type="module" src="demo.js"></script>
+  </body>
+</html>

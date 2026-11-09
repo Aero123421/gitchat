@@ -1,0 +1,273 @@
+:root {
+  --bg: #ffffff;
+  --fg: #1f1f1f;
+  --muted: #6b6b70;
+  --side: #f6f6f7;
+  --bubble: #f0f0f2;
+  --line: #e7e7ea;
+  --code: #f6f6f8;
+  color-scheme: light;
+}
+[data-theme='dark'] {
+  --bg: #1d1d1f;
+  --fg: #ececee;
+  --muted: #9a9aa0;
+  --side: #161618;
+  --bubble: #2c2c30;
+  --line: #313135;
+  --code: #141416;
+  color-scheme: dark;
+}
+* {
+  box-sizing: border-box;
+}
+html {
+  background: var(--bg);
+}
+body {
+  margin: 0;
+  color: var(--fg);
+  font: 15px/1.8 -apple-system, BlinkMacSystemFont, 'Hiragino Sans', 'Noto Sans JP', system-ui, sans-serif;
+}
+.blobs {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.5s;
+  background:
+    radial-gradient(28vw 28vw at 92% 30%, #ff6b9a 0, transparent 60%),
+    radial-gradient(26vw 26vw at 98% 70%, #4facfe 0, transparent 60%),
+    radial-gradient(30vw 30vw at 70% 92%, #43e97b 0, transparent 60%),
+    radial-gradient(24vw 24vw at 78% 8%, #f9d423 0, transparent 60%);
+  filter: saturate(1.2);
+}
+body.vivid .blobs {
+  opacity: 0.85;
+}
+.app {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 250px 1fr;
+  min-height: 100vh;
+}
+.side {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  background: var(--side);
+  border-right: 1px solid var(--line);
+  padding: 18px 12px;
+  font-size: 14px;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+  padding: 0 8px 16px;
+}
+.mark {
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  background: linear-gradient(135deg, #c96442, #e8a87c);
+}
+.newchat {
+  padding: 8px 10px;
+  border-radius: 10px;
+  color: var(--muted);
+  margin-bottom: 14px;
+}
+.h {
+  padding: 7px 10px;
+  border-radius: 9px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.h.on {
+  background: var(--bubble);
+  color: var(--fg);
+}
+.chat {
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 36px 28px 200px;
+}
+.title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--muted);
+  margin: 0 0 28px;
+}
+.msg {
+  margin: 0 0 26px;
+}
+.msg.user {
+  display: flex;
+  justify-content: flex-end;
+}
+.msg.user p {
+  margin: 0;
+  background: var(--bubble);
+  padding: 10px 16px;
+  border-radius: 20px;
+  max-width: 78%;
+}
+.msg.ai p {
+  margin: 0 0 12px;
+}
+ul {
+  padding-left: 22px;
+  margin: 0 0 14px;
+}
+pre {
+  background: var(--code);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px 16px;
+  overflow: auto;
+  font: 13px/1.65 ui-monospace, 'SF Mono', Menlo, monospace;
+  margin: 0 0 14px;
+}
+.math {
+  text-align: center;
+  font: italic 22px/1.6 'Times New Roman', 'Hiragino Mincho ProN', serif;
+  margin: 16px 0 18px;
+}
+.math .sum {
+  font-style: normal;
+  font-size: 28px;
+}
+.viz {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  overflow: hidden;
+  margin: 0 0 14px;
+  background: var(--bg);
+}
+.viz-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  font-size: 12px;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+}
+.viz-head .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #1dd1a1;
+}
+.viz svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.viz .axis line {
+  stroke: var(--line);
+  stroke-width: 2;
+}
+.viz .lbl text {
+  fill: var(--muted);
+  font-size: 13px;
+  text-anchor: middle;
+}
+.composer {
+  position: fixed;
+  z-index: 2;
+  bottom: 22px;
+  left: calc(250px + (100vw - 250px) / 2);
+  transform: translateX(-50%);
+  width: min(700px, calc(100vw - 330px));
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 14px 14px 20px;
+  border-radius: 22px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  box-shadow: 0 8px 30px -12px rgba(0, 0, 0, 0.2);
+  color: var(--muted);
+}
+.send {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--fg);
+  color: var(--bg);
+  font-weight: 700;
+}
+.demo {
+  position: fixed;
+  z-index: 3;
+  left: 14px;
+  bottom: 14px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: calc(100vw - 28px);
+  padding: 5px;
+  border-radius: 14px;
+  background: rgba(24, 24, 28, 0.9);
+  color: #fff;
+  font: 12px/1 -apple-system, system-ui, sans-serif;
+  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5);
+}
+.demo button {
+  all: unset;
+  padding: 7px 10px;
+  border-radius: 9px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.demo button:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+.demo button.on {
+  background: #fff;
+  color: #111;
+}
+.demo .seg {
+  display: flex;
+  gap: 2px;
+}
+.demo .sep {
+  width: 1px;
+  height: 18px;
+  background: rgba(255, 255, 255, 0.2);
+  margin: 0 3px;
+}
+
+.cin {
+  all: unset;
+  flex: 1;
+  color: var(--fg);
+  font-size: 15px;
+}
+.cin::placeholder {
+  color: var(--muted);
+}
+.demo select {
+  all: unset;
+  padding: 7px 10px;
+  border-radius: 9px;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.1);
+}
+.demo select[hidden] {
+  display: none;
+}
+.demo select option {
+  color: #111;
+}

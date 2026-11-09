@@ -1,0 +1,17 @@
+# dependencies and build output
+node_modules/
+dist/
+coverage/
+*.zip
+
+# local-only research data (may contain account details; never publish)
+.research/
+
+# editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.log
+
+# local tooling
+.claude/

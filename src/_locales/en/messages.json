@@ -1,0 +1,419 @@
+{
+  "extName": {
+    "message": "gitchat"
+  },
+  "extDescription": {
+    "message": "Save ChatGPT, Claude and Gemini chats to your GitHub repo as Markdown — with a git-like commit and push."
+  },
+  "commit": {
+    "message": "Commit"
+  },
+  "push": {
+    "message": "Push"
+  },
+  "track": {
+    "message": "Start saving this chat"
+  },
+  "cancel": {
+    "message": "Cancel"
+  },
+  "copyLink": {
+    "message": "Copy link to the file on GitHub"
+  },
+  "autoCommit": {
+    "message": "Auto commit"
+  },
+  "autoPush": {
+    "message": "Auto push"
+  },
+  "openSettings": {
+    "message": "Open settings"
+  },
+  "close": {
+    "message": "Close"
+  },
+  "gitStatus": {
+    "message": "Git status"
+  },
+  "allPushed": {
+    "message": "Everything pushed"
+  },
+  "autoCommitHint": {
+    "message": "Commit when an answer finishes."
+  },
+  "autoPushHint": {
+    "message": "Push right after each commit. Turns on auto commit too."
+  },
+  "back": {
+    "message": "Back"
+  },
+  "branch": {
+    "message": "Branch"
+  },
+  "builtIn": {
+    "message": "Built-in"
+  },
+  "captureHeading": {
+    "message": "Capture"
+  },
+  "change": {
+    "message": "Change"
+  },
+  "clientId": {
+    "message": "GitHub OAuth client ID"
+  },
+  "clientIdHint": {
+    "message": "Leave empty to use the built-in app. Set your own to sign in through a GitHub App or OAuth App you control (enable device flow on it)."
+  },
+  "codeExpired": {
+    "message": "The code expired. Try again."
+  },
+  "codeExpires": {
+    "message": "expires in"
+  },
+  "confirmReset": {
+    "message": "Reset everything?"
+  },
+  "confirmSignOut": {
+    "message": "Sign out?"
+  },
+  "connect": {
+    "message": "Connect"
+  },
+  "continue": {
+    "message": "Continue"
+  },
+  "copied": {
+    "message": "Copied"
+  },
+  "copy": {
+    "message": "Copy"
+  },
+  "create": {
+    "message": "Create"
+  },
+  "createPrivateRepo": {
+    "message": "New repository"
+  },
+  "createToken": {
+    "message": "Create a token on GitHub"
+  },
+  "defaultTag": {
+    "message": "default"
+  },
+  "deviceCodeLead": {
+    "message": "Enter this code on GitHub"
+  },
+  "errAuth": {
+    "message": "GitHub didn't accept the sign-in. Connect again."
+  },
+  "errBadToken": {
+    "message": "GitHub didn't accept this token. Check the token and its permissions."
+  },
+  "errDenied": {
+    "message": "The request was denied on GitHub."
+  },
+  "errGeneric": {
+    "message": "Something went wrong. Try again."
+  },
+  "errNetwork": {
+    "message": "Couldn't reach GitHub. Check your connection."
+  },
+  "errNoPermission": {
+    "message": "This account can't write to that repository."
+  },
+  "errNoReply": {
+    "message": "gitchat's background stopped responding. Try again."
+  },
+  "errNoRepo": {
+    "message": "Choose a repository first."
+  },
+  "errNotFound": {
+    "message": "Not found on GitHub."
+  },
+  "errRateLimit": {
+    "message": "GitHub's rate limit was reached. Try again in a few minutes."
+  },
+  "errRepoExists": {
+    "message": "A repository with that name already exists."
+  },
+  "filterRepos": {
+    "message": "Filter repositories"
+  },
+  "goToSettings": {
+    "message": "Open settings"
+  },
+  "lastPush": {
+    "message": "Pushed $AGO$ ago",
+    "placeholders": {
+      "ago": {
+        "content": "$1",
+        "example": "3m"
+      }
+    }
+  },
+  "license": {
+    "message": "License"
+  },
+  "loadingRepos": {
+    "message": "Loading repositories…"
+  },
+  "methodDevice": {
+    "message": "GitHub sign-in"
+  },
+  "methodPat": {
+    "message": "Personal access token"
+  },
+  "noRepos": {
+    "message": "No repositories found."
+  },
+  "notSignedIn": {
+    "message": "Not connected to GitHub."
+  },
+  "obConnectBody": {
+    "message": "Sign in so gitchat can write to the repository you choose."
+  },
+  "obConnectTitle": {
+    "message": "Connect GitHub"
+  },
+  "obDoneBody": {
+    "message": "Open a chat and hover the widget on the right edge to start saving it."
+  },
+  "obDoneTitle": {
+    "message": "You're all set"
+  },
+  "obPoint1": {
+    "message": "One chat is one Markdown file — math, code and visualizations included."
+  },
+  "obPoint2": {
+    "message": "A git-like flow: changes stage themselves; you commit and push."
+  },
+  "obPoint3": {
+    "message": "Hand a whole chat to another AI agent with a single link."
+  },
+  "obPrefsBody": {
+    "message": "You can change these any time in settings."
+  },
+  "obPrefsTitle": {
+    "message": "How it looks and works"
+  },
+  "obRepoBody": {
+    "message": "A private repository is recommended — chats often contain personal details."
+  },
+  "obRepoTitle": {
+    "message": "Choose a repository"
+  },
+  "obStart": {
+    "message": "Get started"
+  },
+  "obWelcomeBody": {
+    "message": "gitchat saves your ChatGPT, Claude and Gemini conversations as Markdown. Your chats go only to your own GitHub repository."
+  },
+  "obWelcomeTitle": {
+    "message": "Keep your AI chats in your own repository"
+  },
+  "openGitHub": {
+    "message": "Open GitHub"
+  },
+  "openOnGitHub": {
+    "message": "Open on GitHub"
+  },
+  "openService": {
+    "message": "Open $NAME$",
+    "placeholders": {
+      "name": {
+        "content": "$1",
+        "example": "Claude"
+      }
+    }
+  },
+  "pasteToken": {
+    "message": "Token"
+  },
+  "pendingCommits": {
+    "message": "$COUNT$ to push",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "2"
+      }
+    }
+  },
+  "popFinishSetup": {
+    "message": "Finish setup"
+  },
+  "popNewChat": {
+    "message": "Send a message to start this chat, then save it from here."
+  },
+  "popOpenChat": {
+    "message": "Open a chat to save it."
+  },
+  "popPushing": {
+    "message": "Pushing…"
+  },
+  "popSetupLead": {
+    "message": "Save your AI chats to your own GitHub repository."
+  },
+  "popUntracked": {
+    "message": "Not saved yet"
+  },
+  "project": {
+    "message": "Project"
+  },
+  "repoEmpty": {
+    "message": "empty"
+  },
+  "repoName": {
+    "message": "Repository name"
+  },
+  "repoNotEmptyWarn": {
+    "message": "This repository already has files. gitchat will add its folders next to them."
+  },
+  "repoPrivate": {
+    "message": "Private"
+  },
+  "repoPrivateLabel": {
+    "message": "Private"
+  },
+  "repoPublic": {
+    "message": "public"
+  },
+  "repoPublicWarn": {
+    "message": "This repository is public: anyone could read your chats."
+  },
+  "resetAll": {
+    "message": "Reset settings"
+  },
+  "resetHint": {
+    "message": "Signs out on this device and restores the defaults. Your repository is not changed."
+  },
+  "retry": {
+    "message": "Try again"
+  },
+  "saveImages": {
+    "message": "Save images"
+  },
+  "saveImagesHint": {
+    "message": "Store images shown in the chat next to it, when they can be downloaded."
+  },
+  "saveVisualizations": {
+    "message": "Save visualizations"
+  },
+  "saveVisualizationsHint": {
+    "message": "Keep the HTML of interactive charts and artifacts as files next to the chat."
+  },
+  "saved": {
+    "message": "Saved"
+  },
+  "secAbout": {
+    "message": "About"
+  },
+  "secAccount": {
+    "message": "Account"
+  },
+  "secAdvanced": {
+    "message": "Advanced"
+  },
+  "secAppearance": {
+    "message": "Appearance"
+  },
+  "secBehavior": {
+    "message": "Behavior"
+  },
+  "secRepository": {
+    "message": "Repository"
+  },
+  "services": {
+    "message": "Services"
+  },
+  "setUp": {
+    "message": "Set up"
+  },
+  "settings": {
+    "message": "Settings"
+  },
+  "setupProgress": {
+    "message": "Setup progress"
+  },
+  "signInWithGitHub": {
+    "message": "Sign in with GitHub"
+  },
+  "signOut": {
+    "message": "Sign out"
+  },
+  "signedInAs": {
+    "message": "Signed in as $LOGIN$",
+    "placeholders": {
+      "login": {
+        "content": "$1",
+        "example": "octocat"
+      }
+    }
+  },
+  "stepConnect": {
+    "message": "GitHub"
+  },
+  "stepDone": {
+    "message": "Done"
+  },
+  "stepPrefs": {
+    "message": "Style"
+  },
+  "stepRepo": {
+    "message": "Repository"
+  },
+  "stepWelcome": {
+    "message": "Welcome"
+  },
+  "styleCreature": {
+    "message": "Creature"
+  },
+  "styleDot": {
+    "message": "Dot"
+  },
+  "styleLine": {
+    "message": "Line"
+  },
+  "syncError": {
+    "message": "Last push failed: $ERROR$",
+    "placeholders": {
+      "error": {
+        "content": "$1",
+        "example": "network error"
+      }
+    }
+  },
+  "syncState": {
+    "message": "Sync"
+  },
+  "tokenHelp": {
+    "message": "Create a fine-grained token with Contents: Read and write, limited to your chat repository. It is stored only on this device."
+  },
+  "tokenTitle": {
+    "message": "Personal access token"
+  },
+  "untitledChat": {
+    "message": "Untitled chat"
+  },
+  "use": {
+    "message": "Use"
+  },
+  "useExistingRepo": {
+    "message": "Existing repository"
+  },
+  "useTokenInstead": {
+    "message": "Use a token instead"
+  },
+  "version": {
+    "message": "Version"
+  },
+  "waitingForApproval": {
+    "message": "Waiting for approval"
+  },
+  "widgetStyle": {
+    "message": "Widget"
+  },
+  "errRepoNotEmpty": {
+    "message": "This repository already has files that gitchat did not create. Choose an empty repository, or let gitchat create a new one."
+  }
+}

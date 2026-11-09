@@ -1,0 +1,16 @@
+<!-- Structure-only sketch (not a verbatim dump) of an assistant turn that produced an artifact on claude.ai, plus the side-panel iframes. -->
+<div data-testid="assistant-message" data-is-streaming="false">
+  <h3 class="sr-only">Claude の応答：…</h3>
+  <div data-state="done"><!-- collapsible activity group -->
+    <div class="font-sans">ファイルを作成しました、アーティファクトを使用しました <button aria-expanded="false"></button></div>
+    <!-- when expanded: steps as div[data-state=done]>.font-sans lines: thinking summary text ("Preparing an interactive bar chart artifact."), "claude-artifacts を読み込みました", "アーティファクトを使用しました", "作成済み index.html" -->
+  </div>
+  <div><span role="button" data-testid="frame-card-open" aria-label="Four Value Bar Chartを表示" aria-current="true">Four Value Bar Chart</span><span>Artifacts · あなたのみ</span><button aria-label="Four Value Bar Chartを共有" data-testid="frame-card-share"></button></div>
+  <div class="standard-markdown"><p>I published a small bar chart ... <a href="https://claude.ai/artifact/SHORTID">https://claude.ai/artifact/SHORTID</a></p></div>
+</div>
+<!-- Right panel (top document) -->
+<iframe src="https://claude.ai/code/artifact/ARTIFACT_UUID?..." title="Four Value Bar Chart" allow="fullscreen" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads allow-pointer-lock allow-modals">
+  #document (same-origin, readable from top page)
+    <iframe src="https://ARTIFACT_UUID.frame.claudeusercontent.com/..." title="ユーザーが作成した Artifacts のコンテンツ" sandbox="allow-scripts allow-same-origin allow-forms allow-pointer-lock allow-popups" allow="translator; language-detector; fullscreen; clipboard-write; gamepad; xr-spatial-tracking; screen-wake-lock; autoplay"> (cross-origin; content not readable from claude.ai)
+</iframe>
+<iframe src="https://a.claude.ai/isolated-segment.html" sandbox="allow-scripts allow-same-origin" width=0 height=0></iframe><!-- hidden helper -->

@@ -1,0 +1,30 @@
+{
+  "name": "gitchat",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Save ChatGPT, Claude and Gemini conversations to your GitHub repository as Markdown, with a git-like commit/push flow.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "node scripts/build.mjs --watch",
+    "zip": "node scripts/build.mjs && node scripts/zip.mjs",
+    "icons": "node scripts/icons.mjs",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tests",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "playground": "python3 scripts/serve.py 5180 ."
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.3.7",
+    "@types/node": "^24.19.2",
+    "esbuild": "^0.28.2",
+    "fake-indexeddb": "^6.0.0",
+    "happy-dom": "^21.0.4",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0"
+  }
+}
