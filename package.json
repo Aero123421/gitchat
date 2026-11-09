@@ -1,6 +1,6 @@
 {
   "name": "gitchat",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "private": true,
   "description": "Save ChatGPT, Claude and Gemini conversations to your GitHub repository as Markdown, with a git-like commit/push flow.",
   "license": "MIT",
