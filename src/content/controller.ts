@@ -308,11 +308,12 @@ export class Controller {
       else this.sampleIds();
       return;
     }
+    const previousUrl = this.lastUrl;
     this.lastUrl = href;
     const chatId = this.settings.services[this.adapter.service] ? this.adapter.chatId(new URL(href)) : null;
     if (chatId === this.chatId) {
       // A forced re-open (reconnect, settings) is not a navigation. Only a new href can be another transcript.
-      if (chatId && hrefChanged) {
+      if (chatId && hrefChanged && !this.adapter.sameChatUrl?.(new URL(previousUrl), new URL(href))) {
         this.hrefWatch = true;
         this.watchUntil = performance.now() + SAME_CHAT_WATCH_MS;
         this.confirmSameChat();

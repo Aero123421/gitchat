@@ -1,18 +1,23 @@
 // @vitest-environment happy-dom
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { grok } from '../../src/content/adapters/grok';
 import { adapterFor } from '../../src/content/adapters/registry';
+import { captureFullHistory } from '../../src/content/capture/init';
 import { captureVisible } from '../../src/content/capture/snapshot';
 
 const load = (name: string) => {
   document.body.innerHTML = readFileSync(path.resolve('tests/fixtures/grok', name), 'utf8');
+  const id = document.querySelector('.last-response')?.closest('[id^="response-"]')?.id.slice('response-'.length);
+  history.replaceState(null, '', `/c/${UUID}${id ? `?rid=${id}` : ''}`);
 };
 const answer = () => captureVisible(grok, document).find((m) => m.role === 'assistant')?.markdown ?? '';
 const UUID = '642fa97b-ec01-460e-9daa-7108297f77cb';
 
 afterEach(() => {
+  vi.useRealTimers();
+  history.replaceState(null, '', '/');
   document.documentElement.className = '';
   document.body.innerHTML = '';
 });
@@ -45,6 +50,68 @@ describe('grok adapter (live-site fixtures)', () => {
       ['assistant', 'RESP_ID_2'],
     ]);
     expect(grok.title(document)).toBe('Markdown Sample with Formatting Elements');
+  });
+
+  it('captures the newest pair only after server ids and rid settle, keeping older rows', () => {
+    load('basic.html');
+    const older = document.querySelector('[data-testid="chat-transcript-scroller"]')!.innerHTML;
+    load('streaming.html');
+    document.querySelector('[data-testid="chat-transcript-scroller"]')!.insertAdjacentHTML('afterbegin', older.replace('last-response', ''));
+    const ids = () => captureVisible(grok, document).map((m) => m.id);
+    history.replaceState(null, '', `/c/${UUID}?rid=RESP_ID_2`);
+    expect(ids()).toEqual(['RESP_ID_1', 'RESP_ID_2']);
+    document.getElementById('response-RESP_ID_7')!.id = 'response-server-user';
+    document.getElementById('response-RESP_ID_8')!.id = 'response-server-answer';
+    expect(ids()).toEqual(['RESP_ID_1', 'RESP_ID_2']); // rid has not caught up yet
+    history.replaceState(null, '', `/c/${UUID}?rid=server-answer`);
+    expect(ids()).toEqual(['RESP_ID_1', 'RESP_ID_2', 'server-user', 'server-answer']);
+    expect(document.querySelector('[data-plane-row="gateway:RESP_ID_8"]')).not.toBeNull();
+  });
+
+  it('excludes a provisional first pair before rid exists', () => {
+    load('streaming.html');
+    history.replaceState(null, '', `/c/${UUID}`);
+    expect(captureVisible(grok, document)).toEqual([]);
+  });
+
+  it('keeps older virtualized windows when the leaf answer is unmounted', () => {
+    load('long-top.html');
+    history.replaceState(null, '', `/c/${UUID}?rid=unmounted-leaf`);
+    expect(captureVisible(grok, document)).toHaveLength(14);
+  });
+
+  it('does not return temporary ids twice when a prompt is sent during init', async () => {
+    vi.useFakeTimers();
+    load('basic.html');
+    const scroller = document.querySelector<HTMLElement>('[data-testid="chat-transcript-scroller"]')!;
+    Object.defineProperty(scroller, 'clientHeight', { value: 500 });
+    Object.defineProperty(scroller, 'scrollHeight', { value: 1000 });
+    let sent = false;
+    let busy = false;
+    const result = captureFullHistory({ ...grok, topQuietMs: 100 }, document, {
+      signal: new AbortController().signal,
+      onProgress: () => {},
+      busy: () => busy,
+      artifacts: async () => {
+        if (!sent) {
+          sent = busy = true;
+          document.querySelector('.last-response')!.classList.remove('last-response');
+          for (const role of ['user', 'assistant']) {
+            scroller.insertAdjacentHTML('beforeend', `<div data-plane-row="gateway:temp-${role}"><div id="response-temp-${role}">
+              <div data-testid="${role}-message"><div class="response-content-markdown"><p>new ${role}</p></div></div>
+              <div class="action-buttons ${role === 'assistant' ? 'last-response' : ''}"></div></div></div>`);
+          }
+          setTimeout(() => {
+            for (const role of ['user', 'assistant']) document.getElementById(`response-temp-${role}`)!.id = `response-server-${role}`;
+            history.replaceState(null, '', `/c/${UUID}?rid=server-assistant`);
+            busy = false;
+          }, 1500);
+        }
+        return [];
+      },
+    });
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect((await result).messages.map((m) => m.id)).toEqual(['RESP_ID_1', 'RESP_ID_2', 'server-user', 'server-assistant']);
   });
 
   it('reads the prompt as typed, although Grok renders it as Markdown', () => {
@@ -106,6 +173,17 @@ describe('grok adapter (live-site fixtures)', () => {
 });
 
 describe('grok adapter: generation state', () => {
+  it('detects the stop button directly through isGenerating', () => {
+    document.body.innerHTML = '<form><button><svg><g id="name=player-stop"></g></svg></button></form>';
+    const button = document.querySelector('button')!;
+    button.getBoundingClientRect = () => ({ width: 40, height: 40 }) as DOMRect;
+    expect(grok.isGenerating(document)).toBe(true);
+    button.hidden = true;
+    expect(grok.isGenerating(document)).toBe(false);
+    button.remove();
+    expect(grok.isGenerating(document)).toBe(false);
+  });
+
   it('is idle when the newest answer has its toolbar', () => {
     load('basic.html');
     expect(grok.aiPhase(document)).toBe('idle');
@@ -116,7 +194,7 @@ describe('grok adapter: generation state', () => {
     load('streaming.html');
     expect(grok.aiPhase(document)).toBe('streaming');
     const id = grok.activeTurnId?.(document);
-    expect(id).toBe('response-RESP_ID_8');
+    expect(id).toBe('gateway:RESP_ID_8');
     expect(grok.hasTurn?.(document, id!)).toBe(true);
     expect(grok.hasTurn?.(document, 'response-gone')).toBe(false);
   });

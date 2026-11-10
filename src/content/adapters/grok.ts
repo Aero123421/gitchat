@@ -15,13 +15,27 @@ import { defineAdapter, idFromPath } from './define';
 import { fencedCode, inlineCode } from '../capture/markdown';
 
 const ROW = '[id^="response-"]';
+const GATEWAY = '[data-plane-row^="gateway:"]';
 const INLINE_CODE = 'span[class~="!font-mono"]';
 // The stop button has no test id and a localized label; its icon is the stable part.
-const STOP = 'form button g[id="name=player-stop"]';
+const STOP = 'form button:has(g[id="name=player-stop"])';
 const CODE_CARD = '[data-code-card]';
 
 /** The row's server id (`response-<uuid>`). */
 const rowId = (el: Element): string | null => el.closest(ROW)?.id.slice('response-'.length) || null;
+
+/** Only the newest pair has provisional ids; older virtualized windows must stay readable. */
+function stableMessage(el: Element): boolean {
+  const doc = el.ownerDocument;
+  const newest = doc.querySelector('.action-buttons.last-response')?.closest(ROW);
+  if (!newest?.querySelector('[data-testid="assistant-message"]')) return true;
+  const rid = new URL(doc.location.href).searchParams.get('rid');
+  if (rid === rowId(newest)) return true;
+  const row = el.closest(GATEWAY);
+  const answer = newest.closest(GATEWAY);
+  // Both response ids settle with rid; gateway keys keep the original client ids.
+  return row !== answer && !(el.matches('[data-testid="user-message"]') && row === answer?.previousElementSibling);
+}
 
 /** Language id from the code card's display label ("TypeScript" → "typescript"). */
 function codeLanguage(pre: Element): string | null {
@@ -76,6 +90,14 @@ export const grok = defineAdapter({
   siteNames: ['Grok'],
   // `?rid=` picks the branch shown; the conversation is the path uuid
   chatId: (url) => idFromPath(url, /^\/c\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/|$)/i),
+  sameChatUrl(a, b) {
+    const withoutBranch = (url: URL) => {
+      const copy = new URL(url.href);
+      copy.searchParams.delete('rid');
+      return copy.href;
+    };
+    return withoutBranch(a) === withoutBranch(b);
+  },
   virtualized: true,
   doneQuietMs: 1000,
   watchAttributes: ['data-sd-animate', 'data-settled'],
@@ -92,6 +114,7 @@ export const grok = defineAdapter({
     dark: ['html.dark'],
   },
   idOf: (el) => rowId(el),
+  keep: stableMessage,
   bodyOf: (node: MessageNode) => {
     const body = node.el.querySelector('.response-content-markdown');
     if (!body) return null;
@@ -106,13 +129,13 @@ export const grok = defineAdapter({
     if (working || pending || doc.querySelector(STOP) || lastToolbarEmpty(doc)) return 'thinking';
     return 'idle';
   },
-  // the busy answer can scroll out of the virtualized list: remember it by row id
+  // The gateway key survives server id assignment and virtualized remounts.
   activeTurnId(doc) {
     const bar = doc.querySelector('.action-buttons.last-response');
     if (!bar || bar.querySelector('button')) return null;
-    return bar.closest(ROW)?.id ?? null;
+    return bar.closest(GATEWAY)?.getAttribute('data-plane-row') ?? null;
   },
-  hasTurn: (doc, id) => !!doc.getElementById(id),
+  hasTurn: (doc, id) => Array.from(doc.querySelectorAll(GATEWAY)).some((el) => el.getAttribute('data-plane-row') === id),
   markdown: {
     ignore: [
       'button',

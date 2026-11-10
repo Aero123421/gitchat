@@ -33,6 +33,8 @@ export interface AdapterSpec {
   /** Names to strip from document.title ("ChatGPT", "Claude", "Gemini", "Grok"). */
   siteNames: string[];
   chatId(url: URL): string | null;
+  /** See Adapter.sameChatUrl. */
+  sameChatUrl?(a: URL, b: URL): boolean;
   /** See Adapter.canonicalUrl. Default: origin + pathname. */
   canonicalUrl?(url: URL): string;
   /** See Adapter.pageChatId. */
@@ -60,7 +62,7 @@ export interface AdapterSpec {
   };
   /** The service's message ID for an element, if the DOM exposes one. */
   idOf?(el: Element, role: Role): string | null;
-  /** Leave out matched elements that are not messages (e.g. a work log's commentary units). */
+  /** Leave out matched elements that must not be captured (e.g. provisional rows or commentary). */
   keep?(el: Element, role: Role): boolean;
   /** 1-based position of a message among all loaded ones, when the site exposes it. */
   positionOf?(el: Element): number | null;
@@ -155,6 +157,7 @@ export function defineAdapter(spec: AdapterSpec): Adapter & { readonly selectors
     ...(spec.doneQuietMs ? { doneQuietMs: spec.doneQuietMs } : {}),
     ...(spec.topQuietMs ? { topQuietMs: spec.topQuietMs } : {}),
     chatId: (url) => spec.chatId(url),
+    ...(spec.sameChatUrl ? { sameChatUrl: spec.sameChatUrl } : {}),
     canonicalUrl: (url) => spec.canonicalUrl?.(url) ?? `${url.origin}${url.pathname}`,
     ...(spec.pageChatId ? { pageChatId: (doc: Document) => spec.pageChatId!(doc) } : {}),
     title(doc) {

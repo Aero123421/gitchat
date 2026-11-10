@@ -195,7 +195,7 @@ What the sites look like (verified on the live sites, 2026-11; details in the ad
 | Thinking / streaming | `[data-response-starting]` / `[data-talvt-turn-state=in_progress]` | stop button / `data-is-streaming=true` | `pending-request` / `.markdown[aria-busy=true]` | working indicator, stop icon, empty toolbar / `[data-sd-animate]` |
 | Long chats | virtualized (~11 turns), +5 turns per load | virtualized (~20 rows), +32 rows per load | +10 turns per load, `content-visibility:auto` | virtualized (~15 rows), ~50 messages first, the rest behind a loader row |
 | Start of chat | none (stability) | `aria-posinset="1"` marks the first *loaded* row only: stability decides | none (stability) | top row without the loader row |
-| Visualization frames | `*.web-sandbox.oaiusercontent.com` | `*.claudeusercontent.com` | none |
+| Visualization frames | `*.web-sandbox.oaiusercontent.com` | `*.claudeusercontent.com` | `*.scf.usercontent.goog` | none |
 
 Never match localized text (aria-labels, button captions): all four sites translate them.
 
