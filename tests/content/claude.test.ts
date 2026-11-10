@@ -92,6 +92,26 @@ describe('claude assistant selectors', () => {
     expect(captureVisible(claude, document)[1]?.markdown).toContain('Answer from testid');
   });
 
+  it('captures mixed assistant markup in order without duplicate or nested messages', () => {
+    load('assistant-testid.html');
+    document.body.insertAdjacentHTML('beforeend', readFileSync(path.resolve('tests/fixtures/claude/assistant-font.html'), 'utf8'));
+    document.body.insertAdjacentHTML('beforeend', readFileSync(path.resolve('tests/fixtures/claude/assistant-streaming-div.html'), 'utf8'));
+    const first = document.querySelector('[data-testid="assistant-message"]')!;
+    first.innerHTML += '<div class="font-claude-response" data-is-streaming="false"><p>Another segment</p></div>';
+    const last = document.querySelector('[data-turn-key="stream-div-hub-reply"]')!;
+    last.classList.add('font-claude-response');
+    last.setAttribute('data-testid', 'assistant-message');
+
+    const messages = captureVisible(claude, document);
+    expect(messages.map((m) => m.id)).toEqual([
+      'testid', 'testid-hub-reply', 'font', 'font-hub-reply', 'stream-div', 'stream-div-hub-reply',
+    ]);
+    expect(messages[1]?.markdown).toContain('Answer from testid');
+    expect(messages[3]?.markdown).toContain('Answer from font class');
+    expect(messages[5]?.markdown).toContain('Answer from streaming div');
+    expect(claude.messages(document)[1]?.el).toBe(first);
+  });
+
   it('does not treat data-is-streaming="false" as streaming', () => {
     load('basic.html');
     expect(claude.aiPhase(document)).toBe('idle');

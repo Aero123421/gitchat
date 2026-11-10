@@ -10,15 +10,12 @@ import { serializeFrames, type FrameRequest } from '../capture/frames';
 
 /** Preview card: the older testid, plus the 2026-09 block class. */
 const CARD = '[data-testid="frame-card-open"], .artifact-block-cell';
-/**
- * Assistant row. `pickAll` keeps the first candidate that matches, so the 2026 nodes come first and
- * the testid remains when those are absent. Streaming is `data-is-streaming="true"` on its own.
- */
-const ASSISTANT = ['div[data-is-streaming]', '.font-claude-response', '[data-testid="assistant-message"]'];
+// These hooks can coexist in one transcript. One selector collects them all; combine drops nested roots.
+const ASSISTANT = ['div[data-is-streaming], .font-claude-response, [data-testid="assistant-message"]'];
 /** `data-is-streaming="true"` is enough; the testid is not required. */
 const STREAMING = ['div[data-is-streaming="true"]', '[data-testid="assistant-message"][data-is-streaming="true"]'];
-/** Open panel: today's artifact iframe, or the 2026 viewer that starts at /code/frame/. */
-const PANEL = 'iframe[src*="/code/artifact/"], iframe[src*="/code/frame/"]';
+// Top-level /code/frame/ viewers have no verified stable artifact identity yet.
+const PANEL = 'iframe[src*="/code/artifact/"]';
 
 const cardTitle = (card: Element) => (card.textContent ?? '').trim() || 'Artifact';
 const isCard = (el: Element) => el.matches(CARD);
@@ -166,9 +163,10 @@ export const claude = defineAdapter({
     for (const outer of Array.from(doc.querySelectorAll<HTMLIFrameElement>(PANEL))) {
       try {
         const id = /\/code\/artifact\/([^/?#]+)/.exec(outer.getAttribute('src') ?? '')?.[1];
+        if (!id) continue;
         const owner = ownerOf((outer.getAttribute('title') ?? '').trim());
         if (!owner) continue; // can't tell which message opened it: don't guess
-        const key = id ? `artifact:${id}` : `${owner.messageId}:artifact`;
+        const key = `artifact:${id}`;
         if (ctx.skip(key)) continue;
         const win = userContentWindow(outer);
         if (!win) continue; // viewer not readable, or the usercontent frame was never reached

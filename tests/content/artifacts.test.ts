@@ -177,14 +177,20 @@ describe('claude artifacts', () => {
     expect(arts.map((x) => [x.key, x.messageId, x.title])).toEqual([['artifact:ARTIFACT_UUID', 'turn-9-hub-reply', 'Four Value Bar Chart']]);
   });
 
-  it('reads a panel whose top iframe is /code/frame/', async () => {
+  it('skips top-level /code/frame/ previews without a verified artifact identity', async () => {
     load('claude', 'artifact-frame.html');
     const outer = document.querySelector<HTMLIFrameElement>('iframe[src*="/code/frame/"]')!;
-    setFrameDocument(outer, (doc) => {
-      addUserContent(doc, 'https://frame-uuid.frame.claudeusercontent.com/_f/signed');
-    });
-    const arts = await claude.artifacts!(document);
-    expect(arts.map((x) => [x.key, x.messageId, x.title])).toEqual([['turn-frame-hub-reply:artifact', 'turn-frame-hub-reply', 'Frame Chart']]);
+    const other = outer.cloneNode() as HTMLIFrameElement;
+    other.src = 'https://claude.ai/code/frame/OTHER_UUID';
+    document.body.append(other);
+    for (const frame of [outer, other]) {
+      setFrameDocument(frame, (doc) => {
+        addUserContent(doc);
+      });
+    }
+    expect(await claude.artifacts!(document)).toEqual([]);
+    expect(await claude.artifacts!(document, { skip: new Set(['turn-frame-hub-reply:artifact']) })).toEqual([]);
+    expect(captureVisible(claude, document)[0]?.markdown).toContain('> **Artifact:** Frame Chart');
   });
 
   it('ties an .artifact-block-cell card to the open panel', async () => {
