@@ -31,6 +31,9 @@ function area(name: string, listeners: Set<ChangeListener>) {
       }
       listeners.forEach((l) => l(changes, name));
     },
+    async setAccessLevel(_access: { accessLevel: string }) {
+      return undefined;
+    },
   };
 }
 

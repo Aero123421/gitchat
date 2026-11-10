@@ -1,9 +1,14 @@
-// Service worker entry. Listeners must be registered synchronously on every start (MV3).
-import { normalizeSettings } from '../shared/settings';
+// Service worker entry. Restrict storage before registering listeners so a message cannot
+// read, store, or use a token while content scripts can still see chrome.storage.
+import { normalizeSettings, restrictSettingsStorage } from '../shared/settings';
 import { createBackground } from './app';
 import { restrictStorage } from './github/auth';
 
-void restrictStorage();
+const restricted = await Promise.allSettled([restrictStorage(), restrictSettingsStorage()]);
+const failures = restricted.flatMap((result) => (result.status === 'rejected' ? [result.reason] : []));
+if (failures.length > 1) throw new AggregateError(failures, 'Could not restrict extension storage to trusted contexts.');
+if (failures.length === 1) throw failures[0];
+
 const app = createBackground();
 
 chrome.runtime.onMessage.addListener(app.onMessage);

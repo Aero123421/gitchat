@@ -15,24 +15,36 @@ const TOKEN_URL = 'https://github.com/login/oauth/access_token';
 const SCOPE = 'repo';
 
 /**
- * Keeps the token out of reach of content scripts: chrome.storage.local is readable from them by
- * default. Older Chrome versions only support this for session storage; nothing else depends on it.
+ * Hides chrome.storage.local from content scripts. It stays readable from them until this resolves.
+ * Chrome 140 is the first stable release with setAccessLevel on local storage. A rejection removes
+ * any saved token and is propagated: the token must not be kept, stored, or used.
  */
 export async function restrictStorage(): Promise<void> {
   try {
     await chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' });
-  } catch {
-    // not supported for this storage area here
+  } catch (error) {
+    try {
+      await chrome.storage.local.remove(AUTH_KEY);
+    } catch (removeError) {
+      // Both failures have to reach the caller. Dropping either would hide a token left in place.
+      throw new AggregateError(
+        [error, removeError],
+        'Could not restrict token storage to trusted contexts, and the saved token could not be removed.',
+      );
+    }
+    throw error;
   }
 }
 
 export async function loadAuth(): Promise<AuthState | null> {
+  await restrictStorage();
   const got = await chrome.storage.local.get(AUTH_KEY);
   const a = got[AUTH_KEY] as AuthState | undefined;
   return a?.token ? a : null;
 }
 
 export async function saveAuth(a: AuthState): Promise<void> {
+  await restrictStorage();
   await chrome.storage.local.set({ [AUTH_KEY]: a });
 }
 
@@ -44,6 +56,7 @@ export async function clearAuth(): Promise<void> {
 export async function identify(token: string, opts: ClientOptions = {}): Promise<{ login: string; scopes: string[] }> {
   const t = token.trim();
   if (!t) throw new GitchatError('Paste a token first.', 'invalid');
+  await restrictStorage();
   const r = await new GitHub(t, opts).request<{ login: string }>('GET', '/user');
   const scopes = (r.headers.get('x-oauth-scopes') ?? '')
     .split(',')
@@ -77,6 +90,9 @@ export class DeviceFlow {
       throw new GitchatError('"Sign in with GitHub" is not available in this build. Use a personal access token, or set an OAuth client ID under Advanced.', 'no-client-id');
     }
     const generation = this.generation;
+    await restrictStorage();
+    // A cancel during restriction must not be followed by a new device code.
+    if (generation !== this.generation) throw new GitchatError('The sign-in was cancelled.', 'cancelled');
     const data = await this.post(DEVICE_CODE_URL, { client_id: clientId, scope: SCOPE });
     // cancelled (or another sign-in started) while GitHub answered: this code must not become pending
     if (generation !== this.generation) throw new GitchatError('The sign-in was cancelled.', 'cancelled');
@@ -97,7 +113,10 @@ export class DeviceFlow {
     const generation = this.generation;
     const p = (await chrome.storage.session.get(PENDING_KEY))[PENDING_KEY] as Pending | undefined;
     if (!p) throw new GitchatError('The sign-in expired. Start again.', 'expired');
+    await restrictStorage();
     const cancelled = () => new GitchatError('The sign-in was cancelled.', 'cancelled');
+    // A cancel while storage was being restricted must not exchange this device code for a token.
+    if (generation !== this.generation) throw cancelled();
     let interval = p.interval;
     while (this.now() < p.expiresAt) {
       await this.sleep(interval * 1000);
