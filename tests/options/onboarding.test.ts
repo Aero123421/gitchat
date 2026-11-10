@@ -3,6 +3,8 @@
 // "Signed in", and the settings page (with Sign out) stays hidden until a repository is chosen.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { RepoSummary } from '../../src/shared/protocol';
+import { DEFAULT_SETTINGS } from '../../src/shared/settings';
+import type { RepoRef } from '../../src/shared/types';
 import type { WidgetPreview } from '../../src/options/preview';
 import type { AuthInfo } from '../../src/options/state';
 
@@ -14,6 +16,8 @@ const REPO: RepoSummary = {
   empty: true,
   managed: false,
 };
+
+const SAVED: RepoRef = { owner: 'octocat', name: 'ai-chats', branch: 'main' };
 
 const preview = {
   show() {},
@@ -71,15 +75,44 @@ afterEach(() => {
 });
 
 describe('replacing a sign-in during setup', () => {
-  async function wizard(auth: AuthInfo, reply: (type: string) => Reply) {
+  async function wizard(auth: AuthInfo | null, reply: (type: string) => Reply, repo?: RepoRef) {
     const booted = await boot(reply);
     booted.state.app.auth = auth;
     booted.state.app.settings.widget = 'dot';
     booted.state.app.settings.githubClientId = 'cid';
+    if (repo) booted.state.app.settings.repo = repo;
     const { createOnboarding } = await import('../../src/options/onboarding');
     const root = createOnboarding({ preview, onFinish() {} });
     document.body.append(root);
     return { ...booted, root };
+  }
+
+  /** Sign-out drops the session; auth/pat brings a different account back. The saved repo stays in settings. */
+  function credentialReply(start: AuthInfo | null): (type: string) => Reply {
+    let current = start;
+    const stored = { ...DEFAULT_SETTINGS, widget: 'dot' as const, githubClientId: 'cid', repo: SAVED };
+    return (type) => {
+      if (type === 'auth/signout') {
+        current = null;
+        return ok();
+      }
+      if (type === 'auth/get') return ok(current);
+      if (type === 'auth/pat') {
+        current = { login: 'hubot', method: 'pat', scopes: [] };
+        return ok({ login: current.login });
+      }
+      if (type === 'repo/list') return ok([REPO]);
+      if (type === 'repo/use') return ok(SAVED);
+      if (type === 'settings/get' || type === 'settings/set') return ok(stored);
+      return ok();
+    };
+  }
+
+  function pasteToken(root: ParentNode): void {
+    const input = root.querySelector<HTMLInputElement>('#gc-token');
+    if (!input) throw new Error('no token field');
+    input.value = 'github_pat_new';
+    clickSolid(root, 'connect');
   }
 
   const pat: AuthInfo = { login: 'octocat', method: 'pat', scopes: [] };
@@ -243,5 +276,84 @@ describe('replacing a sign-in during setup', () => {
     await vi.waitFor(() => expect(view.textContent).toContain('errNoPermission'));
     expect(view.textContent).not.toContain('tokenLacksAccess');
     expect(view.textContent).not.toContain('wrongTokenUseDifferent');
+  });
+
+  it('keeps a saved repository when the same sign-in is still active', async () => {
+    const { root, calls } = await wizard(pat, () => ok(), SAVED);
+    expect(root.textContent).toContain('obPrefsTitle');
+    expect(root.querySelector('.repo-chooser')).toBeNull();
+    expect(calls).not.toContain('repo/list');
+
+    click(root, 'back');
+    expect(root.textContent).toContain('obRepoTitle');
+    expect(root.textContent).toContain('octocat/ai-chats');
+    expect(root.querySelector('.note.ok')).toBeTruthy();
+    expect(root.querySelector('.repo-chooser')).toBeNull();
+    clickSolid(root, 'continue');
+    expect(root.textContent).toContain('obPrefsTitle');
+    clickSolid(root, 'continue');
+    expect(root.textContent).toContain('obDoneTitle');
+    expect(calls).not.toContain('repo/use');
+  });
+
+  it('requires choosing the repository again after the token is replaced', async () => {
+    const { root, calls, state } = await wizard(pat, credentialReply(pat), SAVED);
+    expect(root.textContent).toContain('obPrefsTitle');
+    click(root, 'back');
+    click(root, 'back');
+    expect(root.textContent).toContain('useDifferentToken');
+
+    click(root, 'useDifferentToken');
+    await vi.waitFor(() => expect(root.querySelector('#gc-token')).toBeTruthy());
+    expect(state.app.auth).toBeNull();
+    expect(state.app.settings.repo).toEqual(SAVED);
+    expect(calls).not.toContain('settings/set');
+
+    pasteToken(root);
+    await vi.waitFor(() => expect(root.querySelector('.repo-chooser')).toBeTruthy());
+    expect(root.textContent).toContain('obRepoTitle');
+    expect(root.textContent).not.toContain('obPrefsTitle');
+    expect(root.textContent).not.toContain('obDoneTitle');
+    expect(root.querySelector('.note.ok')).toBeNull();
+    expect(() => clickSolid(root, 'continue')).toThrow(/no solid button/);
+
+    click(root, 'back');
+    expect(root.textContent).toContain('signedInAs');
+    expect(state.app.auth).toEqual({ login: 'hubot', method: 'pat', scopes: [] });
+    clickSolid(root, 'continue');
+    expect(root.querySelector('.repo-chooser')).toBeTruthy();
+    expect(root.textContent).not.toContain('obPrefsTitle');
+
+    await vi.waitFor(() => expect(root.querySelector('.repo')).toBeTruthy());
+    (root.querySelector('.repo') as HTMLElement).click();
+    clickSolid(root, 'use');
+    await vi.waitFor(() => expect(root.textContent).toContain('obPrefsTitle'));
+    expect(calls).toContain('repo/use');
+    expect(calls.indexOf('auth/pat')).toBeLessThan(calls.indexOf('repo/use'));
+    expect(root.textContent).not.toContain('obDoneTitle');
+    clickSolid(root, 'continue');
+    expect(root.textContent).toContain('obDoneTitle');
+  });
+
+  it('requires choosing the repository when signing in with a repo saved earlier', async () => {
+    const { root, calls } = await wizard(null, credentialReply(null), SAVED);
+    expect(root.textContent).toContain('obWelcomeTitle');
+    expect(root.textContent).not.toContain('obPrefsTitle');
+    click(root, 'obStart');
+    expect(root.textContent).toContain('obConnectTitle');
+    click(root, 'useTokenInstead');
+    pasteToken(root);
+    await vi.waitFor(() => expect(root.querySelector('.repo-chooser')).toBeTruthy());
+    expect(root.textContent).not.toContain('obPrefsTitle');
+    expect(root.textContent).not.toContain('obDoneTitle');
+    expect(root.querySelector('.note.ok')).toBeNull();
+    expect(calls).toContain('repo/list');
+    expect(calls).not.toContain('repo/use');
+
+    await vi.waitFor(() => expect(root.querySelector('.repo')).toBeTruthy());
+    (root.querySelector('.repo') as HTMLElement).click();
+    clickSolid(root, 'use');
+    await vi.waitFor(() => expect(root.textContent).toContain('obPrefsTitle'));
+    expect(calls).toContain('repo/use');
   });
 });
