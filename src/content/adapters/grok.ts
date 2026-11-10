@@ -24,17 +24,26 @@ const CODE_CARD = '[data-code-card]';
 /** The row's server id (`response-<uuid>`). */
 const rowId = (el: Element): string | null => el.closest(ROW)?.id.slice('response-'.length) || null;
 
-/** Only the newest pair has provisional ids; older virtualized windows must stay readable. */
+const after = (a: Element, b: Element) => !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+
+/**
+ * False for a row whose id may still be temporary. `?rid=` names the leaf of the branch shown, and
+ * it moves on together with the server ids: rows after the leaf are new (just sent). When the leaf
+ * is gone while an answer is being made (an edit or a regenerate replaced it), the newest prompt
+ * and what follows are new. Without `rid` (the first moment after opening a chat from the
+ * sidebar) or with the leaf merely scrolled out, nothing is known to be new: keep every row.
+ */
 function stableMessage(el: Element): boolean {
   const doc = el.ownerDocument;
-  const newest = doc.querySelector('.action-buttons.last-response')?.closest(ROW);
-  if (!newest?.querySelector('[data-testid="assistant-message"]')) return true;
   const rid = new URL(doc.location.href).searchParams.get('rid');
-  if (rid === rowId(newest)) return true;
-  const row = el.closest(GATEWAY);
-  const answer = newest.closest(GATEWAY);
-  // Both response ids settle with rid; gateway keys keep the original client ids.
-  return row !== answer && !(el.matches('[data-testid="user-message"]') && row === answer?.previousElementSibling);
+  const row = el.closest(ROW);
+  if (!rid || !row) return true;
+  const leaf = doc.getElementById(`response-${rid}`);
+  if (leaf) return !after(leaf, row);
+  if (phase(doc) === 'idle') return true;
+  const prompts = doc.querySelectorAll('[data-testid="user-message"]');
+  const newest = prompts[prompts.length - 1]?.closest(ROW);
+  return !newest || (newest !== row && !after(newest, row));
 }
 
 /** Language id from the code card's display label ("TypeScript" → "typescript"). */
@@ -85,6 +94,14 @@ function lastToolbarEmpty(doc: Document): boolean {
   return !!bar && !bar.querySelector('button') && !!bar.closest(ROW)?.querySelector('[data-testid="assistant-message"]');
 }
 
+function phase(doc: Document): 'idle' | 'thinking' | 'streaming' {
+  if (doc.querySelector('[data-testid="assistant-message"] [data-sd-animate]')) return 'streaming';
+  const working = doc.querySelector('[data-testid="canvas-working-indicator"]:not([data-settled])');
+  const pending = doc.querySelector('[data-testid="assistant-message"] .grok-bot');
+  if (working || pending || doc.querySelector(STOP) || lastToolbarEmpty(doc)) return 'thinking';
+  return 'idle';
+}
+
 export const grok = defineAdapter({
   service: 'grok',
   siteNames: ['Grok'],
@@ -122,13 +139,7 @@ export const grok = defineAdapter({
   },
   // the top row is mounted and no older history is left to load below it
   atStart: (doc) => !!doc.querySelector('[data-plane-row="transcript:top-inset"]') && !doc.querySelector('[data-plane-row="chat:earlier-turns"]'),
-  aiPhase(doc) {
-    if (doc.querySelector('[data-testid="assistant-message"] [data-sd-animate]')) return 'streaming';
-    const working = doc.querySelector('[data-testid="canvas-working-indicator"]:not([data-settled])');
-    const pending = doc.querySelector('[data-testid="assistant-message"] .grok-bot');
-    if (working || pending || doc.querySelector(STOP) || lastToolbarEmpty(doc)) return 'thinking';
-    return 'idle';
-  },
+  aiPhase: (doc) => phase(doc),
   // The gateway key survives server id assignment and virtualized remounts.
   activeTurnId(doc) {
     const bar = doc.querySelector('.action-buttons.last-response');

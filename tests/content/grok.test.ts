@@ -68,10 +68,26 @@ describe('grok adapter (live-site fixtures)', () => {
     expect(document.querySelector('[data-plane-row="gateway:RESP_ID_8"]')).not.toBeNull();
   });
 
-  it('excludes a provisional first pair before rid exists', () => {
-    load('streaming.html');
+  it('keeps every row while the URL has no rid yet (a chat just opened from the sidebar)', () => {
+    load('basic.html');
     history.replaceState(null, '', `/c/${UUID}`);
-    expect(captureVisible(grok, document)).toEqual([]);
+    expect(captureVisible(grok, document).map((m) => m.id)).toEqual(['RESP_ID_1', 'RESP_ID_2']);
+  });
+
+  it('leaves out the newest prompt and answer while an edit or a regenerate replaces the leaf', () => {
+    load('basic.html');
+    const older = document.querySelector('[data-testid="chat-transcript-scroller"]')!.innerHTML;
+    load('streaming.html'); // answer RESP_ID_8 is being made
+    document.querySelector('[data-testid="chat-transcript-scroller"]')!.insertAdjacentHTML('afterbegin', older.replace('last-response', ''));
+    const ids = () => captureVisible(grok, document).map((m) => m.id);
+    history.replaceState(null, '', `/c/${UUID}?rid=the-replaced-leaf`); // no longer in the page
+    expect(ids()).toEqual(['RESP_ID_1', 'RESP_ID_2']);
+    // finished: nothing is provisional any more, even before rid catches up
+    for (const el of Array.from(document.querySelectorAll('[data-sd-animate]'))) el.removeAttribute('data-sd-animate');
+    document.querySelector('form')?.remove();
+    document.querySelector('.action-buttons.last-response')!.append(document.createElement('button'));
+    for (const el of Array.from(document.querySelectorAll('[data-testid="canvas-working-indicator"]'))) el.setAttribute('data-settled', 'true');
+    expect(ids()).toEqual(['RESP_ID_1', 'RESP_ID_2', 'RESP_ID_7', 'RESP_ID_8']);
   });
 
   it('keeps older virtualized windows when the leaf answer is unmounted', () => {
