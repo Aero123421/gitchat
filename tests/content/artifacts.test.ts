@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { CapturedMessage } from '../../src/shared/types';
+import { keepArtifacts } from '../../src/background/stage';
 
 // Frames cannot answer in the test DOM: report what each adapter would ask for instead.
 vi.mock('../../src/content/capture/frames', async (orig) => ({
@@ -151,6 +152,25 @@ describe('claude artifacts', () => {
 });
 
 describe('gemini', () => {
+  it('preserves legacy Canvas links and files when titled previews are closed after upgrading', async () => {
+    load('gemini', 'canvas-title.html');
+    const turn = document.querySelector('.conversation-container')!.id;
+    const titles = ['Canvas', 'Canvas 2', 'Canvas 3', 'Canvas 4'];
+    const [saved] = attachArtifacts(
+      [a(`${turn}:a`, titles.map((title) => `> **Artifact:** ${title}`).join('\n\n'))],
+      titles.map((title, i) => ({ key: `${turn}:canvas${i + 1}`, messageId: `${turn}:a`, title, html: `<p>Preview ${i + 1}</p>` })),
+    );
+    expect(saved?.assets).toHaveLength(4);
+
+    for (const frame of Array.from(document.querySelectorAll('iframe'))) frame.remove();
+    expect(await gemini.artifacts!(document)).toEqual([]);
+    const [closed] = captureVisible(gemini, document);
+    expect(closed?.id).toBe(saved?.id);
+    const kept = keepArtifacts(saved!, closed!);
+    expect(kept.markdown).toBe(saved?.markdown);
+    expect(kept.assets).toEqual(saved?.assets);
+  });
+
   it('keeps numbered citation markers', () => {
     document.body.innerHTML = `<div class="conversation-container" id="abc"><model-response><message-content><div class="markdown-main-panel">
       <p>Fact one<source-footnote><sup class="superscript" data-turn-source-index="1">1</sup></source-footnote> and two.</p></div></message-content></model-response></div>`;
