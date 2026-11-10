@@ -15,7 +15,8 @@ export interface Marker {
 
 /** One card line; group 1 is the kind, group 2 the rest (a title or a link). */
 export const MARKER_LINE = /^> \*\*(Artifact|File):\*\* (.*?)[ \t]*$/gm;
-const LINKED = /^\[((?:\\.|[^\]\\])*)\]\(([^()\s]+)\)$/;
+// The saved format escapes brackets only, so a label may end with a literal backslash.
+const LINKED = /^\[((?:\\.|[^\]\\])*\\?)\]\(([^()\s]+)\)$/;
 
 export const escapeLabel = (s: string) => s.replace(/[[\]]/g, '\\$&');
 const unescapeLabel = (s: string) => s.replace(/\\([[\]\\])/g, '$1');
@@ -63,7 +64,7 @@ const MIME: Record<string, string> = {
 };
 
 /** Links to files already in the repository: `[label](<chat>.assets/<name>)`, images included. */
-const REPO_LINK = /(!?)\[((?:\\.|[^\]\\])*)\]\(([^()\s/]+\.assets\/([^()\s]+))\)/g;
+const REPO_LINK = /(!?)\[((?:\\.|[^\]\\])*\\?)\]\(([^()\s/]+\.assets\/([^()\s]+))\)/g;
 
 /**
  * Turns a message read from the repository back into live form: every linked asset gets its bytes

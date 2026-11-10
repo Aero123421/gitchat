@@ -79,7 +79,7 @@ function copyAssetLabels(text: string): string {
         break;
       }
     } else if (m[2] !== undefined || m[3] !== undefined) {
-      // Older captures escaped brackets but not a card title's trailing backslash.
+      // Captured cards escape brackets but may leave a title's trailing backslash literal.
       const label = (m[3] ?? m[2]!).replace(/\\([\\[\]])/g, '$1');
       out += text.slice(from, m.index) + (m[1] ? `${m[1]}${label}\\` : label);
       from = tokens.lastIndex;
@@ -89,16 +89,20 @@ function copyAssetLabels(text: string): string {
 }
 
 function copyBody(md: string): string {
-  let fence: string | null = null;
+  let fence: { prefix: string; marker: string } | null = null;
   let text = '';
   let out = '';
   for (const line of md.split(/(?<=\n)/)) {
-    const f = FENCE.exec(line)?.[1];
+    // Quotes (including nested quotes) and list indentation belong to the fence's container.
+    // Keep that prefix so a fence in a different container cannot close this one.
+    const f = /^([ \t]*(?:>[ \t]*)*)(`{3,}|~{3,})([^\r\n]*)/.exec(line);
     if (fence || f) {
       out += copyAssetLabels(text) + line;
       text = '';
-      if (!fence) fence = f!;
-      else if (f && f[0] === fence[0] && f.length >= fence.length && line.trim() === f) fence = null;
+      if (!fence) fence = { prefix: f![1]!, marker: f![2]! };
+      else if (f && f[1] === fence.prefix && f[2]![0] === fence.marker[0] && f[2]!.length >= fence.marker.length && !f[3]!.trim()) {
+        fence = null;
+      }
     } else text += line;
   }
   return out + copyAssetLabels(text);

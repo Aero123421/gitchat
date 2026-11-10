@@ -242,7 +242,7 @@ const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 function linkMarker(md: string, title: string, name: string): string | null {
   const re = new RegExp(`^(> \\*\\*(?:Artifact|File):\\*\\* )${escapeRe(title)}[ \\t]*$`, 'm');
   if (!re.test(md)) return null;
-  const label = title.replace(/[\\[\]]/g, '\\$&');
+  const label = title.replace(/[[\]]/g, '\\$&');
   return md.replace(re, (_m, prefix: string) => `${prefix}[${label}](gitchat-asset:${name})`);
 }
 

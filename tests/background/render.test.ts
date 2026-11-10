@@ -192,6 +192,19 @@ describe('renderCopy', () => {
     expect(copy(`${code}\n\n${link}`)).toContain(`${code}\n\nChart\n`);
   });
 
+  it.each(['> ', '> >', '    ', '  >   '])('preserves fences with prefix %j and rewrites links outside them', (prefix) => {
+    const link = '[Chart](gitchat-asset:chart.html)';
+    const code = `${prefix}~~~md\n${prefix}${link}\n${prefix}~~~`;
+    const lead = prefix === '    ' ? '- Item\n\n' : '';
+    expect(copy(`${lead}${code}\n\n${link}`)).toContain(`${lead}${code}\n\nChart\n`);
+  });
+
+  it('only closes a nested fence with the same prefix and matching marker', () => {
+    const link = '[Chart](gitchat-asset:chart.html)';
+    const code = `> ~~~~md\n~~~\n> ~~~\n> \`\`\`\n> > ~~~~\n> ${link}\n> ~~~~~`;
+    expect(copy(`${code}\n\n${link}`)).toContain(`${code}\n\nChart\n`);
+  });
+
   it('does not let an unmatched label swallow the next artifact card', () => {
     expect(copy('[intro\n\n> **Artifact:** [Chart](gitchat-asset:chart.html)'))
       .toContain('[intro\n\n> **Artifact:** Chart\n');
@@ -206,7 +219,9 @@ describe('renderCopy', () => {
   it('unescapes brackets and backslashes in asset labels', () => {
     expect(copy(String.raw`> **Artifact:** [Path \[v2\] \\](gitchat-asset:path.html)`))
       .toContain('> **Artifact:** Path [v2] \\\n');
-    // Previously saved cards have an unescaped trailing backslash.
+    // Captured and saved cards have an unescaped trailing backslash.
+    expect(copy('> **Artifact:** [Path \\](gitchat-asset:x)'))
+      .toContain('> **Artifact:** Path \\\n');
     expect(copy('> **Artifact:** [Path \\](chat.assets/path.html)'))
       .toContain('> **Artifact:** Path \\\n');
   });
