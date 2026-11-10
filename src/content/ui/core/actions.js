@@ -12,6 +12,7 @@ import { applyLens } from './glass.js';
 import { Spring, clamp, moving, wake } from './spring.js';
 import { setHTML } from './html.js';
 import { availableActions } from '../../../shared/actions.js';
+import { isUserInput } from './gesture.js';
 
 export const BTN = 26;
 export const BTN_GAP = 6;
@@ -80,10 +81,13 @@ export function createActions(root, parent, store, label = (k) => LABELS[k] ?? k
   parent.addEventListener('focusin', syncFocus);
   parent.addEventListener('focusout', () => queueMicrotask(syncFocus));
 
-  buttons.start.addEventListener('click', () => store.init());
-  buttons.cancel.addEventListener('click', () => store.cancelInit?.());
-  buttons.commit.addEventListener('click', () => store.commit());
-  buttons.push.addEventListener('click', () => store.push());
+  const onUserClick = (fn) => (e) => {
+    if (isUserInput(e)) fn();
+  };
+  buttons.start.addEventListener('click', onUserClick(() => store.init()));
+  buttons.cancel.addEventListener('click', onUserClick(() => store.cancelInit?.()));
+  buttons.commit.addEventListener('click', onUserClick(() => store.commit()));
+  buttons.push.addEventListener('click', onUserClick(() => store.push()));
 
   function visible() {
     const st = store.state;

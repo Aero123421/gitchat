@@ -12,6 +12,7 @@ import { createPanel, panelCSS } from '../core/panel.js';
 import { icon, nestedIcon } from '../core/icons.js';
 import { fmtAgo } from '../core/format.js';
 import { setHTML } from '../core/html.js';
+import { isUserInput } from '../core/gesture.js';
 
 const BW = 150;
 const BH = 420;
@@ -172,6 +173,8 @@ export function mountLine(host, store, options = {}) {
 
   // ---- input
   cap.addEventListener('pointerdown', (e) => {
+    // A synthetic press must not arm the click that commits or pushes.
+    if (!isUserInput(e)) return;
     pressed = { y: e.clientY, dy: e.clientY - cY.value };
     cap.setPointerCapture(e.pointerId);
   });
@@ -183,7 +186,7 @@ export function mountLine(host, store, options = {}) {
     }
     if (dragging) frac = clamp(e.clientY - pressed.dy, 60, innerHeight - 60) / innerHeight;
   });
-  const release = () => {
+  const release = (e) => {
     if (!pressed) return;
     pressed = null;
     if (dragging) {
@@ -191,6 +194,8 @@ export function mountLine(host, store, options = {}) {
       box.classList.remove('drag');
       return;
     }
+    // pointercancel, and a pointerup the page synthesized, are not a click.
+    if (!isUserInput(e) || e.type !== 'pointerup') return;
     if (panelOpen) return closePanel();
     if (noPanel()) {
       // nothing to show in a panel yet: reveal the start (or cancel) button instead

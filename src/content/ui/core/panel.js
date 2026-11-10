@@ -7,6 +7,7 @@ import { fmtAgo } from './format.js';
 import { applyLens, setLight } from './glass.js';
 import { pointer } from './pointer.js';
 import { setHTML } from './html.js';
+import { isUserInput } from './gesture.js';
 
 const OPEN = springEasing({ stiffness: 380, damping: 38 });
 const CLOSE = springEasing({ stiffness: 600, damping: 50 });
@@ -396,9 +397,20 @@ export function createPanel(root, store, { onRequestClose, openSettings, label =
     );
   }
 
-  btnCommit.addEventListener('click', () => store.commit());
-  btnPush.addEventListener('click', () => store.push());
-  switches.forEach((sw) => sw.addEventListener('click', () => store.setAuto(sw.dataset.k, !store.state.settings[sw.dataset.k])));
+  btnCommit.addEventListener('click', (e) => {
+    if (isUserInput(e)) store.commit();
+  });
+  btnPush.addEventListener('click', (e) => {
+    if (isUserInput(e)) store.push();
+  });
+  // Bind the key now. The host page can rewrite data-k on the open shadow root later.
+  for (const key of ['autoCommit', 'autoPush']) {
+    const sw = switches.find((s) => s.dataset.k === key);
+    sw.addEventListener('click', (e) => {
+      if (!isUserInput(e)) return;
+      store.setAuto(key, !store.state.settings[key]);
+    });
+  }
   $('.gear').addEventListener('click', () => {
     onRequestClose?.();
     openSettings?.();
