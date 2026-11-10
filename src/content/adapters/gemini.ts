@@ -29,10 +29,37 @@ function canvasIndex(chip: Element): number {
   return chips.indexOf(chip) + 1;
 }
 
-/** Card label of a Canvas preview (the chip has no title element): "Canvas", "Canvas 2", … */
+/**
+ * Card label of a Canvas preview. Gemini puts the name on the chip's `.title`.
+ * "Canvas", then "Canvas 2", … is only the stand-in when that element is absent or blank.
+ */
 function canvasTitle(chip: Element): string {
+  const title = chip.querySelector('.title')?.textContent?.trim() ?? '';
+  if (title) return title;
   const n = canvasIndex(chip);
   return n > 1 ? `Canvas ${n}` : 'Canvas';
+}
+
+/**
+ * Expanded thinking inserts its own `message-content` ahead of the answer. `querySelector`
+ * would take that panel; these containers are never the answer, collapsed or open.
+ */
+const THOUGHTS = 'model-thoughts, .thoughts-container, .thoughts-content';
+
+/** Ranked assistant prose. The first hit outside `THOUGHTS` wins. */
+const ASSISTANT_BODY = ['message-content .markdown-main-panel', 'message-content .markdown', 'message-content'] as const;
+
+function assistantProse(root: Element): Element | null {
+  for (const sel of ASSISTANT_BODY) {
+    for (const el of Array.from(root.querySelectorAll(sel))) {
+      if (!el.closest(THOUGHTS)) return el;
+    }
+  }
+  // No prose outside the thinking panel. Returning null would let pick() save that panel.
+  if (!root.querySelector(THOUGHTS)) return null;
+  const copy = root.cloneNode(true) as Element;
+  for (const el of Array.from(copy.querySelectorAll(THOUGHTS))) el.remove();
+  return copy;
 }
 
 export const gemini = defineAdapter({
@@ -50,7 +77,8 @@ export const gemini = defineAdapter({
   selectors: {
     user: ['user-query'],
     assistant: ['model-response'],
-    assistantBody: ['message-content .markdown-main-panel', 'message-content .markdown', 'message-content'],
+    // bodyOf applies these outside the thinking panel; pick() alone would take the expanded one
+    assistantBody: ASSISTANT_BODY,
     generating: ['pending-request', 'model-response .markdown[aria-busy="true"]'],
     composer: ['rich-textarea .ql-editor', 'rich-textarea [contenteditable="true"]'],
     scroller: ['infinite-scroller.chat-history', 'infinite-scroller'],
@@ -62,7 +90,7 @@ export const gemini = defineAdapter({
     return id ? `${id}:${role === 'user' ? 'u' : 'a'}` : null;
   },
   bodyOf: (node: MessageNode) => {
-    if (node.role !== 'user') return null;
+    if (node.role !== 'user') return assistantProse(node.el);
     // p.query-text-line holds the full prompt; the screen-reader h5 is truncated
     const box = node.el.ownerDocument.createElement('div');
     for (const p of Array.from(node.el.querySelectorAll('p.query-text-line'))) box.appendChild(p.cloneNode(true));
@@ -76,6 +104,8 @@ export const gemini = defineAdapter({
     return (last.textContent ?? '').trim() ? 'streaming' : 'thinking';
   },
   async artifacts(doc, ctx) {
+    // The preview iframe is cross-origin (scf.usercontent.goog). The code tab's full text
+    // lives on the page-world Monaco model, which this isolated script cannot read.
     const requests: FrameRequest[] = [];
     for (const chip of Array.from(doc.querySelectorAll('immersive-entry-chip'))) {
       const frame = chip.querySelector<HTMLIFrameElement>('iframe[src*="usercontent.goog"]');
@@ -95,6 +125,9 @@ export const gemini = defineAdapter({
       '.cdk-visually-hidden',
       'source-footnote',
       'thinking-overlay',
+      'model-thoughts',
+      '.thoughts-container',
+      '.thoughts-content',
       'message-actions',
     ],
     codeLanguage,

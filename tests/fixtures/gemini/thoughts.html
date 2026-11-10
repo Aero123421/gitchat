@@ -1,0 +1,55 @@
+<!-- Expanded thinking panels sit ahead of the answer. Collapsed chrome has no second message-content. -->
+<infinite-scroller class="chat-history">
+  <div class="conversation-container" id="aa11bb22cc33dd01">
+    <model-response>
+      <model-thoughts>
+        <message-content><div class="markdown-main-panel">THOUGHT LEAK</div></message-content>
+      </model-thoughts>
+      <div class="thoughts-container">
+        <message-content><div class="markdown-main-panel">CONTAINER LEAK</div></message-content>
+      </div>
+      <div class="thoughts-content">
+        <message-content><div class="markdown-main-panel">CONTENT LEAK</div></message-content>
+      </div>
+      <message-content>
+        <div class="markdown-main-panel">
+          <p>Visible answer.</p>
+          <model-thoughts>nested model thought</model-thoughts>
+          <div class="thoughts-container">nested container</div>
+          <div class="thoughts-content">nested content</div>
+        </div>
+      </message-content>
+    </model-response>
+  </div>
+  <div class="conversation-container" id="aa11bb22cc33dd02">
+    <model-response>
+      <model-thoughts>
+        <message-content><div class="markdown-main-panel">thought only panel</div></message-content>
+      </model-thoughts>
+      <message-content><div class="markdown">fallback prose</div></message-content>
+    </model-response>
+  </div>
+  <div class="conversation-container" id="aa11bb22cc33dd03">
+    <model-response>
+      <div class="thoughts-container">
+        <message-content><div class="markdown-main-panel">thought before plain</div></message-content>
+      </div>
+      <message-content><p>plain content</p></message-content>
+    </model-response>
+  </div>
+  <div class="conversation-container" id="aa11bb22cc33dd04">
+    <model-response>
+      <model-thoughts><div class="thoughts-header">thinking header</div></model-thoughts>
+      <message-content>
+        <div class="markdown-main-panel"><p>Collapsed answer stays.</p></div>
+      </message-content>
+    </model-response>
+  </div>
+  <div class="conversation-container" id="aa11bb22cc33dd05">
+    <model-response>
+      <div class="thoughts-content">
+        <message-content><div class="markdown-main-panel">only the thought</div></message-content>
+      </div>
+    </model-response>
+  </div>
+</infinite-scroller>

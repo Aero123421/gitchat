@@ -1,9 +1,16 @@
 // @vitest-environment happy-dom
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
-import { gemini } from '../../src/content/adapters/gemini';
-import { captureVisible } from '../../src/content/capture/snapshot';
+import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('../../src/content/capture/frames', async (orig) => ({
+  ...(await orig<typeof import('../../src/content/capture/frames')>()),
+  serializeFrames: async (reqs: Array<{ key: string; messageId: string | null; title: string }>) =>
+    reqs.map((r) => ({ key: r.key, messageId: r.messageId, title: r.title, html: `<html>${r.key}</html>` })),
+}));
+
+const { gemini } = await import('../../src/content/adapters/gemini');
+const { captureVisible } = await import('../../src/content/capture/snapshot');
 
 const load = (name: string) => {
   document.body.innerHTML = readFileSync(path.resolve('tests/fixtures/gemini', name), 'utf8');
@@ -51,6 +58,51 @@ describe('gemini adapter (live-site fixtures)', () => {
     const answer = captureVisible(gemini, document).find((m) => m.role === 'assistant');
     expect(answer?.markdown).toMatch(/^> \*\*Artifact:\*\* Canvas$/m);
     expect(answer?.kinds ?? []).toContain('viz');
+  });
+
+  it('keeps an expanded thinking panel out of the answer', () => {
+    load('thoughts.html');
+    const answers = captureVisible(gemini, document).filter((m) => m.role === 'assistant');
+    const text = (needle: string) => answers.find((m) => m.markdown.includes(needle))?.markdown ?? '';
+
+    const expanded = text('Visible answer');
+    expect(expanded).toContain('Visible answer.');
+    expect(expanded).not.toContain('THOUGHT LEAK');
+    expect(expanded).not.toContain('CONTAINER LEAK');
+    expect(expanded).not.toContain('CONTENT LEAK');
+    expect(expanded).not.toContain('nested model thought');
+    expect(expanded).not.toContain('nested container');
+    expect(expanded).not.toContain('nested content');
+
+    const fallback = text('fallback prose');
+    expect(fallback).toContain('fallback prose');
+    expect(fallback).not.toContain('thought only panel');
+
+    const plain = text('plain content');
+    expect(plain).toContain('plain content');
+    expect(plain).not.toContain('thought before plain');
+
+    const collapsed = text('Collapsed answer stays');
+    expect(collapsed).toContain('Collapsed answer stays.');
+    expect(collapsed).not.toContain('thinking header');
+
+    expect(answers.some((m) => m.markdown.includes('only the thought'))).toBe(false);
+  });
+
+  it('uses the chip title and falls back only when it is absent', async () => {
+    load('canvas-title.html');
+    const answer = captureVisible(gemini, document).find((m) => m.role === 'assistant');
+    expect(answer?.markdown).toMatch(/^> \*\*Artifact:\*\* Snake Game$/m);
+    expect(answer?.markdown).toMatch(/^> \*\*Artifact:\*\* Canvas 2$/m);
+    expect(answer?.markdown).toMatch(/^> \*\*Artifact:\*\* Canvas 3$/m);
+    expect(answer?.markdown).toMatch(/^> \*\*Artifact:\*\* Notes$/m);
+    expect(answer?.markdown).not.toMatch(/^> \*\*Artifact:\*\* Canvas$/m);
+
+    for (const frame of Array.from(document.querySelectorAll<HTMLIFrameElement>('iframe'))) {
+      Object.defineProperty(frame, 'contentWindow', { configurable: true, get: () => window });
+    }
+    const arts = await gemini.artifacts!(document);
+    expect(arts.map((a) => a.title)).toEqual(['Snake Game', 'Canvas 2', 'Canvas 3', 'Notes']);
   });
 
   it('reads every turn of a long chat even when they are off-screen', () => {
