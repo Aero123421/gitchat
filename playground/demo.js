@@ -23,8 +23,6 @@ const write = (k, v) => {
 };
 
 let theme = read('gc-theme', 'light');
-// init motion of the creature while one is picked ('' = the current one)
-let captureMotion = read('gc-capm', '');
 document.documentElement.dataset.theme = theme;
 if (read('gc-vivid', '0') === '1') document.body.classList.add('vivid');
 
@@ -35,9 +33,8 @@ function mount(name) {
   host = document.createElement('gitchat-ui');
   host.dataset.theme = theme;
   document.body.appendChild(host);
-  current = variants[name](host, store, captureMotion ? { captureMotion } : {});
+  current = variants[name](host, store);
   document.querySelectorAll('[data-v]').forEach((b) => b.classList.toggle('on', b.dataset.v === name));
-  document.querySelectorAll('[data-cm]').forEach((b) => b.classList.toggle('on', b.dataset.cm === captureMotion));
   document.querySelector('.acts').hidden = !current.act;
   history.replaceState(null, '', `#${name}`);
   write('gc-variant', name);
@@ -47,11 +44,6 @@ document.querySelector('.demo').addEventListener('click', (e) => {
   const b = e.target.closest('button');
   if (!b) return;
   if (b.dataset.v) return mount(b.dataset.v);
-  if (b.dataset.cm !== undefined) {
-    captureMotion = b.dataset.cm;
-    write('gc-capm', captureMotion);
-    return mount(read('gc-variant', 'creature'));
-  }
   const act = b.dataset.act;
   if (act === 'reply') store.aiTurn();
   else if (act === 'fail') store.failNextPush();
