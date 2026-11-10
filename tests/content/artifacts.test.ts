@@ -30,6 +30,20 @@ const showPanes = () => {
 const withWindows = (frames: Iterable<HTMLIFrameElement>) => {
   for (const f of frames) Object.defineProperty(f, 'contentWindow', { get: () => window, configurable: true });
 };
+/** happy-dom does not load frames: put a real same-origin document behind `frame`. */
+const setFrameDocument = (frame: HTMLIFrameElement, fill: (doc: Document) => void): Document => {
+  const doc = document.implementation.createHTMLDocument('');
+  fill(doc);
+  Object.defineProperty(frame, 'contentDocument', { configurable: true, get: () => doc });
+  return doc;
+};
+const addUserContent = (doc: Document, src = 'https://x.frame.claudeusercontent.com/'): HTMLIFrameElement => {
+  const inner = doc.createElement('iframe');
+  inner.setAttribute('src', src);
+  doc.body.append(inner);
+  withWindows([inner]);
+  return inner;
+};
 
 describe('attachArtifacts', () => {
   it('attaches each visualization to the message that owns it, even with equal titles', () => {
@@ -111,10 +125,9 @@ describe('claude artifacts', () => {
   it('ties the open panel to the card marked current, keyed by the artifact id', async () => {
     load('claude', 'artifact.html');
     const outer = document.querySelector<HTMLIFrameElement>('iframe[src*="/code/artifact/"]')!;
-    const inner = document.createElement('iframe');
-    inner.src = 'https://x.frame.claudeusercontent.com/';
-    withWindows([inner]);
-    Object.defineProperty(outer, 'contentDocument', { get: () => ({ querySelector: () => inner }) });
+    setFrameDocument(outer, (doc) => {
+      addUserContent(doc);
+    });
     document.querySelector('[data-testid="assistant-message"]')!.setAttribute('data-turn-key', 'turn-9-hub-reply');
     const arts = await claude.artifacts!(document);
     expect(arts).toHaveLength(1);
@@ -135,10 +148,9 @@ describe('claude artifacts', () => {
         <button data-testid="frame-card-open">Chart</button></div>
         <iframe id="${id}" src="https://claude.ai/code/artifact/ART" title="Chart"></iframe>`;
       const outer = document.getElementById(id) as HTMLIFrameElement;
-      const inner = document.createElement('iframe');
-      inner.src = 'https://x.frame.claudeusercontent.com/';
-      withWindows([inner]);
-      Object.defineProperty(outer, 'contentDocument', { configurable: true, get: () => ({ querySelector: () => inner }) });
+      setFrameDocument(outer, (doc) => {
+        addUserContent(doc);
+      });
     };
     history.replaceState(null, '', `/chat/${chatA}`);
     mount('outer-a');
@@ -148,6 +160,83 @@ describe('claude artifacts', () => {
     history.replaceState(null, '', `/chat/${chatB}`);
     mount('outer-b');
     expect(await claude.artifacts!(document)).toEqual([]);
+  });
+
+  it('walks a same-origin /code/frame/ document to the claudeusercontent frame', async () => {
+    load('claude', 'artifact.html');
+    const outer = document.querySelector<HTMLIFrameElement>('iframe[src*="/code/artifact/"]')!;
+    setFrameDocument(outer, (doc) => {
+      const mid = doc.createElement('iframe');
+      mid.setAttribute('src', 'https://claude.ai/code/frame/viewer');
+      doc.body.append(mid);
+      setFrameDocument(mid, (midDoc) => {
+        addUserContent(midDoc, 'https://ARTIFACT_UUID.frame.claudeusercontent.com/_f/signed');
+      });
+    });
+    document.querySelector('[data-testid="assistant-message"]')!.setAttribute('data-turn-key', 'turn-9-hub-reply');
+    const arts = await claude.artifacts!(document);
+    expect(arts.map((x) => [x.key, x.messageId, x.title])).toEqual([['artifact:ARTIFACT_UUID', 'turn-9-hub-reply', 'Four Value Bar Chart']]);
+  });
+
+  it('skips top-level /code/frame/ previews without a verified artifact identity', async () => {
+    load('claude', 'artifact-frame.html');
+    const outer = document.querySelector<HTMLIFrameElement>('iframe[src*="/code/frame/"]')!;
+    const other = outer.cloneNode() as HTMLIFrameElement;
+    other.src = 'https://claude.ai/code/frame/OTHER_UUID';
+    document.body.append(other);
+    for (const frame of [outer, other]) {
+      setFrameDocument(frame, (doc) => {
+        addUserContent(doc);
+      });
+    }
+    expect(await claude.artifacts!(document)).toEqual([]);
+    expect(await claude.artifacts!(document, { skip: new Set(['turn-frame-hub-reply:artifact']) })).toEqual([]);
+    expect(captureVisible(claude, document)[0]?.markdown).toContain('> **Artifact:** Frame Chart');
+  });
+
+  it('ties an .artifact-block-cell card to the open panel', async () => {
+    load('claude', 'artifact-cell.html');
+    const outer = document.querySelector<HTMLIFrameElement>('iframe[src*="/code/artifact/"]')!;
+    setFrameDocument(outer, (doc) => {
+      addUserContent(doc);
+    });
+    const arts = await claude.artifacts!(document);
+    expect(arts.map((x) => [x.key, x.messageId, x.title])).toEqual([['artifact:CELL_UUID', 'turn-cell-hub-reply', 'Cell Chart']]);
+    const answer = captureVisible(claude, document).find((m) => m.id === 'turn-cell-hub-reply')!;
+    expect(answer.markdown).toContain('> **Artifact:** Cell Chart');
+    expect(answer.markdown).toContain('Published the chart.');
+  });
+
+  it('skips an artifact when the usercontent window cannot be reached', async () => {
+    load('claude', 'artifact.html');
+    const outer = document.querySelector<HTMLIFrameElement>('iframe[src*="/code/artifact/"]')!;
+    Object.defineProperty(outer, 'contentDocument', {
+      configurable: true,
+      get() {
+        throw new DOMException('blocked', 'SecurityError');
+      },
+    });
+    document.querySelector('[data-testid="assistant-message"]')!.setAttribute('data-turn-key', 'turn-9-hub-reply');
+    await expect(claude.artifacts!(document)).resolves.toEqual([]);
+
+    setFrameDocument(outer, (doc) => {
+      const inner = addUserContent(doc);
+      Object.defineProperty(inner, 'contentWindow', { configurable: true, get: () => null });
+    });
+    await expect(claude.artifacts!(document)).resolves.toEqual([]);
+
+    setFrameDocument(outer, (doc) => {
+      const mid = doc.createElement('iframe');
+      mid.setAttribute('src', 'https://claude.ai/code/frame/viewer');
+      doc.body.append(mid);
+      Object.defineProperty(mid, 'contentDocument', {
+        configurable: true,
+        get() {
+          throw new DOMException('blocked', 'SecurityError');
+        },
+      });
+    });
+    await expect(claude.artifacts!(document)).resolves.toEqual([]);
   });
 });
 
@@ -216,9 +305,9 @@ describe('preview ownership (N11)', () => {
       <div data-testid="assistant-message" data-turn-key="a2"><span role="button" data-testid="frame-card-open">Chart</span></div>
       <iframe title="Chart" src="https://claude.ai/code/artifact/U1"></iframe>`;
     const outer = document.querySelector<HTMLIFrameElement>('iframe')!;
-    const inner = document.createElement('iframe');
-    withWindows([inner]);
-    Object.defineProperty(outer, 'contentDocument', { get: () => ({ querySelector: () => inner }) });
+    setFrameDocument(outer, (doc) => {
+      addUserContent(doc, 'https://x.frame.claudeusercontent.com/');
+    });
     claude.watch!(document);
     expect(await claude.artifacts!(document)).toEqual([]);
     document.querySelectorAll<HTMLElement>('[data-testid="frame-card-open"]')[0]!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -234,9 +323,9 @@ describe('preview ownership in virtualized lists (c-services H4)', () => {
       <div data-testid="assistant-message" data-turn-key="new"><span role="button" data-testid="frame-card-open">Plot</span></div>
       <iframe title="Plot" src="https://claude.ai/code/artifact/OLD"></iframe>`;
     const outer = document.querySelector<HTMLIFrameElement>('iframe')!;
-    const inner = document.createElement('iframe');
-    withWindows([inner]);
-    Object.defineProperty(outer, 'contentDocument', { get: () => ({ querySelector: () => inner }) });
+    setFrameDocument(outer, (doc) => {
+      addUserContent(doc);
+    });
     expect(await claude.artifacts!(document)).toEqual([]);
     // marked current by the site: that card owns the panel
     document.querySelector('[data-testid="frame-card-open"]')!.setAttribute('aria-current', 'true');

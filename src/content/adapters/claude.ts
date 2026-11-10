@@ -8,13 +8,94 @@ import type { MessageNode } from './types';
 import { defineAdapter, idFromPath } from './define';
 import { serializeFrames, type FrameRequest } from '../capture/frames';
 
-const CARD = '[data-testid="frame-card-open"]';
+/** Preview card: the older testid, plus the 2026-09 block class. */
+const CARD = '[data-testid="frame-card-open"], .artifact-block-cell';
+// These hooks can coexist in one transcript. One selector collects them all; combine drops nested roots.
+const ASSISTANT = ['div[data-is-streaming], .font-claude-response, [data-testid="assistant-message"]'];
+/** `data-is-streaming="true"` is enough; the testid is not required. */
+const STREAMING = ['div[data-is-streaming="true"]', '[data-testid="assistant-message"][data-is-streaming="true"]'];
+// Top-level /code/frame/ viewers have no verified stable artifact identity yet.
+const PANEL = 'iframe[src*="/code/artifact/"]';
+
 const cardTitle = (card: Element) => (card.textContent ?? '').trim() || 'Artifact';
+const isCard = (el: Element) => el.matches(CARD);
+
+function frameURL(frame: HTMLIFrameElement): URL | null {
+  try {
+    const raw = frame.getAttribute('src') || frame.src || '';
+    if (!raw) return null;
+    return new URL(raw, 'https://claude.ai');
+  } catch {
+    return null;
+  }
+}
+
+function hostIs(url: URL, host: string): boolean {
+  return url.hostname === host || url.hostname.endsWith(`.${host}`);
+}
+
+function frameWindow(frame: HTMLIFrameElement): Window | null {
+  try {
+    return frame.contentWindow;
+  } catch {
+    return null;
+  }
+}
+
+function frameDocument(frame: HTMLIFrameElement): Document | null {
+  try {
+    return frame.contentDocument;
+  } catch {
+    return null;
+  }
+}
+
+function childFrames(root: ParentNode): HTMLIFrameElement[] {
+  try {
+    return Array.from(root.querySelectorAll('iframe')).filter((el): el is HTMLIFrameElement => el.tagName.toUpperCase() === 'IFRAME');
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Window of the claudeusercontent.com frame inside a same-origin viewer.
+ * Intermediate documents (including claude.ai/code/frame/) are walked. An unreadable window is null.
+ */
+function userContentWindow(outer: HTMLIFrameElement): Window | null {
+  const seen = new Set<ParentNode>();
+  const walk = (root: ParentNode): Window | null => {
+    if (seen.has(root)) return null;
+    seen.add(root);
+    const frames = childFrames(root);
+    for (const frame of frames) {
+      const url = frameURL(frame);
+      if (!url || !hostIs(url, 'claudeusercontent.com')) continue;
+      const win = frameWindow(frame);
+      if (win) return win;
+    }
+    for (const frame of frames) {
+      const url = frameURL(frame);
+      if (url && !hostIs(url, 'claude.ai')) continue;
+      const child = frameDocument(frame);
+      if (!child || child === root) continue;
+      const win = walk(child);
+      if (win) return win;
+    }
+    return null;
+  };
+  try {
+    const doc = frameDocument(outer);
+    return doc ? walk(doc) : null;
+  } catch {
+    return null;
+  }
+}
 
 /** Text segments and artifact cards of an answer, in order, without tool-use chrome. */
 function answerBody(node: MessageNode): Element {
   const box = node.el.ownerDocument.createElement('div');
-  const parts = node.el.querySelectorAll('.standard-markdown, [data-testid="frame-card-open"]');
+  const parts = node.el.querySelectorAll(`.standard-markdown, ${CARD}`);
   for (const part of Array.from(parts)) {
     if (part.parentElement?.closest('.standard-markdown')) continue;
     box.appendChild(part.cloneNode(true));
@@ -25,13 +106,15 @@ function answerBody(node: MessageNode): Element {
 export const claude = defineAdapter({
   service: 'claude',
   siteNames: ['Claude'],
-  chatId: (url) => idFromPath(url, /^\/chat\/([0-9a-f-]{36})/i),
+  // Incognito is a temporary chat: the URL keeps `?incognito=` (empty value counts). No
+  // language-independent DOM flag is present here, so a `/chat/<uuid>` without that query is saved.
+  chatId: (url) => (url.searchParams.has('incognito') ? null : idFromPath(url, /^\/chat\/([0-9a-f-]{36})/i)),
   // ~20 rows in the DOM at a time
   virtualized: true,
   selectors: {
     user: ['[data-testid="user-message"]'],
-    assistant: ['[data-testid="assistant-message"]'],
-    generating: ['[data-testid="chat-input-stop"]', '[data-testid="assistant-message"][data-is-streaming="true"]'],
+    assistant: ASSISTANT,
+    generating: ['[data-testid="chat-input-stop"]', ...STREAMING],
     composer: ['[data-testid="chat-input"]', 'div[contenteditable="true"].ProseMirror'],
     scroller: ['[data-autoscroll-container]'],
     // the first *loaded* row (positions are rebased after each batch): a hint, never proof of the start
@@ -56,9 +139,9 @@ export const claude = defineAdapter({
     const n = Number(doc.querySelector('[data-testid="transcript-row"] [role="article"][aria-setsize]')?.getAttribute('aria-setsize'));
     return Number.isFinite(n) && n > 0 ? n : null;
   },
-  // The open artifact lives in a same-origin wrapper iframe that holds a cross-origin frame on
-  // <uuid>.frame.claudeusercontent.com; gitchat's frame script there returns the rendered HTML. The
-  // card of the open artifact carries aria-current="true", which ties the panel to its message.
+  // The open artifact is a cross-origin frame on <uuid>.frame.claudeusercontent.com. The viewer is
+  // same-origin and may nest another same-origin document (claude.ai/code/frame/) before that frame.
+  // The card of the open artifact carries aria-current="true", which ties the panel to its message.
   async artifacts(doc, ctx) {
     const requests: FrameRequest[] = [];
     const current = Array.from(doc.querySelectorAll(CARD))
@@ -77,33 +160,31 @@ export const claude = defineAdapter({
       const opened = ctx.opened();
       return opened?.messageId && opened.title === panelTitle ? { messageId: opened.messageId, title: opened.title } : null;
     };
-    for (const outer of Array.from(doc.querySelectorAll<HTMLIFrameElement>('iframe[src*="/code/artifact/"]'))) {
-      const id = /\/code\/artifact\/([^/?#]+)/.exec(outer.getAttribute('src') ?? '')?.[1];
-      const owner = ownerOf((outer.getAttribute('title') ?? '').trim());
-      if (!owner) continue; // can't tell which message opened it: don't guess
-      const key = id ? `artifact:${id}` : `${owner.messageId}:artifact`;
-      if (ctx.skip(key)) continue;
-      let inner: HTMLIFrameElement | null = null;
+    for (const outer of Array.from(doc.querySelectorAll<HTMLIFrameElement>(PANEL))) {
       try {
-        inner = outer.contentDocument?.querySelector<HTMLIFrameElement>('iframe[src*="claudeusercontent.com"]') ?? null;
+        const id = /\/code\/artifact\/([^/?#]+)/.exec(outer.getAttribute('src') ?? '')?.[1];
+        if (!id) continue;
+        const owner = ownerOf((outer.getAttribute('title') ?? '').trim());
+        if (!owner) continue; // can't tell which message opened it: don't guess
+        const key = `artifact:${id}`;
+        if (ctx.skip(key)) continue;
+        const win = userContentWindow(outer);
+        if (!win) continue; // viewer not readable, or the usercontent frame was never reached
+        requests.push({ key, messageId: owner.messageId, title: owner.title, win });
       } catch {
-        // not readable (should be same-origin, but stay safe)
+        // one bad panel must not drop the rest
       }
-      if (!inner?.contentWindow) continue;
-      requests.push({ key, messageId: owner.messageId, title: owner.title, win: inner.contentWindow });
     }
     return serializeFrames(requests);
   },
   // The streaming answer's turn. The observer keeps it, so unmounting that row is not "done".
   activeTurnId(doc) {
-    const streaming = Array.from(doc.querySelectorAll('[data-testid="assistant-message"][data-is-streaming="true"]')).pop();
-    return streaming?.getAttribute('data-turn-key') ?? null;
+    const streaming = Array.from(doc.querySelectorAll(STREAMING.join(', '))).pop();
+    return streaming?.closest('[data-turn-key]')?.getAttribute('data-turn-key') ?? null;
   },
   hasTurn: (doc, id) => !!doc.querySelector(`[data-turn-key="${CSS.escape(id)}"]`),
   aiPhase(doc) {
-    const msgs = doc.querySelectorAll('[data-testid="assistant-message"]');
-    const last = msgs[msgs.length - 1];
-    if (last?.getAttribute('data-is-streaming') === 'true') return 'streaming';
+    if (doc.querySelector(STREAMING.join(', '))) return 'streaming';
     if (doc.querySelector('[data-testid="chat-input-stop"]')) return 'thinking';
     return 'idle';
   },
@@ -119,7 +200,7 @@ export const claude = defineAdapter({
     // `##` renders as <h3>: the site shifts headings down one level
     headingLevel: (el) => Number(el.tagName[1]) - 1,
     render(el, _children, kind) {
-      if (el.getAttribute('data-testid') !== 'frame-card-open') return null;
+      if (!isCard(el)) return null;
       kind('viz');
       return `\n\n> **Artifact:** ${cardTitle(el)}\n\n`;
     },
