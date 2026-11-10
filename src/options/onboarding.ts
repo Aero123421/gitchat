@@ -27,7 +27,11 @@ export function createOnboarding(opts: { preview: WidgetPreview; onFinish: () =>
   const content = h('div', { class: 'step-content', 'aria-live': 'polite' });
   card.append(content);
   root.append(steps, card);
-  let step: Step = app.auth ? (app.settings.repo ? 'prefs' : 'repo') : 'welcome';
+  // A repository is confirmed only for the credentials already signed in when this wizard opened,
+  // or after this sign-in chooses or re-attaches one. Sign-out clears the token and leaves the
+  // saved repository in settings, so that stored choice must not skip the chooser.
+  let repoConfirmed = Boolean(app.auth && app.settings.repo);
+  let step: Step = app.auth ? (repoConfirmed ? 'prefs' : 'repo') : 'welcome';
   let error = '';
   // After signing out of a personal access token, the connect step opens the paste form.
   let tokenFirst = false;
@@ -74,6 +78,7 @@ export function createOnboarding(opts: { preview: WidgetPreview; onFinish: () =>
     );
 
   // auth/signout clears only the token. Settings, including a repository already chosen, stay.
+  // Those credentials are gone, so the stored repository is no longer a confirmed choice.
   async function replaceSignIn(): Promise<void> {
     if (replacing) return;
     replacing = true;
@@ -82,6 +87,7 @@ export function createOnboarding(opts: { preview: WidgetPreview; onFinish: () =>
       await request('auth/signout', {});
       // The token is gone now, so never show the old account again even if the refresh below fails.
       app.auth = null;
+      repoConfirmed = false;
       await refreshAuth().catch(() => undefined);
       tokenFirst = pasteToken;
       replacing = false;
@@ -124,7 +130,9 @@ export function createOnboarding(opts: { preview: WidgetPreview; onFinish: () =>
             createConnect(
               async () => {
                 await refreshAuth().catch(() => undefined);
-                go(app.settings.repo ? 'prefs' : 'repo');
+                // This sign-in has not chosen a repository yet, even if settings still hold one.
+                repoConfirmed = false;
+                go('repo');
               },
               tokenFirst ? { tokenFirst: true } : undefined,
             ),
@@ -134,7 +142,7 @@ export function createOnboarding(opts: { preview: WidgetPreview; onFinish: () =>
         break;
       case 'repo':
         body.append(title('obRepoTitle'), lead('obRepoBody'));
-        if (app.settings.repo) {
+        if (app.settings.repo && repoConfirmed) {
           const r = app.settings.repo;
           body.append(
             h('div', { class: 'note ok' }, icon('check'), h('span', { class: 'mono' }, `${r.owner}/${r.name}`)),
@@ -148,6 +156,7 @@ export function createOnboarding(opts: { preview: WidgetPreview; onFinish: () =>
                 // Make sure the choice is persisted even if the worker did not save it itself.
                 if (!app.settings.repo) await patchSettings({ repo }).catch(() => undefined);
                 void refreshSync();
+                repoConfirmed = true;
                 go('prefs');
               },
               // Settings already has Sign out; only the wizard needs a way back to the token form.
