@@ -46,6 +46,12 @@ const addUserContent = (doc: Document, src = 'https://x.frame.claudeusercontent.
 };
 
 describe('attachArtifacts', () => {
+  it('escapes a trailing backslash as well as brackets in a card title', () => {
+    const title = 'Path [v2] \\';
+    const [linked] = attachArtifacts([a('m1', `> **Artifact:** ${title}`)], [{ key: 'k', messageId: 'm1', title, html: '<p></p>' }]);
+    expect(linked?.markdown).toContain(String.raw`[Path \[v2\] \\](gitchat-asset:`);
+  });
+
   it('attaches each visualization to the message that owns it, even with equal titles', () => {
     const msgs = [a('m1', '> **Artifact:** Chart'), a('m2', '> **Artifact:** Chart')];
     const out = attachArtifacts(msgs, [{ key: 'artifact:x1', messageId: 'm1', title: 'Chart', html: '<p>old</p>' }]);

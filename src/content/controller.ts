@@ -51,8 +51,7 @@ const AUTO_RESCAN_MS = 60_000;
  */
 const SAME_CHAT_WATCH_MS = 4000;
 /**
- * How long a copy waits for the page to be staged. Chrome's user activation lasts about 5 s and the
- * clipboard write needs it, so a slow read is skipped (the copy then has the last capture).
+ * How long a copy waits for the page to be staged; a slow read uses the last capture instead.
  */
 const COPY_REFRESH_MS = 1500;
 /** Abort reason when the tab moves to another chat: unlike Cancel, it does not undo a finished capture. */
@@ -756,17 +755,37 @@ export class Controller {
   /**
    * Copies the tracked chat as Markdown. The text comes from the background's working copy, so no
    * scroll through the history is needed; what the page shows now is staged first, but only for a
-   * moment — the clipboard needs the click's user activation, which runs out after a few seconds.
+   * moment. Start the clipboard write in the click's task, before waiting for any text.
    */
   private async copyMarkdown(): Promise<boolean> {
     const route = this.route();
-    if (!route || !this.store.state.tracked || this.abort) return false;
-    try {
+    if (!route || !this.store.state.tracked || this.abort || !this.onPage(route)) return false;
+    const check = () => {
+      if (!this.live(route) || !this.onPage(route)) throw new DOMException('Navigated', 'AbortError');
+    };
+    const text = async () => {
       await Promise.race([this.refresh(), new Promise((r) => setTimeout(r, COPY_REFRESH_MS))]);
-      if (!this.live(route)) return false;
+      check();
       const { markdown } = await request('chat/markdown', { key: route.key });
-      if (!this.live(route)) return false;
-      await navigator.clipboard.writeText(markdown);
+      check();
+      return markdown;
+    };
+    try {
+      if (typeof ClipboardItem !== 'undefined') {
+        const blob = text().then((markdown) => {
+          check();
+          return new Blob([markdown], { type: 'text/plain' });
+        });
+        // Also handle rejection if the API throws before it consumes the item's promise.
+        void blob.catch(() => {});
+        check();
+        await navigator.clipboard.write([new ClipboardItem({ 'text/plain': blob })]);
+      } else {
+        const markdown = await text();
+        check();
+        await navigator.clipboard.writeText(markdown);
+      }
+      check();
       return true;
     } catch (e) {
       log.warn('copy failed', e);

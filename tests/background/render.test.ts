@@ -184,6 +184,33 @@ describe('parseChatFile', () => {
 });
 
 describe('renderCopy', () => {
+  const copy = (markdown: string) => renderCopy(doc({ messages: [{ id: 'a', role: 'assistant', markdown }] }));
+
+  it('leaves asset references in fenced and inline code untouched', () => {
+    const link = '[Chart](gitchat-asset:chart.html)';
+    const code = `\`\`\`md\n${link}\n\`\`\`\n\n~~~~\n${link}\n~~~~\n\n\`${link}\` and \`\`a \` ${link}\`\`\n\n\`across\n${link}\nlines\``;
+    expect(copy(`${code}\n\n${link}`)).toContain(`${code}\n\nChart\n`);
+  });
+
+  it('does not let an unmatched label swallow the next artifact card', () => {
+    expect(copy('[intro\n\n> **Artifact:** [Chart](gitchat-asset:chart.html)'))
+      .toContain('[intro\n\n> **Artifact:** Chart\n');
+    expect(copy('[intro [Chart](chat.assets/chart.html)')).toContain('[intro Chart\n');
+  });
+
+  it('replaces asset images with alt text and preserves other images and escaped links', () => {
+    expect(copy('![Diagram](gitchat-asset:diagram.html) ![](chat.assets/empty.png) ![web](https://example.com/a.png) \\[literal](gitchat-asset:a.html)'))
+      .toContain('Diagram  ![web](https://example.com/a.png) \\[literal](gitchat-asset:a.html)');
+  });
+
+  it('unescapes brackets and backslashes in asset labels', () => {
+    expect(copy(String.raw`> **Artifact:** [Path \[v2\] \\](gitchat-asset:path.html)`))
+      .toContain('> **Artifact:** Path [v2] \\\n');
+    // Previously saved cards have an unescaped trailing backslash.
+    expect(copy('> **Artifact:** [Path \\](chat.assets/path.html)'))
+      .toContain('> **Artifact:** Path \\\n');
+  });
+
   it('writes the title and messages without front matter or message comments', () => {
     const md = renderCopy(doc());
     expect(md).toBe('# State "design": v2\n\n## User\n\nHow should I design state?\n\n## Assistant\n\nUse $E=mc^2$.\n\n```ts\nconst a = 1;\n```\n');

@@ -61,7 +61,48 @@ export function renderChat(doc: ChatDoc, path: string): RepoFile[] {
 }
 
 /** A link to a message asset: not yet uploaded (`gitchat-asset:`) or a file next to the chat. */
-const ASSET_MARKDOWN_LINK = /\[((?:\\.|[^\\\]])*)\]\((?:gitchat-asset:[^()\s]+|[^()\s/]+\.assets\/[^()\s]+)\)/g;
+const COPY_TOKEN = /\\[^\r\n]|`+|(?:(^> \*\*(?:Artifact|File):\*\* )\[((?:\\[^\r\n]|[^\[\]\\\r\n])*)\\\]|!?\[((?:\\[^\r\n]|[^\[\]\\\r\n])*)\])\((?:gitchat-asset:[^()\s]+|[^()\s/]+\.assets\/[^()\s]+)\)/gm;
+
+/** Bounded labels cannot swallow an unmatched bracket or the next line's artifact card. */
+function copyAssetLabels(text: string): string {
+  const tokens = new RegExp(COPY_TOKEN);
+  let out = '';
+  let from = 0;
+  for (let m; (m = tokens.exec(text)); ) {
+    if (m[0].startsWith('`')) {
+      // Only a run of the same length closes an inline code span (which may cross lines).
+      const runs = /`+/g;
+      runs.lastIndex = tokens.lastIndex;
+      for (let end; (end = runs.exec(text)); ) {
+        if (end[0].length !== m[0].length) continue;
+        tokens.lastIndex = runs.lastIndex;
+        break;
+      }
+    } else if (m[2] !== undefined || m[3] !== undefined) {
+      // Older captures escaped brackets but not a card title's trailing backslash.
+      const label = (m[3] ?? m[2]!).replace(/\\([\\[\]])/g, '$1');
+      out += text.slice(from, m.index) + (m[1] ? `${m[1]}${label}\\` : label);
+      from = tokens.lastIndex;
+    }
+  }
+  return out + text.slice(from);
+}
+
+function copyBody(md: string): string {
+  let fence: string | null = null;
+  let text = '';
+  let out = '';
+  for (const line of md.split(/(?<=\n)/)) {
+    const f = FENCE.exec(line)?.[1];
+    if (fence || f) {
+      out += copyAssetLabels(text) + line;
+      text = '';
+      if (!fence) fence = f!;
+      else if (f && f[0] === fence[0] && f.length >= fence.length && line.trim() === f) fence = null;
+    } else text += line;
+  }
+  return out + copyAssetLabels(text);
+}
 
 /**
  * The chat as Markdown to paste elsewhere: the title and one section per message, without the front
@@ -71,7 +112,7 @@ const ASSET_MARKDOWN_LINK = /\[((?:\\.|[^\\\]])*)\]\((?:gitchat-asset:[^()\s]+|[
 export function renderCopy(doc: Pick<ChatDoc, 'title' | 'messages'>): string {
   const lines = [`# ${chatTitle(doc.title)}`, ''];
   for (const m of doc.messages) {
-    const body = canonicalMarkdown(m.markdown.replace(ASSET_MARKDOWN_LINK, (_m, label: string) => label.replace(/\\([[\]])/g, '$1')));
+    const body = canonicalMarkdown(copyBody(m.markdown));
     lines.push(`## ${ROLE_HEADING[m.role]}`, '');
     if (body) lines.push(body, '');
   }

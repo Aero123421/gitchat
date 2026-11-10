@@ -731,9 +731,71 @@ describe('Controller', () => {
   describe('copy as Markdown', () => {
     let writeText: ReturnType<typeof vi.fn>;
     beforeEach(() => {
+      vi.stubGlobal('ClipboardItem', undefined);
       writeText = vi.fn(async () => undefined);
       Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
       handlers['chat/markdown'] = () => ({ markdown: '# T\n\n## User\n\nhi\n' });
+    });
+    afterEach(() => vi.unstubAllGlobals());
+
+    function promiseClipboard() {
+      class Item {
+        constructor(readonly data: Record<string, Promise<Blob>>) {}
+      }
+      vi.stubGlobal('ClipboardItem', Item);
+      const written: string[] = [];
+      const write = vi.fn(async ([item]: Item[]) => {
+        const blob = await item!.data['text/plain']!;
+        written.push(await blob.text());
+      });
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { write, writeText } });
+      return { write, written };
+    }
+
+    it('starts the clipboard write synchronously, even when the background takes longer than activation', async () => {
+      const c = await open(makeAdapter());
+      const { write, written } = promiseClipboard();
+      let answer!: (v: unknown) => void;
+      handlers['chat/markdown'] = () => new Promise((r) => (answer = r));
+      const copied = c.store.copyMarkdown();
+      expect(write).toHaveBeenCalledTimes(1); // Before yielding even a microtask.
+      expect(written).toEqual([]);
+      await vi.advanceTimersByTimeAsync(6000);
+      answer({ markdown: '# delayed\n' });
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(copied).resolves.toBe(true);
+      expect(written).toEqual(['# delayed\n']);
+      expect(writeText).not.toHaveBeenCalled();
+    });
+
+    it.each([false, true])('writes nothing when the URL changes before the route poll (ClipboardItem: %s)', async (modern) => {
+      const c = await open(makeAdapter());
+      const clipboard = modern ? promiseClipboard() : null;
+      let answer!: (v: unknown) => void;
+      handlers['chat/markdown'] = () => new Promise((r) => (answer = r));
+      const copied = c.store.copyMarkdown();
+      await vi.advanceTimersByTimeAsync(50);
+      showChat('b');
+      answer({ markdown: '# a\n' });
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(copied).resolves.toBe(false);
+      expect(c.key).toBe('claude:a'); // The cached route has not caught up yet.
+      expect(clipboard?.written ?? []).toEqual([]);
+      expect(writeText).not.toHaveBeenCalled();
+    });
+
+    it('rejects the clipboard data when navigation happens during refresh', async () => {
+      const c = await open(makeAdapter());
+      const { written } = promiseClipboard();
+      handlers['chat/snapshot'] = () => new Promise(() => {});
+      sent.length = 0;
+      const copied = c.store.copyMarkdown();
+      await vi.advanceTimersByTimeAsync(50);
+      showChat('b');
+      await vi.advanceTimersByTimeAsync(1500);
+      await expect(copied).resolves.toBe(false);
+      expect(written).toEqual([]);
+      expect(sent.some((s) => s.type === 'chat/markdown')).toBe(false);
     });
 
     it('stages what the page shows, then copies the background’s text', async () => {

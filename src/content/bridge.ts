@@ -115,7 +115,7 @@ export class UiStore {
     this.actions.setAuto(key, value);
   }
 
-  /** Only a tracked chat: its whole text is already here, so the copy fits in the click's time. */
+  /** Forward synchronously so the clipboard write still belongs to the trusted click. */
   copyMarkdown(): Promise<boolean> {
     if (!this.state.tracked) return Promise.resolve(false);
     return this.actions.copyMarkdown();
