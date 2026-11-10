@@ -196,6 +196,12 @@ export function mountCreature(host, store, options = {}) {
   let forming = null; // the AI's answer condensing into a droplet on the body's edge
   let nextPulse = 0;
   let lastInputRect = null;
+  // Init motion (playground variants while one is picked): 'a' tug, 'b' scan, 'c' travel; else calm.
+  const capMotion = options.captureMotion ?? null;
+  const lift = new Spring(0, { stiffness: 140, damping: 20 }); // 'c': the whole widget climbs / comes back
+  let capCount = 0;
+  let capStep = 0;
+  let capFlash = 0; // 'b': a batch arrived, the scan light flares
   const poseX = new Spring(1, { stiffness: 120, damping: 14 });
   const poseY = new Spring(1, { stiffness: 120, damping: 14 });
   const orbitL = new Spring(0, { stiffness: 60, damping: 14 }); // 1 = the gloss circles the body
@@ -502,6 +508,26 @@ export function mountCreature(host, store, options = {}) {
   }
 
   // ---- reactions to git events
+  /** A batch of older messages arrived (loading), or reading passed another fifth. */
+  function captureBeat(d) {
+    if (d.stage === 'loading') {
+      if (d.count <= capCount) return;
+      capCount = d.count;
+      if (capMotion === 'a') {
+        sqy.kick(1.6);
+        by.kick(-170);
+        blink();
+      } else if (capMotion === 'b') capFlash = 1;
+      else if (capMotion === 'c') lift.kick(-240);
+      return;
+    }
+    const step = Math.floor(((d.p - 0.25) / 0.75) * 5);
+    if (step <= capStep) return;
+    capStep = step;
+    if (capMotion === 'a') sqy.kick(-0.7);
+    else if (capMotion === 'b') capFlash = 0.6;
+  }
+
   const unsub = store.subscribe((type, d) => {
     if (type === 'staged') {
       d.items.forEach((_, i) => {
@@ -558,6 +584,10 @@ export function mountCreature(host, store, options = {}) {
       acts.nod();
     } else if (type === 'captureStart') {
       acts.perk();
+      capCount = 0;
+      capStep = 0;
+    } else if (type === 'progress' && capMotion && !motion.reduced) {
+      captureBeat(d);
     } else if (type === 'captured') {
       shown = 0;
       d.items.slice(0, MAX_SATS + 2).forEach((_, i) => flyIn(120 + i * 110));
@@ -703,7 +733,11 @@ export function mountCreature(host, store, options = {}) {
     anchor.set(clamp(frac * innerHeight, 60, Math.max(60, innerHeight - 60)));
     if (innerHeight > 0 && anchor.value <= 1) anchor.snap();
     anchor.step(dt);
-    const top = anchor.value - HY;
+    const capturing = st.phase === 'capturing' && !!capMotion && !motion.reduced;
+    const readP = st.captureStage === 'reading' ? clamp((st.progress - 0.25) / 0.75, 0, 1) : 0;
+    lift.set(capturing && capMotion === 'c' ? (st.captureStage === 'loading' ? -46 : -46 * (1 - readP)) : 0);
+    lift.step(dt);
+    const top = anchor.value - HY + lift.value;
     box.style.top = `${top.toFixed(1)}px`;
     const px = pointer.x - (innerWidth - BOX);
     const py = pointer.y - top;
@@ -731,7 +765,7 @@ export function mountCreature(host, store, options = {}) {
       by.set(HY + clamp(dy * 0.05 * f, -6, 6));
     } else {
       bx.set(HX);
-      by.set(HY);
+      by.set(HY + (capturing && capMotion === 'a' ? (st.captureStage === 'loading' ? -7 : 3) : 0));
     }
     if (scrollImpulse) {
       by.kick(clamp(scrollImpulse, -220, 220));
@@ -746,8 +780,9 @@ export function mountCreature(host, store, options = {}) {
     const streaming = aiPhase === 'streaming' && !sleeping;
     const still = motion.reduced;
     tilt.set(thinking && !still ? Math.sin(t * 0.5) * 5 : 0);
-    poseX.set(thinking ? 0.97 : 1);
-    poseY.set(thinking ? 1.04 : 1);
+    const tug = capturing && capMotion === 'a' && st.captureStage === 'loading';
+    poseX.set(tug ? 0.9 : thinking ? 0.97 : 1);
+    poseY.set(tug ? 1.13 : thinking ? 1.04 : 1);
     poseX.step(dt);
     poseY.step(dt);
     tilt.step(dt);
@@ -847,6 +882,16 @@ export function mountCreature(host, store, options = {}) {
     light.setAttribute('x', lerp(cx + lxS.value * 60, cx + Math.cos(la) * 44, ok).toFixed(1));
     light.setAttribute('y', lerp(cy + lyS.value * 60 - 24, cy + Math.sin(la) * 44, ok).toFixed(1));
     light.setAttribute('z', lerp(140, 64, ok).toFixed(1));
+    let scanY = null;
+    if (capturing && capMotion === 'b') {
+      // a scan line: upward sweeps while loading, then down with the reading
+      const ph = st.captureStage === 'loading' ? (t * 1.25) % 1 : readP;
+      scanY = st.captureStage === 'loading' ? cy + R * 1.1 - ph * R * 2.2 : cy - R * 1.1 + ph * R * 2.2;
+      capFlash = Math.max(0, capFlash - dt * 2.5);
+      light.setAttribute('x', (cx - 6).toFixed(1));
+      light.setAttribute('y', scanY.toFixed(1));
+      light.setAttribute('z', (46 - capFlash * 26).toFixed(1));
+    }
 
     // droplets
     for (let i = sats.length - 1; i >= 0; i--) {
@@ -944,7 +989,10 @@ export function mountCreature(host, store, options = {}) {
     };
     let lxT = 0;
     let lyT = 0;
-    if (m === 'focus') {
+    if (m === 'focus' && scanY !== null) {
+      lxT = -0.35;
+      lyT = clamp((scanY - cy) / R, -1, 1);
+    } else if (m === 'focus') {
       // scroll to the top first, then read line by line on the way down
       const p = st.progress;
       if (p < 0.25) {
@@ -1060,7 +1108,7 @@ export function mountCreature(host, store, options = {}) {
     const engaged =
       dragging || pressed || panelOpen || st.phase === 'capturing' || parts.length || forming || incoming ||
       now < shiverUntil || now < pinUntil || buttonsMoving || ((thinking || streaming) && !still) ||
-      moving([anchor, bx, by, sqx, sqy, reach, reachR, tilt, ringO, reveal, poseX, poseY, orbitL], 0.01) ||
+      moving([anchor, bx, by, sqx, sqy, reach, reachR, tilt, ringO, reveal, poseX, poseY, orbitL, lift], 0.01) ||
       sats.some((x) => moving([x.rad], 0.05)) || pearls.some((x) => moving([x.s]));
     if (engaged) return FULL;
     if (still) return moving([lookX, lookY, lid, lidCap, widen], 0.01) ? 24 : 2; // otherwise only timers
