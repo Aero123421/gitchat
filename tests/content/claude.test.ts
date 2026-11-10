@@ -47,6 +47,57 @@ describe('claude adapter (live-site fixtures)', () => {
       'https://claude.ai/chat/0f1e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b',
     );
   });
+
+  it('treats incognito as a temporary chat', () => {
+    const id = '0f1e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b';
+    expect(claude.chatId(new URL('https://claude.ai/new?incognito='))).toBeNull();
+    expect(claude.chatId(new URL('https://claude.ai/new?incognito'))).toBeNull();
+    expect(claude.chatId(new URL(`https://claude.ai/chat/${id}?incognito=`))).toBeNull();
+    expect(claude.chatId(new URL(`https://claude.ai/chat/${id}?incognito=true`))).toBeNull();
+    expect(claude.chatId(new URL(`https://claude.ai/chat/${id.toUpperCase()}?foo=1&incognito=`))).toBeNull();
+    expect(claude.chatId(new URL(`https://claude.ai/chat/${id}?artifact=incognito`))).toBe(id);
+  });
+});
+
+describe('claude assistant selectors', () => {
+  it('reads an assistant row that only has div[data-is-streaming]', () => {
+    load('assistant-streaming-div.html');
+    const msgs = claude.messages(document);
+    expect(msgs.map((m) => m.role)).toEqual(['user', 'assistant']);
+    expect(msgs[1]?.id).toBe('stream-div-hub-reply');
+    expect(claude.aiPhase(document)).toBe('streaming');
+    expect(claude.activeTurnId!(document)).toBe('stream-div-hub-reply');
+    expect(claude.isGenerating(document)).toBe(true);
+    expect(captureVisible(claude, document)[1]?.markdown).toContain('Answer from streaming div');
+  });
+
+  it('reads an assistant row that only has .font-claude-response', () => {
+    load('assistant-font.html');
+    const msgs = claude.messages(document);
+    expect(msgs.map((m) => m.role)).toEqual(['user', 'assistant']);
+    expect(msgs[1]?.id).toBe('font-hub-reply');
+    expect(claude.aiPhase(document)).toBe('idle');
+    expect(claude.activeTurnId!(document)).toBeNull();
+    expect(captureVisible(claude, document)[1]?.markdown).toContain('Answer from font class');
+  });
+
+  it('still reads [data-testid=assistant-message] when the 2026 selectors are absent', () => {
+    load('assistant-testid.html');
+    const msgs = claude.messages(document);
+    expect(msgs.map((m) => m.role)).toEqual(['user', 'assistant']);
+    expect(msgs[1]?.id).toBe('testid-hub-reply');
+    expect(document.querySelector('div[data-is-streaming]')).toBeNull();
+    expect(document.querySelector('.font-claude-response')).toBeNull();
+    expect(claude.aiPhase(document)).toBe('idle');
+    expect(captureVisible(claude, document)[1]?.markdown).toContain('Answer from testid');
+  });
+
+  it('does not treat data-is-streaming="false" as streaming', () => {
+    load('basic.html');
+    expect(claude.aiPhase(document)).toBe('idle');
+    expect(claude.activeTurnId!(document)).toBeNull();
+    expect(claude.isGenerating(document)).toBe(false);
+  });
 });
 
 describe('claude row positions', () => {
