@@ -31,6 +31,9 @@ const BOX = 240;
 const HX = BOX - 50;
 const HY = 112;
 const R0 = 23;
+/** Scrolling makes the body lag: at most this fast (px/s) and this far (px) from its place. */
+const SCROLL_SPEED = 260;
+const SCROLL_LAG = 14;
 const MAX_SATS = 6;
 const MAX_PEARLS = 6;
 const NS = 'http://www.w3.org/2000/svg';
@@ -178,6 +181,7 @@ export function mountCreature(host, store, options = {}) {
   let breathPh = 0;
   let breathK = 1;
   let scrollImpulse = 0;
+  let scrolledAt = -Infinity;
   let petDist = 0;
   let petCool = 0;
   let startleCool = 0;
@@ -625,6 +629,7 @@ export function mountCreature(host, store, options = {}) {
     onActivity();
     wakeFrames(900);
     scrollImpulse += -dy * 3.5;
+    scrolledAt = performance.now();
     look(-0.7, dy < 0 ? -0.85 : 0.75, 450);
   };
   document.addEventListener('scroll', onScroll, { capture: true, passive: true });
@@ -764,11 +769,18 @@ export function mountCreature(host, store, options = {}) {
       by.set(HY + (capturing ? (st.captureStage === 'loading' ? -7 : 3) : 0));
     }
     if (scrollImpulse) {
-      by.kick(clamp(scrollImpulse, -220, 220));
+      // A fast scroll sends an event every frame: cap the speed, not just each kick, or the kicks
+      // add up and fling the body off screen.
+      by.velocity = clamp(by.velocity + clamp(scrollImpulse, -220, 220), -SCROLL_SPEED, SCROLL_SPEED);
       scrollImpulse = 0;
     }
     bx.step(dt);
     by.step(dt);
+    if (!dragging && now - scrolledAt < 700 && Math.abs(by.value - by.target) > SCROLL_LAG) {
+      // it lags behind the page a little, never out of its place (hops and tugs are left alone)
+      by.value = by.target + Math.sign(by.value - by.target) * SCROLL_LAG;
+      by.velocity = 0;
+    }
     sqx.step(dt);
     sqy.step(dt);
     // AI thinking: a little taller, head slowly tilting side to side
