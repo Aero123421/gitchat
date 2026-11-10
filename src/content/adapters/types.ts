@@ -20,6 +20,8 @@ export interface Adapter {
   readonly service: ServiceId;
   /** Chat ID from the page URL, or null on pages that are not a saved conversation. */
   chatId(url: URL): string | null;
+  /** True when a same-id URL change only selects a branch, so message ids may all change. */
+  sameChatUrl?(a: URL, b: URL): boolean;
   /**
    * URL stored for this chat. Default is origin + pathname (no query, no hash). Gemini also drops
    * the `/u/<n>` account slot. Never used as the chat key.

@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Adapter, CapturedArtifact, MessageNode } from '../../src/content/adapters/types';
 import type { ChatSnapshot, ChatStatus } from '../../src/shared/types';
+import { grok } from '../../src/content/adapters/grok';
 import { DEFAULT_SETTINGS } from '../../src/shared/settings';
 
 vi.mock('../../src/content/widget', () => ({ Widget: class { show() {} hide() {} setTheme() {} } }));
@@ -650,6 +651,35 @@ describe('Controller', () => {
     expect(c.stale).toBeNull();
     expect(c.foreign).toBe(false);
   });
+
+  it('captures a rid-only branch switch even when every message id changes', async () => {
+    const c = await open(makeAdapter({ sameChatUrl: grok.sameChatUrl }));
+    history.replaceState(null, '', '/chat/a?rid=old-answer');
+    await c.checkRoute();
+    sent.length = 0;
+    history.replaceState(null, '', '/chat/a?rid=new-answer');
+    showMessages(['branch-user', 'branch-answer']);
+    await c.checkRoute();
+    void c.snapshot('answered');
+    await vi.advanceTimersByTimeAsync(50);
+    expect(c.foreign).toBe(false);
+    expect(snapshots().map((s) => s.messages.map((m) => m.id))).toEqual([['branch-user', 'branch-answer']]);
+  });
+
+  it.each(['?rid=new-answer&account=other', '?account=other', '?rid=new-answer#other'])(
+    'still refuses a different transcript on a non-branch URL change: %s', async (query) => {
+      const c = await open(makeAdapter({ sameChatUrl: grok.sameChatUrl }));
+      sent.length = 0;
+      history.replaceState(null, '', `/chat/a${query}`);
+      showMessages(['other-user', 'other-answer']);
+      await c.checkRoute();
+      void c.snapshot('answered');
+      await c.init({ rescan: true });
+      await vi.advanceTimersByTimeAsync(50);
+      expect(c.foreign).toBe(true);
+      expect(sent).toEqual([]);
+    },
+  );
 
   it('keeps capturing when a same-id URL change still shows this chat', async () => {
     const c = await open(slotAdapter());

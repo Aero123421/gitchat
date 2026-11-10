@@ -3,7 +3,7 @@
     "message": "gitchat"
   },
   "extDescription": {
-    "message": "Save ChatGPT, Claude and Gemini chats to your GitHub repo as Markdown — with a git-like commit and push."
+    "message": "Save ChatGPT, Claude, Gemini and Grok chats to your GitHub repo as Markdown — with a git-like commit and push."
   },
   "commit": {
     "message": "Commit"
@@ -210,7 +210,7 @@
     "message": "Get started"
   },
   "obWelcomeBody": {
-    "message": "gitchat saves your ChatGPT, Claude and Gemini conversations as Markdown. Your chats go only to your own GitHub repository."
+    "message": "gitchat saves your ChatGPT, Claude, Gemini and Grok conversations as Markdown. Your chats go only to your own GitHub repository."
   },
   "obWelcomeTitle": {
     "message": "Keep your AI chats in your own repository"

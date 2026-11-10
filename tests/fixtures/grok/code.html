@@ -1,0 +1,41 @@
+<!-- Reconstruction (not a raw dump) of a grok.com code answer, observed 2026-11-10 (ja UI, dark). Shows: data-testid=code-block cards (Shiki). The language is only a display label in the card header ("Python", "TypeScript" for a ts fence); <code> has no language class. Lines are span.line separated by "\n" text nodes, so code.textContent is the raw source. The copy button label is localized. Ids are placeholders. -->
+<div data-testid="chat-transcript-scroller" class="h-full overflow-x-hidden overflow-y-auto">
+  <div class="relative w-full" style="height: 900px;">
+    <div data-plane-row="gateway:RESP_ID_3" class="absolute inset-x-0 top-0" style="transform: translateY(0px);">
+      <div id="response-RESP_ID_3" class="relative group flex flex-col justify-center w-full items-end">
+        <div dir="auto" role="article" aria-labelledby="turn-heading-RESP_ID_3" data-testid="user-message" class="message-bubble relative chat-md prose">
+          <h2 id="turn-heading-RESP_ID_3" class="sr-only" data-no-copy="true">あなた</h2>
+          <div class="relative"><div class="relative response-content-markdown markdown chat-md chat-md-links"><p dir="auto" class="break-words">[gitchat research] code: show a 4-line Python function in a fenced code block tagged python, then a 2-line TypeScript snippet tagged ts, then one sentence.</p></div></div>
+          <section class="inline-media-container"></section>
+        </div>
+        <div role="group" aria-labelledby="turn-heading-RESP_ID_3" class="action-buttons"><button type="button" aria-label="Edit"></button><button type="button" aria-label="コピー"></button></div>
+      </div>
+    </div>
+    <div data-plane-row="gateway:RESP_ID_4" class="absolute inset-x-0 top-0" style="transform: translateY(128px);">
+      <div id="response-RESP_ID_4" class="relative group flex flex-col justify-center w-full items-start">
+        <div dir="auto" role="article" aria-labelledby="turn-heading-RESP_ID_4" data-testid="assistant-message" class="message-bubble relative chat-md">
+          <h2 id="turn-heading-RESP_ID_4" class="sr-only" data-no-copy="true">Grok</h2>
+          <div class="thinking-container"></div>
+          <div class="relative"><div class="relative response-content-markdown markdown chat-md chat-md-links"><div class="streamdown-chat-md"><div class="sd:space-y-4 sd:whitespace-normal">
+            <div class="not-prose"><div class="chat-code-block not-prose" data-testid="code-block"><div data-code-card="true" class="rounded-xl">
+              <div class="flex items-center justify-between"><span class="font-mono text-xs">Python</span><div class="flex"><button type="button" data-slot="button" aria-label="Python コードをコピー"><div><svg aria-hidden="true"></svg></div><span class="t-copy-label-swap" aria-hidden="true"><span class="t-copy-label" data-label="copy">コピー</span><span class="t-copy-label" data-label="copied">コピーしました</span></span></button></div></div>
+              <div class="shiki not-prose"><pre class="shiki slack-dark" role="group" aria-label="Pythonコード"><code><span class="line"><span>def</span><span> greet</span><span>(</span><span>name</span><span>: </span><span>str</span><span>) -&gt; </span><span>str</span><span>:</span></span>
+<span class="line"><span>    message </span><span>=</span><span> f</span><span>"Hello, </span><span>{</span><span>name</span><span>}</span><span>!"</span></span>
+<span class="line"><span>    print</span><span>(message)</span></span>
+<span class="line"><span>    return</span><span> message</span></span></code></pre></div>
+            </div></div></div>
+            <div class="not-prose"><div class="chat-code-block not-prose" data-testid="code-block"><div data-code-card="true" class="rounded-xl">
+              <div class="flex items-center justify-between"><span class="font-mono text-xs">TypeScript</span><div class="flex"><button type="button" data-slot="button" aria-label="TypeScript コードをコピー"><div><svg aria-hidden="true"></svg></div><span class="t-copy-label-swap" aria-hidden="true"><span class="t-copy-label" data-label="copy">コピー</span><span class="t-copy-label" data-label="copied">コピーしました</span></span></button></div></div>
+              <div class="shiki not-prose"><pre class="shiki slack-dark" role="group" aria-label="TypeScriptコード"><code><span class="line"><span>const</span><span> add </span><span>=</span><span> (</span><span>a</span><span>: </span><span>number</span><span>, </span><span>b</span><span>: </span><span>number</span><span>): </span><span>number</span><span> =&gt;</span><span> a </span><span>+</span><span> b</span><span>;</span></span>
+<span class="line"><span>console</span><span>.</span><span>log</span><span>(</span><span>add</span><span>(</span><span>2</span><span>, </span><span>3</span><span>));</span></span></code></pre></div>
+            </div></div></div>
+            <p dir="auto" class="break-words">These short snippets demonstrate basic function definitions in both languages.</p>
+          </div><span hidden=""></span></div></div></div>
+          <section class="inline-media-container"></section>
+          <div class="-ms-2"></div>
+        </div>
+        <div role="group" aria-labelledby="turn-heading-RESP_ID_4" class="action-buttons last-response"><button type="button" aria-label="回答をコピー"></button><button type="button" aria-label="再生成"></button></div>
+      </div>
+    </div>
+  </div>
+</div>

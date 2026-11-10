@@ -152,6 +152,7 @@ export const SITE_SERVICES: Record<string, ServiceId> = {
   'https://chatgpt.com': 'chatgpt',
   'https://claude.ai': 'claude',
   'https://gemini.google.com': 'gemini',
+  'https://grok.com': 'grok',
 };
 
 /** `frameType` is on a message sender at runtime (Chrome 106+); this package's MessageSender omits it. */

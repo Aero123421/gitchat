@@ -61,10 +61,10 @@ Check these four conditions:
 1. **The conversation has a permanent URL**:
    - On a blank "New chat" screen before the first message is sent, there is no conversation ID yet.
    - On ChatGPT right after sending the first prompt, the URL briefly uses a transient `/c/local-chatgpt:<uuid>` path; gitchat waits until ChatGPT assigns the permanent `/c/<uuid>` URL.
-   - Supported URL paths are `chatgpt.com/c/<uuid>`, `claude.ai/chat/<uuid>`, and `gemini.google.com/app/<id>` (or `/gem/<gem>/<id>`).
+   - Supported URL paths are `chatgpt.com/c/<uuid>`, `claude.ai/chat/<uuid>`, `gemini.google.com/app/<id>` (or `/gem/<gem>/<id>`), and `grok.com/c/<uuid>`. Grok's private chats stay at `grok.com/` and are never saved.
    - Gemini chats opened with a second Google account (`/u/<n>/app/<id>` or `/u/<n>/gem/<gem>/<id>`) are the same chats. Saved links leave out that account slot and query parameters such as `?authuser` and `?hl`.
 2. **Not a temporary chat**: ChatGPT temporary chats (`?temporary-chat=true`) are meant to disappear, so gitchat never shows the widget or saves them.
-3. **Service is enabled in settings**: open **Settings → Behavior → Services** and confirm that **ChatGPT**, **Claude**, or **Gemini** is switched on.
+3. **Service is enabled in settings**: open **Settings → Behavior → Services** and confirm that **ChatGPT**, **Claude**, **Gemini**, or **Grok** is switched on.
 4. **Tab was already open before installing or reloading the extension**: Chrome does not inject new content scripts into tabs that were already open before the extension was loaded. Reload the chat tab once.
 
 ### The Commit or Push button is missing from the widget
@@ -80,7 +80,7 @@ You can toggle **Auto commit** and **Auto push** in the widget panel (click the 
 
 ### Starting tracking (init) takes a long time on a long conversation
 
-ChatGPT, Claude, and Gemini all load older turns lazily in batches (5 turns per batch on ChatGPT, 32 rows on Claude, 10 turns on Gemini) and re-anchor the scroll container after each batch. During **init**, gitchat scrolls to the top repeatedly until the site stops adding older turns, then walks from top to bottom so virtualized lists are read in full.
+ChatGPT, Claude, Gemini, and Grok all load older turns lazily in batches (5 turns per batch on ChatGPT, 32 rows on Claude, 10 turns on Gemini, the rest after the newest ~50 messages on Grok) and re-anchor the scroll container after each batch. During **init**, gitchat scrolls to the top repeatedly until the site stops adding older turns, then walks from top to bottom so virtualized lists are read in full.
 
 - Keep the chat tab active while the counter (`↑ N`) and reading percentage (`0–100%`) progress.
 - On 34–40-turn conversations, init typically takes 4–11 seconds; conversations with hundreds of turns take longer because the site must fetch each batch from its server.

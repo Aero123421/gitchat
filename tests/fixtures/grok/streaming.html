@@ -1,0 +1,41 @@
+<!-- Reconstruction (not a raw dump) of a grok.com answer while it streams, observed 2026-11-10 (ja UI, dark, Fast model, 150-word prompt, snapshot at ~18.5 s). Shows: the working indicator, now data-settled="true" with its final duration, plus a one-line thought summary inside .thinking-container; each new word wrapped in span[data-sd-animate="true"] (unwrapped to plain text when finished); an empty .action-buttons.last-response group (filled with buttons only when the answer is done); the stop button in the composer, which has no data-testid or type and is recognizable by its svg g[id="name=player-stop"]. Ids are placeholders. -->
+<div data-testid="chat-transcript-scroller" class="h-full overflow-x-hidden overflow-y-auto">
+  <div class="relative w-full" style="height: 800px;">
+    <div data-plane-row="gateway:RESP_ID_7" class="absolute inset-x-0 top-0" style="transform: translateY(0px);">
+      <div id="response-RESP_ID_7" class="relative group flex flex-col justify-center w-full items-end">
+        <div dir="auto" role="article" aria-labelledby="turn-heading-RESP_ID_7" data-testid="user-message" class="message-bubble relative chat-md prose">
+          <h2 id="turn-heading-RESP_ID_7" class="sr-only" data-no-copy="true">あなた</h2>
+          <div class="relative"><div class="relative response-content-markdown markdown chat-md chat-md-links"><p dir="auto" class="break-words">[gitchat research] streaming: write about 150 words on why plain-text notes age well. Plain paragraphs only.</p></div></div>
+          <section class="inline-media-container"></section>
+        </div>
+        <div role="group" aria-labelledby="turn-heading-RESP_ID_7" class="action-buttons"><button type="button" aria-label="Edit"></button><button type="button" aria-label="コピー"></button></div>
+      </div>
+    </div>
+    <div data-plane-row="gateway:RESP_ID_8" class="absolute inset-x-0 top-0" style="transform: translateY(120px);">
+      <div id="response-RESP_ID_8" class="relative group flex flex-col justify-center w-full items-start">
+        <div dir="auto" role="article" aria-labelledby="turn-heading-RESP_ID_8" data-testid="assistant-message" class="message-bubble relative chat-md">
+          <h2 id="turn-heading-RESP_ID_8" class="sr-only" data-no-copy="true">Grok</h2>
+          <div class="thinking-container"><div>
+            <div><div><div class="not-prose"><div><div><div><div><div aria-label="Thought"><span><svg aria-hidden="true"></svg></span></div></div></div><div class="ps-0.5 pe-2"><span>Writing about plain-text notes</span></div></div></div></div></div></div>
+            <div class="not-prose"><div data-testid="canvas-working-indicator" data-settled="true"><span>18s 作業しました</span></div></div>
+            <div aria-hidden="true"></div>
+          </div></div>
+          <div class="relative"><div class="relative response-content-markdown markdown chat-md chat-md-links"><div class="streamdown-chat-md"><div class="sd:space-y-4 sd:whitespace-normal">
+            <p dir="auto" class="break-words"><span data-sd-animate="true">Plain-text</span> <span data-sd-animate="true">notes</span> <span data-sd-animate="true">endure</span> <span data-sd-animate="true">because</span> <span data-sd-animate="true">they</span> <span data-sd-animate="true">rest</span> <span data-sd-animate="true">on</span> <span data-sd-animate="true">nothing</span> <span data-sd-animate="true">more</span> <span data-sd-animate="true">complicated</span> <span data-sd-animate="true">than</span> <span data-sd-animate="true">characters</span> <span data-sd-animate="true">and</span></p>
+          </div><span hidden=""></span></div></div></div>
+          <section class="inline-media-container"></section>
+        </div>
+        <div class="-ml-1 w-full"></div>
+        <div><div></div></div>
+        <div role="group" aria-labelledby="turn-heading-RESP_ID_8" class="action-buttons last-response"></div>
+      </div>
+    </div>
+  </div>
+</div>
+<form><div data-testid="chat-input"><div class="query-bar group z-20 relative w-full"><div contenteditable="true" role="textbox" aria-multiline="true" aria-label="Grokに何でも聞いてください" translate="no" class="tiptap ProseMirror query-bar-editor"><p></p></div>
+  <button type="button" aria-label="添付" data-testid="attach-button"></button><button type="button" id="model-select-trigger" aria-label="モデル: ファスト"></button><button type="button" aria-label="音声入力 (⌃D)"></button>
+  <button aria-label="モデルの応答を停止" class="group flex flex-col justify-center rounded-full" tabindex="0"><div class="h-10 aspect-square flex flex-col"><svg width="1.25rem" height="1.25rem" viewBox="0 0 24 24" fill="none" aria-hidden="true"><g id="name=player-stop"><path id="vector" d="M5 7C5 5.9 5.9 5 7 5H17C18.1 5 19 5.9 19 7V17C19 18.1 18.1 19 17 19H7C5.9 19 5 18.1 5 17V7Z" fill="currentColor"></path></g></svg></div></button>
+</div></div></form>
+<!-- Earlier phase (same row, first ~0.3 s or while a request hangs): no .thinking-container yet, only a spinner:
+<div data-testid="assistant-message" ...><h2 class="sr-only" data-no-copy="true">Grok</h2><div><div class="chat-md"><div><div><span aria-hidden="true"><span class="grok-bot-lazy"><span class="grok-bot">…</span></span></span></div></div></div></div><div class="relative"><div class="response-content-markdown …"><div class="streamdown-chat-md"><div></div><span hidden=""></span></div></div></div>…
+Thinking phase (before the first word): .thinking-container > … > div[data-testid="canvas-working-indicator"] (no data-settled) with "作業内容:<span class="tabular-nums">2s</span>". -->

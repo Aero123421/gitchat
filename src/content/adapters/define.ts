@@ -30,9 +30,11 @@ export interface AdapterSpec {
   doneQuietMs?: number;
   topQuietMs?: number;
   watchAttributes?: readonly string[];
-  /** Names to strip from document.title ("ChatGPT", "Claude", "Gemini"). */
+  /** Names to strip from document.title ("ChatGPT", "Claude", "Gemini", "Grok"). */
   siteNames: string[];
   chatId(url: URL): string | null;
+  /** See Adapter.sameChatUrl. */
+  sameChatUrl?(a: URL, b: URL): boolean;
   /** See Adapter.canonicalUrl. Default: origin + pathname. */
   canonicalUrl?(url: URL): string;
   /** See Adapter.pageChatId. */
@@ -60,7 +62,7 @@ export interface AdapterSpec {
   };
   /** The service's message ID for an element, if the DOM exposes one. */
   idOf?(el: Element, role: Role): string | null;
-  /** Leave out matched elements that are not messages (e.g. a work log's commentary units). */
+  /** Leave out matched elements that must not be captured (e.g. provisional rows or commentary). */
   keep?(el: Element, role: Role): boolean;
   /** 1-based position of a message among all loaded ones, when the site exposes it. */
   positionOf?(el: Element): number | null;
@@ -71,6 +73,8 @@ export interface AdapterSpec {
   cardTitle?(card: Element): string;
   /** Custom content element for a message (e.g. a container built from several segments). */
   bodyOf?(node: MessageNode): Element | null;
+  /** The very start of the conversation is rendered, when one selector cannot say it (see `start`). */
+  atStart?(doc: Document): boolean;
   /** Precise AI state from site signals; null falls back to the generic guess. */
   aiPhase?(doc: Document): 'idle' | 'thinking' | 'streaming' | null;
   /** Messages loaded so far, if the site exposes it. */
@@ -153,6 +157,7 @@ export function defineAdapter(spec: AdapterSpec): Adapter & { readonly selectors
     ...(spec.doneQuietMs ? { doneQuietMs: spec.doneQuietMs } : {}),
     ...(spec.topQuietMs ? { topQuietMs: spec.topQuietMs } : {}),
     chatId: (url) => spec.chatId(url),
+    ...(spec.sameChatUrl ? { sameChatUrl: spec.sameChatUrl } : {}),
     canonicalUrl: (url) => spec.canonicalUrl?.(url) ?? `${url.origin}${url.pathname}`,
     ...(spec.pageChatId ? { pageChatId: (doc: Document) => spec.pageChatId!(doc) } : {}),
     title(doc) {
@@ -192,7 +197,7 @@ export function defineAdapter(spec: AdapterSpec): Adapter & { readonly selectors
       return false;
     },
     isLoadingOlder: (doc) => (s.loadingOlder ? pickAll(doc, s.loadingOlder).some(isShown) : false),
-    isAtStart: (doc) => (s.start ? exists(doc, s.start) : false),
+    isAtStart: (doc) => spec.atStart?.(doc) ?? (s.start ? exists(doc, s.start) : false),
     loadedCount: (doc) => spec.loadedCount?.(doc) ?? null,
     aiPhase: (doc) => spec.aiPhase?.(doc) ?? null,
     composer: (doc) => pick(doc, s.composer),

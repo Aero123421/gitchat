@@ -1,6 +1,6 @@
 # Site adapters
 
-ChatGPT, Claude, and Gemini update their front-end HTML frequently. To keep site-specific knowledge isolated and easy to maintain, all DOM knowledge for each service lives in a single adapter file under `src/content/adapters/`:
+ChatGPT, Claude, Gemini, and Grok update their front-end HTML frequently. To keep site-specific knowledge isolated and easy to maintain, all DOM knowledge for each service lives in a single adapter file under `src/content/adapters/`:
 
 - [`src/content/adapters/chatgpt.ts`](../src/content/adapters/chatgpt.ts) — `chatgpt.com` (new app shell, classic UI, and Work mode)
 - [`src/content/adapters/claude.ts`](../src/content/adapters/claude.ts) — `claude.ai`
@@ -19,7 +19,7 @@ Shared helpers live in [`src/content/adapters/define.ts`](../src/content/adapter
 4. **Never write HTML into the host page**:
    Gemini enforces Trusted Types on the main document. Content capture only reads from the page DOM, and the widget renders inside an isolated `<gitchat-ui>` Shadow DOM.
 5. **Account for virtualized lists, hidden panes, and `content-visibility: auto`**:
-   - **ChatGPT** can leave a stale `0×0` copy of `.thread-scroll-container` in the DOM after navigation; `transcript()` reads only the visible pane (`getBoundingClientRect().height > 0`), and nothing at all while panes exist but none is visible. The controller adds a site-independent guard: after a navigation, a read whose message ids all belong to the previous chat is not a read of the new chat (a chat branched from it is recognized by its first message of its own). ChatGPT also names the open conversation in the DOM; when that id matches the URL, the guard ends even if every message id was copied, and while it still names the previous chat, captures stop (any other mismatch is ignored: the id can lag behind the URL right after a chat is created). A URL change that keeps the chat id (an account slot or a query) is checked the same way: if the visible message ids share nothing with this visit, captures stop until they overlap again.
+   - **ChatGPT** can leave a stale `0×0` copy of `.thread-scroll-container` in the DOM after navigation; `transcript()` reads only the visible pane (`getBoundingClientRect().height > 0`), and nothing at all while panes exist but none is visible. The controller adds a site-independent guard: after a navigation, a read whose message ids all belong to the previous chat is not a read of the new chat (a chat branched from it is recognized by its first message of its own). ChatGPT also names the open conversation in the DOM; when that id matches the URL, the guard ends even if every message id was copied, and while it still names the previous chat, captures stop (any other mismatch is ignored: the id can lag behind the URL right after a chat is created). A URL change that keeps the chat id (an account slot or a query) is checked the same way: if the visible message ids share nothing with this visit, captures stop until they overlap again. An adapter’s `sameChatUrl` hook can exempt branch-only changes (Grok’s `rid`), allowing the normal branch merge and full-read request to handle replaced message ids.
    - **Gemini** uses `content-visibility: auto` on off-screen turns, which causes `element.innerText` to return an empty string. Always read text through `textContent` and structural DOM walks (`userText()` in `src/content/capture/snapshot.ts` and `toMarkdown()` in `src/content/capture/markdown.ts`).
    - **ChatGPT** `fallback-turn-N` keys are window-relative in virtualized lists and shift as the user scrolls; the adapter never uses them as message identity (it falls back to a content fingerprint instead).
 6. **Validate captures before staging**:
@@ -31,15 +31,15 @@ Shared helpers live in [`src/content/adapters/define.ts`](../src/content/adapter
 
 Verified against the live sites (2026-11):
 
-| Concept | ChatGPT (new app shell + classic) | Claude | Gemini |
-| --- | --- | --- | --- |
-| Message hook | `[data-chatgpt-search-unit-key$=":user"/":assistant"]` or `data-content-search-unit-key` (classic: `data-message-author-role`) | `[data-testid=user-message/assistant-message]` | `user-query` / `model-response` |
-| Stable id | `data-chatgpt-search-message-ids` (classic: `data-message-id`) | `data-turn-key` | `.conversation-container#<16hex>` (`<id>:u` / `<id>:a`) |
-| Thinking / streaming | `[data-response-starting]` / `[data-talvt-turn-state=in_progress]` (classic: `[data-testid="stop-button"]`) | `[data-testid="chat-input-stop"]` / `data-is-streaming=true`. The streaming row's `data-turn-key` is remembered, so an answer that finishes while that row is unmounted is staged when the row is back | `pending-request` / `.markdown[aria-busy=true]` |
-| Long chats | Virtualized (~11 turns), +5 turns per load | Virtualized (~20 rows), +32 rows per load | +10 turns per load, `content-visibility:auto` |
-| Start of chat | None (stability: `topQuietMs: 3500`) | None (stability; `aria-posinset="1"` marks only the first loaded row) | None (stability: default `topQuietMs: 2500`) |
-| Visualization frames | `*.web-sandbox.oaiusercontent.com` | `*.claudeusercontent.com` (inside `iframe[src*="/code/artifact/"]`) | `*.scf.usercontent.goog` (inside `immersive-entry-chip`) |
-| Code / inline code | `[data-code-block="true"]` box: language label in its `[data-markdown-copy="exclude"]` bar, source in `[data-code-block-source] code` (earlier: raw source in `data-chatgpt-copy-code`); inline code is `span[data-markdown-copy="inline-code"]` | `pre > code` with `language-*` | `code-block` with a language label |
+| Concept | ChatGPT (new app shell + classic) | Claude | Gemini | Grok |
+| --- | --- | --- | --- | --- |
+| Message hook | `[data-chatgpt-search-unit-key$=":user"/":assistant"]` or `data-content-search-unit-key` (classic: `data-message-author-role`) | `[data-testid=user-message/assistant-message]` | `user-query` / `model-response` | `[data-testid=user-message/assistant-message]` |
+| Stable id | `data-chatgpt-search-message-ids` (classic: `data-message-id`) | `data-turn-key` | `.conversation-container#<16hex>` (`<id>:u` / `<id>:a`) | `#response-<uuid>` (one row per message; provisional rows omitted until the last answer matches `rid`) |
+| Thinking / streaming | `[data-response-starting]` / `[data-talvt-turn-state=in_progress]` (classic: `[data-testid="stop-button"]`) | `[data-testid="chat-input-stop"]` / `data-is-streaming=true`. The streaming row's `data-turn-key` is remembered, so an answer that finishes while that row is unmounted is staged when the row is back | `pending-request` / `.markdown[aria-busy=true]` | `[data-testid=canvas-working-indicator]` without `data-settled`, the stop icon (`g[id="name=player-stop"]`) or an empty `.action-buttons.last-response` / `[data-sd-animate]`. The busy row's stable `data-plane-row="gateway:<id>"` key is remembered across response-id changes and virtualized remounts |
+| Long chats | Virtualized (~11 turns), +5 turns per load | Virtualized (~20 rows), +32 rows per load | +10 turns per load, `content-visibility:auto` | Virtualized (~15 rows), ~50 messages on load, the rest behind `[data-plane-row="chat:earlier-turns"]` |
+| Start of chat | None (stability: `topQuietMs: 3500`) | None (stability; `aria-posinset="1"` marks only the first loaded row) | None (stability: default `topQuietMs: 2500`) | `transcript:top-inset` row without the loader row (`atStart`) |
+| Visualization frames | `*.web-sandbox.oaiusercontent.com` | `*.claudeusercontent.com` (inside `iframe[src*="/code/artifact/"]`) | `*.scf.usercontent.goog` (inside `immersive-entry-chip`) | None |
+| Code / inline code | `[data-code-block="true"]` box: language label in its `[data-markdown-copy="exclude"]` bar, source in `[data-code-block-source] code` (earlier: raw source in `data-chatgpt-copy-code`); inline code is `span[data-markdown-copy="inline-code"]` | `pre > code` with `language-*` | `code-block` with a language label | `[data-code-card]` with a language label; inline code is `span.!font-mono`. The prompt is rendered as Markdown too, so it is turned back into the typed text |
 
 ChatGPT also marks copy roles on its markup (`data-markdown-copy="exclude" / "code-block" / "inline-code" / "contents"`): these are the most stable hooks it has, and the adapter relies on them. Citation links (`a[data-testid="chatgpt-citation"]`) carry a favicon `<img>`; the converter drops images inside links that have text, so the label is the source name.
 
@@ -51,18 +51,21 @@ An adapter is created with `defineAdapter(spec)` (`src/content/adapters/define.t
 
 | Field | Type | Purpose |
 | --- | --- | --- |
-| `service` | `'chatgpt' \| 'claude' \| 'gemini'` | Service identifier used in chat keys and repository folder names. |
+| `service` | `'chatgpt' \| 'claude' \| 'gemini' \| 'grok'` | Service identifier used in chat keys and repository folder names. |
 | `siteNames` | `string[]` | Suffixes stripped from `document.title` when deriving the conversation title. |
 | `chatId(url)` | `(url: URL) => string \| null` | Extracts the conversation ID from the page URL, or returns `null` on non-chat pages and temporary chats. Ids are lowercased (hex / UUID); the chat key is unchanged. Gemini accepts an optional `/u/<n>` prefix and does not put it in the id. |
+| `sameChatUrl?(a, b)` | `(a: URL, b: URL) => boolean` | Allows a same-chat-id URL change to replace every message id without triggering the foreign-transcript guard. Grok returns true only when removing `rid` makes the URLs equal; other URL changes keep the overlap check. |
 | `canonicalUrl?(url)` | `(url: URL) => string` | URL stored and sent for the chat. Default is origin + pathname (no query, no hash). Gemini also drops a leading `/u/<n>`. Not the chat key. |
 | `pageChatId?(doc)` | `(doc: Document) => string \| null` | Conversation id the page itself reports. Null (or omitted) keeps the URL-only behaviour. ChatGPT reads `data-chatgpt-conversation-selection-target` / `data-chatgpt-selection-conversation-id` on the visible pane. |
 | `root?(doc)` | `(doc: Document) => ParentNode` | Optional root container when the page keeps duplicate hidden transcripts in the DOM (used on ChatGPT). |
-| `virtualized` | `boolean` | `true` when the site removes off-screen messages from the DOM (ChatGPT, Claude). Init then harvests while scrolling and serializes visualizations at each step; `false` (Gemini) reads the loaded transcript in one pass. |
+| `virtualized` | `boolean` | `true` when the site removes off-screen messages from the DOM (ChatGPT, Claude, Grok). Init then harvests while scrolling and serializes visualizations at each step; `false` (Gemini) reads the loaded transcript in one pass. |
 | `doneQuietMs?` | `number` | Quiet period (ms) after streaming stops before an answer counts as finished (default `700`; `3000` on ChatGPT, longer than the 1.9 s false-completion gap measured in Work mode). The timer restarts while the answer text keeps changing. |
 | `topQuietMs?` | `number` | Quiet period (ms) at the top of the scroller before `init` concludes no older turns remain (default `2500`; `3500` on ChatGPT). Every site needs this full period: a start-of-chat marker such as Claude's `aria-posinset="1"` only marks the first *loaded* row. |
 | `selectors` | `SelectorPack` | Ranked CSS selector candidates for `user`, `assistant`, `userBody`, `assistantBody`, `generating`, `composer`, `scroller`, `loadingOlder`, `start`, `title`, and `dark`. |
 | `idOf?(el, role)` | `(el: Element, role: Role) => string \| null` | Returns the service's stable message ID when exposed in the DOM; falls back to a deterministic content fingerprint (`assignIds`). |
+| `keep?(el, role)` | `(el: Element, role: Role) => boolean` | Omits matched rows that must not be captured. Grok leaves out the newest prompt/answer pair until the last-response id matches the URL’s `rid`; gateway keys may retain client ids afterwards. Older virtualized windows stay readable. |
 | `bodyOf?(node)` | `(node: MessageNode) => Element \| null` | Builds or selects a custom content element when a message's prose is split across multiple sub-elements (e.g. Claude's `.standard-markdown` segments around tool-use blocks, or Gemini's `p.query-text-line`). |
+| `atStart?(doc)` | `(doc: Document) => boolean` | True when the very start of the conversation is rendered, for a site where one `start` selector cannot say it (Grok: the top row is mounted and no loader row follows). Overrides `selectors.start`. |
 | `loadedCount?(doc)` | `(doc: Document) => number \| null` | Total messages loaded so far when the site exposes a count (e.g. `aria-setsize` on Claude). |
 | `aiPhase?(doc)` | `(doc: Document) => 'idle' \| 'thinking' \| 'streaming' \| null` | Precise AI state from site-specific attributes; returning `null` falls back to `AiObserver`'s generic heuristic. |
 | `artifacts?(doc, ctx)` | `(doc: Document, ctx: { skip }) => Promise<CapturedArtifact[]>` | Requests rendered HTML from open visualization iframes via `requestFrameHtml()`. Each artifact has a stable `key` (the site's artifact id, or the owning message id plus the frame's position) and its owning `messageId`; the key names the saved file. `skip` lists keys already collected during init. |
@@ -76,13 +79,13 @@ An adapter is created with `defineAdapter(spec)` (`src/content/adapters/define.t
 | `render(el, children, kind)` | Custom Markdown output for site-specific elements (such as ChatGPT's `[data-code-block]` boxes and inline-code spans, custom bold/italic spans, citation pills, file cards, or artifact cards). Runs before `ignore` and before built-in skipping (so a `<button>` can be a card); `kind('code')` records the content kind for the widget. |
 | `headingLevel(el)` | Adjusts heading levels when a site shifts them (ChatGPT's `[data-d-component]` headings and Claude shift `##` to `<h3>`, so `Number(el.tagName[1]) - 1` restores level 2). |
 | `linkLabel(a)` | Customizes link text (e.g. stripping `+3` counters from Claude citation pills). |
-| `codeLanguage(pre)` | Extracts the language identifier when it is stored in a decorative header rather than a `language-*` class (used on Gemini). |
+| `codeLanguage(pre)` | Extracts the language identifier when it is stored in a decorative header rather than a `language-*` class (used on Gemini and Grok). |
 | `math(el)` | Extracts `{ tex, display }` when a site wraps math in custom attributes (such as ChatGPT's `[data-d-component="math"]`). |
 | `iframe(el)` / `image(el)` | Custom rendering for `<iframe>` or `<img>` elements. |
 
 ## Workflow when a site changes its HTML
 
-When ChatGPT, Claude, or Gemini updates its DOM and a selector stops matching, follow this workflow:
+When ChatGPT, Claude, Gemini, or Grok updates its DOM and a selector stops matching, follow this workflow:
 
 ### 1. Inspect the live page
 

@@ -6,7 +6,7 @@ export const DEFAULT_SETTINGS: Settings = {
   autoCommit: false,
   autoPush: false,
   repo: null,
-  services: { chatgpt: true, claude: true, gemini: true },
+  services: { chatgpt: true, claude: true, gemini: true, grok: true },
   saveVisualizations: true,
   githubClientId: '',
 };

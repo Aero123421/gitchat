@@ -2,7 +2,7 @@
 
 [English](how-it-works.md)
 
-gitchat は、ChatGPT・Claude・Gemini 上の会話を **自動ステージ → コミット → プッシュ** という git と同じ流れで、あなた自身の GitHub リポジトリに Markdown ファイルとして保存します。
+gitchat は、ChatGPT・Claude・Gemini・Grok 上の会話を **自動ステージ → コミット → プッシュ** という git と同じ流れで、あなた自身の GitHub リポジトリに Markdown ファイルとして保存します。
 
 ## アーキテクチャの概要
 
@@ -18,7 +18,7 @@ gitchat は Manifest V3 対応の Chrome 拡張機能であり、各パートは
 
 | パート | 実行環境 | 役割 |
 | --- | --- | --- |
-| `src/content/` | チャットページ（`chatgpt.com`, `claude.ai`, `gemini.google.com`） | サイトアダプタ、DOM から Markdown への変換、AI の状態監視、全文取り込み（init）、Shadow DOM ウィジェット（`<gitchat-ui>`）の表示 |
+| `src/content/` | チャットページ（`chatgpt.com`, `claude.ai`, `gemini.google.com`, `grok.com`） | サイトアダプタ、DOM から Markdown への変換、AI の状態監視、全文取り込み（init）、Shadow DOM ウィジェット（`<gitchat-ui>`）の表示 |
 | `src/frame/` | 可視化用 iframe（`*.claudeusercontent.com`, `*.web-sandbox.oaiusercontent.com`, `*.scf.usercontent.goog`） | トップレベルのチャットページからの要求に応じて、レンダリング済みの可視化 HTML をシリアライズして返す |
 | `src/background/` | Service Worker | GitHub 認証および Git Data API クライアント、ローカル DB（IndexedDB）、ステージング、ローカルコミット、マルチデバイス同期エンジン、Markdown ファイルの生成 |
 | `src/popup/` | ツールバーのポップアップ | 現在のチャットの状態表示、コミットグラフ、クイック操作 |
@@ -34,6 +34,7 @@ gitchat は Manifest V3 対応の Chrome 拡張機能であり、各パートは
 - **ChatGPT**: 会話リストが仮想化されており（DOM 上には約 11 ターンのみ保持）、上端に到達するたび過去ログが 5 ターンずつ読み込まれ、スクロール位置が再調整されます。
 - **Claude**: 会話リストが仮想化されており（DOM 上には約 20 行のみ保持）、上端で 32 行ずつ過去ログが読み込まれます。最初のターンには `aria-posinset="1"` が付与されます。
 - **Gemini**: まず直近の 10 ターンが読み込まれ、`infinite-scroller.chat-history` が上端に達するたび 10 ターンずつ追加読み込みされます。画面外のターンには `content-visibility: auto` が適用されます。2 つ目の Google アカウント（パスの `/u/<n>`）でも同じチャットです。
+- **Grok**: 会話の表示を仮想化しており（DOM 上にはメッセージ 1 件ずつ約 15 行のみ）、最初は直近およそ 50 件のメッセージを表示します。それより古いメッセージは、上端の読み込み行の後ろで追加読み込みされます。プライベートチャットはアドレスが `grok.com/` のままなので、保存の対象になりません。
 
 保存を開始すると、**init** は次の 2 段階で会話全体を取り込みます。
 
@@ -158,7 +159,7 @@ Claude のアーティファクト（`*.claudeusercontent.com`）、ChatGPT の�
 設定の **可視化を保存** がオン（初期値）になっており、取り込み時にその可視化が画面上に表示されている場合、次の手順で保存されます（プレビューパネルは、どのメッセージのものか確かな場合だけ保存します。クリックしたカード、または Claude で現在のカードとして示されているカードです）。
 
 1. コンテンツスクリプトが対象の iframe に対して `{gitchat: 1, type: 'frame/serialize', nonce}` メッセージを送ります。
-2. iframe 内の `src/frame/index.ts` は、送信元が許可されたオリジン（`https://claude.ai`、`https://chatgpt.com`、`https://gemini.google.com`）の `window.top` であることを検証したうえで、`<!doctype html>\n` + `document.documentElement.outerHTML` を返します。
+2. iframe 内の `src/frame/index.ts` は、送信元が許可されたオリジン（`https://claude.ai`、`https://chatgpt.com`、`https://gemini.google.com`、`https://grok.com`）の `window.top` であることを検証したうえで、`<!doctype html>\n` + `document.documentElement.outerHTML` を返します。
 3. バックグラウンドがその HTML を `<チャットファイル名（.md なし）>.assets/<slug>.html` として保存し、Markdown 内のアーティファクト表記を相対リンク（`> **Artifact:** [Title](<chat>.assets/<slug>.html)`）に書き換えます。
 
 ### 既知の制限事項

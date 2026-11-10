@@ -1,8 +1,8 @@
 // Domain types shared by the content script, the background service worker, the popup and the
 // options page. Keep this file free of runtime code so every bundle can import it cheaply.
 
-export type ServiceId = 'chatgpt' | 'claude' | 'gemini';
-export const SERVICES: readonly ServiceId[] = ['chatgpt', 'claude', 'gemini'] as const;
+export type ServiceId = 'chatgpt' | 'claude' | 'gemini' | 'grok';
+export const SERVICES: readonly ServiceId[] = ['chatgpt', 'claude', 'gemini', 'grok'] as const;
 
 export type Role = 'user' | 'assistant';
 

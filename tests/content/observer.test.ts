@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { grok } from '../../src/content/adapters/grok';
 import { claude } from '../../src/content/adapters/claude';
 import { AiObserver } from '../../src/content/capture/observer';
 import type { Adapter } from '../../src/content/adapters/types';
@@ -133,6 +134,29 @@ describe('AiObserver', () => {
     await vi.advanceTimersByTimeAsync(5_000);
     expect(obs.settled).toBe(true);
     expect(obs.turn).toBe(first + 1);
+    obs.stop();
+  });
+
+  it('reports a Grok answer after remounting with a server id and the same gateway key', async () => {
+    const row = (id: string, busy: boolean) => `<div data-testid="chat-transcript-scroller">
+      <div data-plane-row="gateway:client-id"><div id="response-${id}">
+        <div data-testid="assistant-message"><div class="response-content-markdown"><p ${busy ? 'data-sd-animate="true"' : ''}>answer</p></div></div>
+        <div class="action-buttons last-response">${busy ? '' : '<button></button>'}</div>
+      </div></div></div>`;
+    document.body.innerHTML = row('client-id', true);
+    const answered = vi.fn();
+    const sent = vi.fn();
+    const obs = new AiObserver(grok, document, { phase: () => {}, sent, answered });
+    obs.start();
+    await vi.advanceTimersByTimeAsync(500);
+    document.body.innerHTML = '<div data-testid="chat-transcript-scroller"></div>';
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(answered).not.toHaveBeenCalled();
+    document.body.innerHTML = row('server-id', false);
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(answered).toHaveBeenCalledTimes(1);
+    expect(sent).toHaveBeenCalledTimes(1);
+    expect(obs.settled).toBe(true);
     obs.stop();
   });
 
