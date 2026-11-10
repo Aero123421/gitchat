@@ -13,7 +13,7 @@ function isEnvelope(x) {
 }
 
 // src/shared/types.ts
-var SERVICES = ["chatgpt", "claude", "gemini"];
+var SERVICES = ["chatgpt", "claude", "gemini", "grok"];
 var ASSET_URL_PREFIX = "gitchat-asset:";
 var chatKey = (service2, chatId) => `${service2}:${chatId}`;
 
@@ -24,7 +24,7 @@ var DEFAULT_SETTINGS = {
   autoCommit: false,
   autoPush: false,
   repo: null,
-  services: { chatgpt: true, claude: true, gemini: true },
+  services: { chatgpt: true, claude: true, gemini: true, grok: true },
   saveVisualizations: true,
   githubClientId: ""
 };
@@ -863,7 +863,7 @@ async function putFile(gh, repo, path, text, message) {
 // src/background/github/repo.ts
 var README_MARKER = "<!-- gitchat -->";
 var TOPIC = "gitchat";
-var SERVICE_DIRS = ["chatgpt", "claude", "gemini"];
+var SERVICE_DIRS = ["chatgpt", "claude", "gemini", "grok"];
 var README = `${README_MARKER}
 # AI chat archive
 
@@ -874,6 +874,7 @@ This repository is managed by [gitchat](https://github.com/Aero123421/gitchat). 
 | \`chatgpt/\` | ChatGPT |
 | \`claude/\` | Claude |
 | \`gemini/\` | Gemini |
+| \`grok/\` | Grok |
 
 File names look like \`2026-11-09-chat-title--a1b2c3d4.md\`: the date of the first save, the title, and the
 start of the chat id. Interactive visualizations are saved next to their chat in a \`*.assets/\` folder.
@@ -2103,7 +2104,8 @@ function validatePayload(type, payload) {
 var SITE_SERVICES = {
   "https://chatgpt.com": "chatgpt",
   "https://claude.ai": "claude",
-  "https://gemini.google.com": "gemini"
+  "https://gemini.google.com": "gemini",
+  "https://grok.com": "grok"
 };
 function isTopDocument(sender) {
   if (sender.documentLifecycle === "prerender") return false;

@@ -3,7 +3,7 @@
     "message": "gitchat"
   },
   "extDescription": {
-    "message": "ChatGPT・Claude・Gemini の会話を Markdown として自分の GitHub リポジトリに保存。git のようにコミットとプッシュ。"
+    "message": "ChatGPT・Claude・Gemini・Grok の会話を Markdown として自分の GitHub リポジトリに保存。git のようにコミットとプッシュ。"
   },
   "commit": {
     "message": "コミット"
@@ -210,7 +210,7 @@
     "message": "はじめる"
   },
   "obWelcomeBody": {
-    "message": "gitchat は ChatGPT・Claude・Gemini の会話を Markdown として保存します。チャットが送られる先は、あなた自身の GitHub リポジトリだけです。"
+    "message": "gitchat は ChatGPT・Claude・Gemini・Grok の会話を Markdown として保存します。チャットが送られる先は、あなた自身の GitHub リポジトリだけです。"
   },
   "obWelcomeTitle": {
     "message": "AI とのチャットを、自分のリポジトリに"

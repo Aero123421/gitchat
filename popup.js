@@ -28,7 +28,7 @@
   }
 
   // src/shared/types.ts
-  var SERVICES = ["chatgpt", "claude", "gemini"];
+  var SERVICES = ["chatgpt", "claude", "gemini", "grok"];
   var chatKey = (service, chatId) => `${service}:${chatId}`;
 
   // src/content/ui/core/icons.js
@@ -129,7 +129,7 @@
     autoCommit: false,
     autoPush: false,
     repo: null,
-    services: { chatgpt: true, claude: true, gemini: true },
+    services: { chatgpt: true, claude: true, gemini: true, grok: true },
     saveVisualizations: true,
     githubClientId: ""
   };
@@ -1109,7 +1109,8 @@ label.lbl { display: block; font-size: 12px; color: var(--ink-2); margin: 0 0 6p
   var SERVICE_LINKS = [
     { name: "ChatGPT", url: "https://chatgpt.com/" },
     { name: "Claude", url: "https://claude.ai/" },
-    { name: "Gemini", url: "https://gemini.google.com/" }
+    { name: "Gemini", url: "https://gemini.google.com/" },
+    { name: "Grok", url: "https://grok.com/" }
   ];
   async function copy(text2) {
     try {
@@ -1154,7 +1155,7 @@ label.lbl { display: block; font-size: 12px; color: var(--ink-2); margin: 0 0 6p
 
   // src/popup/popup.ts
   var GRAPH_W = 284;
-  var SERVICE_NAME = { chatgpt: "ChatGPT", claude: "Claude", gemini: "Gemini" };
+  var SERVICE_NAME = { chatgpt: "ChatGPT", claude: "Claude", gemini: "Gemini", grok: "Grok" };
   async function activeTabId() {
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });

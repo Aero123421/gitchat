@@ -97,7 +97,7 @@
   }
 
   // src/shared/types.ts
-  var SERVICES = ["chatgpt", "claude", "gemini"];
+  var SERVICES = ["chatgpt", "claude", "gemini", "grok"];
 
   // src/shared/settings.ts
   var DEFAULT_SETTINGS = {
@@ -106,7 +106,7 @@
     autoCommit: false,
     autoPush: false,
     repo: null,
-    services: { chatgpt: true, claude: true, gemini: true },
+    services: { chatgpt: true, claude: true, gemini: true, grok: true },
     saveVisualizations: true,
     githubClientId: ""
   };
@@ -802,7 +802,8 @@ label.lbl { display: block; font-size: 12px; color: var(--ink-2); margin: 0 0 6p
   var SERVICE_LINKS = [
     { name: "ChatGPT", url: "https://chatgpt.com/" },
     { name: "Claude", url: "https://claude.ai/" },
-    { name: "Gemini", url: "https://gemini.google.com/" }
+    { name: "Gemini", url: "https://gemini.google.com/" },
+    { name: "Grok", url: "https://grok.com/" }
   ];
   async function copy(text) {
     try {
@@ -2235,7 +2236,7 @@ button { font: inherit; }
           const el = performance.now() - t0;
           if (el < loadMs) {
             state.captureStage = "loading";
-            state.captureCount = Math.round(total * (1 - Math.exp(-3 * el / loadMs)));
+            state.captureCount = Math.min(total, 30 * (1 + Math.floor(el / 480)));
             state.progress = 0.25 * (el / loadMs);
           } else {
             state.captureStage = "reading";
@@ -3044,6 +3045,8 @@ button { font: inherit; }
   var HX = BOX - 50;
   var HY = 112;
   var R0 = 23;
+  var SCROLL_SPEED = 260;
+  var SCROLL_LAG = 14;
   var MAX_SATS = 6;
   var MAX_PEARLS = 6;
   var NS3 = "http://www.w3.org/2000/svg";
@@ -3184,6 +3187,7 @@ button { font: inherit; }
     let breathPh = 0;
     let breathK = 1;
     let scrollImpulse = 0;
+    let scrolledAt = -Infinity;
     let petDist = 0;
     let petCool = 0;
     let startleCool = 0;
@@ -3203,6 +3207,8 @@ button { font: inherit; }
     let forming = null;
     let nextPulse = 0;
     let lastInputRect = null;
+    let capCount = 0;
+    let capStep = 0;
     const poseX = new Spring(1, { stiffness: 120, damping: 14 });
     const poseY = new Spring(1, { stiffness: 120, damping: 14 });
     const orbitL = new Spring(0, { stiffness: 60, damping: 14 });
@@ -3490,6 +3496,20 @@ button { font: inherit; }
       box.classList.toggle("sending", st.phase === "pushing");
       box.classList.toggle("err", st.phase === "error");
     }
+    function captureBeat(d) {
+      if (d.stage === "loading") {
+        if (d.count <= capCount) return;
+        capCount = d.count;
+        sqy.kick(1.6);
+        by.kick(-170);
+        blink();
+        return;
+      }
+      const step = Math.floor((d.p - 0.25) / 0.75 * 5);
+      if (step <= capStep) return;
+      capStep = step;
+      sqy.kick(-0.7);
+    }
     const unsub = store.subscribe((type, d) => {
       if (type === "staged") {
         d.items.forEach((_, i) => {
@@ -3542,6 +3562,10 @@ button { font: inherit; }
         acts.nod();
       } else if (type === "captureStart") {
         acts.perk();
+        capCount = 0;
+        capStep = 0;
+      } else if (type === "progress" && !motion.reduced) {
+        captureBeat(d);
       } else if (type === "captured") {
         shown = 0;
         d.items.slice(0, MAX_SATS + 2).forEach((_, i) => flyIn(120 + i * 110));
@@ -3577,6 +3601,7 @@ button { font: inherit; }
       onActivity();
       wake(900);
       scrollImpulse += -dy * 3.5;
+      scrolledAt = performance.now();
       look(-0.7, dy < 0 ? -0.85 : 0.75, 450);
     };
     document.addEventListener("scroll", onScroll, { capture: true, passive: true });
@@ -3673,6 +3698,7 @@ button { font: inherit; }
       anchor.set(clamp(frac * innerHeight, 60, Math.max(60, innerHeight - 60)));
       if (innerHeight > 0 && anchor.value <= 1) anchor.snap();
       anchor.step(dt);
+      const capturing = st.phase === "capturing" && !motion.reduced;
       const top = anchor.value - HY;
       box.style.top = `${top.toFixed(1)}px`;
       const px = pointer.x - (innerWidth - BOX);
@@ -3699,22 +3725,27 @@ button { font: inherit; }
         by.set(HY + clamp(dy * 0.05 * f, -6, 6));
       } else {
         bx.set(HX);
-        by.set(HY);
+        by.set(HY + (capturing ? st.captureStage === "loading" ? -7 : 3 : 0));
       }
       if (scrollImpulse) {
-        by.kick(clamp(scrollImpulse, -220, 220));
+        by.velocity = clamp(by.velocity + clamp(scrollImpulse, -220, 220), -SCROLL_SPEED, SCROLL_SPEED);
         scrollImpulse = 0;
       }
       bx.step(dt);
       by.step(dt);
+      if (!dragging && now - scrolledAt < 700 && Math.abs(by.value - by.target) > SCROLL_LAG) {
+        by.value = by.target + Math.sign(by.value - by.target) * SCROLL_LAG;
+        by.velocity = 0;
+      }
       sqx.step(dt);
       sqy.step(dt);
       const thinking = aiPhase === "thinking" && !sleeping;
       const streaming = aiPhase === "streaming" && !sleeping;
       const still = motion.reduced;
       tilt.set(thinking && !still ? Math.sin(t2 * 0.5) * 5 : 0);
-      poseX.set(thinking ? 0.97 : 1);
-      poseY.set(thinking ? 1.04 : 1);
+      const tug = capturing && st.captureStage === "loading";
+      poseX.set(tug ? 0.9 : thinking ? 0.97 : 1);
+      poseY.set(tug ? 1.13 : thinking ? 1.04 : 1);
       poseX.step(dt);
       poseY.step(dt);
       tilt.step(dt);
@@ -4684,7 +4715,7 @@ button { font: inherit; }
 
   // src/options/settings-view.ts
   var PROJECT_URL = "https://github.com/Aero123421/gitchat";
-  var SERVICE_NAME = { chatgpt: "ChatGPT", claude: "Claude", gemini: "Gemini" };
+  var SERVICE_NAME = { chatgpt: "ChatGPT", claude: "Claude", gemini: "Gemini", grok: "Grok" };
   var SECTIONS = ["account", "repository", "behavior", "appearance", "advanced", "about"];
   var SECTION_LABEL = {
     account: "secAccount",
@@ -4968,7 +4999,7 @@ button { font: inherit; }
         h(
           "div",
           { class: "rows" },
-          row(t("version"), null, h("span", { class: "mono muted" }, "0.1.8")),
+          row(t("version"), null, h("span", { class: "mono muted" }, "0.1.9")),
           // after `git pull` in the extension folder: load the new files without visiting chrome://extensions
           row(t("reloadExtension"), t("reloadExtensionHint"), h("button", { class: "btn small", type: "button", onClick: () => chrome.runtime.reload() }, t("reloadExtension"))),
           row(t("project"), null, h("a", { class: "mono", href: PROJECT_URL, target: "_blank", rel: "noopener noreferrer" }, PROJECT_URL.replace("https://", ""))),

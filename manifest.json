@@ -3,7 +3,7 @@
   "name": "__MSG_extName__",
   "short_name": "gitchat",
   "description": "__MSG_extDescription__",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "default_locale": "en",
   "minimum_chrome_version": "140",
   "icons": {
@@ -41,7 +41,8 @@
       "matches": [
         "https://chatgpt.com/*",
         "https://claude.ai/*",
-        "https://gemini.google.com/*"
+        "https://gemini.google.com/*",
+        "https://grok.com/*"
       ],
       "js": [
         "content.js"

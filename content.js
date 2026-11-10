@@ -145,6 +145,7 @@
       ...spec.doneQuietMs ? { doneQuietMs: spec.doneQuietMs } : {},
       ...spec.topQuietMs ? { topQuietMs: spec.topQuietMs } : {},
       chatId: (url) => spec.chatId(url),
+      ...spec.sameChatUrl ? { sameChatUrl: spec.sameChatUrl } : {},
       canonicalUrl: (url) => spec.canonicalUrl?.(url) ?? `${url.origin}${url.pathname}`,
       ...spec.pageChatId ? { pageChatId: (doc) => spec.pageChatId(doc) } : {},
       title(doc) {
@@ -181,7 +182,7 @@
         return false;
       },
       isLoadingOlder: (doc) => s.loadingOlder ? pickAll(doc, s.loadingOlder).some(isShown) : false,
-      isAtStart: (doc) => s.start ? exists(doc, s.start) : false,
+      isAtStart: (doc) => spec.atStart?.(doc) ?? (s.start ? exists(doc, s.start) : false),
       loadedCount: (doc) => spec.loadedCount?.(doc) ?? null,
       aiPhase: (doc) => spec.aiPhase?.(doc) ?? null,
       composer: (doc) => pick(doc, s.composer),
@@ -471,19 +472,19 @@ ${s.trim()}
       if (ann?.textContent) return { tex: ann.textContent.trim(), display: el.classList.contains("katex-display") };
     }
     if (el.tagName === "MJX-CONTAINER") {
-      const tex = el.getAttribute("data-latex") ?? el.querySelector("math")?.getAttribute("alttext");
-      if (tex) return { tex: tex.trim(), display: el.getAttribute("display") === "true" };
+      const tex2 = el.getAttribute("data-latex") ?? el.querySelector("math")?.getAttribute("alttext");
+      if (tex2) return { tex: tex2.trim(), display: el.getAttribute("display") === "true" };
     }
     for (const attr of ["data-math", "data-latex", "data-tex"]) {
-      const tex = el.getAttribute(attr);
-      if (tex) {
+      const tex2 = el.getAttribute(attr);
+      if (tex2) {
         const display = /display|block/i.test(el.className) || el.tagName === "DIV";
-        return { tex: tex.trim(), display };
+        return { tex: tex2.trim(), display };
       }
     }
     if (el.tagName.toLowerCase() === "math") {
-      const tex = el.getAttribute("alttext");
-      if (tex) return { tex: tex.trim(), display: el.getAttribute("display") === "block" };
+      const tex2 = el.getAttribute("alttext");
+      if (tex2) return { tex: tex2.trim(), display: el.getAttribute("display") === "block" };
     }
     return null;
   }
@@ -810,8 +811,8 @@ ${fencedCode(raw.replace(/\n$/, ""), codeLanguage(el))}
       headingLevel: (el) => el.hasAttribute("data-d-component") ? Number(el.tagName[1]) - 1 : Number(el.tagName[1]),
       math(el) {
         if (el.getAttribute("data-d-component") !== "math") return null;
-        const tex = el.querySelector('annotation[encoding="application/x-tex"]')?.textContent;
-        return tex ? { tex: tex.trim(), display: el.hasAttribute("data-d-block") } : null;
+        const tex2 = el.querySelector('annotation[encoding="application/x-tex"]')?.textContent;
+        return tex2 ? { tex: tex2.trim(), display: el.hasAttribute("data-d-block") } : null;
       },
       render(el, children, kind) {
         if (el.hasAttribute("data-chatgpt-copy-code") || el.getAttribute("data-code-block") === "true") {
@@ -1143,11 +1144,138 @@ ${fencedCode(raw.replace(/\n$/, ""), codeLanguage(el))}
     }
   });
 
+  // src/content/adapters/grok.ts
+  var ROW = '[id^="response-"]';
+  var GATEWAY = '[data-plane-row^="gateway:"]';
+  var INLINE_CODE = 'span[class~="!font-mono"]';
+  var STOP = 'form button:has(g[id="name=player-stop"])';
+  var CODE_CARD = "[data-code-card]";
+  var rowId = (el) => el.closest(ROW)?.id.slice("response-".length) || null;
+  function stableMessage(el) {
+    const doc = el.ownerDocument;
+    const newest = doc.querySelector(".action-buttons.last-response")?.closest(ROW);
+    if (!newest?.querySelector('[data-testid="assistant-message"]')) return true;
+    const rid = new URL(doc.location.href).searchParams.get("rid");
+    if (rid === rowId(newest)) return true;
+    const row = el.closest(GATEWAY);
+    const answer = newest.closest(GATEWAY);
+    return row !== answer && !(el.matches('[data-testid="user-message"]') && row === answer?.previousElementSibling);
+  }
+  function codeLanguage3(pre) {
+    const label = pre.closest(CODE_CARD)?.querySelector(":scope > div:first-child span")?.textContent?.trim() ?? "";
+    if (!label || !/^[A-Za-z0-9+#.\-]{1,20}$/.test(label)) return null;
+    const map = { "c++": "cpp", "c#": "csharp", "objective-c": "objectivec", shell: "bash", plaintext: "", text: "" };
+    const id = label.toLowerCase();
+    return id in map ? map[id] || null : id;
+  }
+  function tex(katex) {
+    return katex.querySelector('annotation[encoding="application/x-tex"]')?.textContent?.trim() || null;
+  }
+  function typedPrompt(body) {
+    const copy = body.cloneNode(true);
+    const doc = copy.ownerDocument;
+    const swap = (el, text2) => el.replaceWith(doc.createTextNode(text2));
+    for (const card of Array.from(copy.querySelectorAll('[data-testid="code-block"]'))) {
+      const pre = card.querySelector("pre");
+      if (!pre) continue;
+      const fence = fencedCode((pre.textContent ?? "").replace(/\n$/, ""), codeLanguage3(pre) ?? "");
+      const p = doc.createElement("p");
+      p.textContent = fence;
+      card.replaceWith(p);
+    }
+    for (const el of Array.from(copy.querySelectorAll(".katex-display"))) {
+      const t2 = tex(el);
+      if (t2) swap(el, `$$${t2}$$`);
+    }
+    for (const el of Array.from(copy.querySelectorAll(".katex"))) {
+      const t2 = tex(el);
+      if (t2) swap(el, `$${t2}$`);
+    }
+    for (const el of Array.from(copy.querySelectorAll(INLINE_CODE))) swap(el, inlineCode(el.textContent ?? ""));
+    return copy;
+  }
+  function lastToolbarEmpty(doc) {
+    const bar = doc.querySelector(".action-buttons.last-response");
+    return !!bar && !bar.querySelector("button") && !!bar.closest(ROW)?.querySelector('[data-testid="assistant-message"]');
+  }
+  var grok = defineAdapter({
+    service: "grok",
+    siteNames: ["Grok"],
+    // `?rid=` picks the branch shown; the conversation is the path uuid
+    chatId: (url) => idFromPath(url, /^\/c\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/|$)/i),
+    sameChatUrl(a, b) {
+      const withoutBranch = (url) => {
+        const copy = new URL(url.href);
+        copy.searchParams.delete("rid");
+        return copy.href;
+      };
+      return withoutBranch(a) === withoutBranch(b);
+    },
+    virtualized: true,
+    doneQuietMs: 1e3,
+    watchAttributes: ["data-sd-animate", "data-settled"],
+    selectors: {
+      user: ['[data-testid="user-message"]'],
+      assistant: ['[data-testid="assistant-message"]'],
+      userBody: [".response-content-markdown"],
+      assistantBody: [".response-content-markdown"],
+      generating: [STOP, '[data-testid="assistant-message"] [data-sd-animate]', '[data-testid="canvas-working-indicator"]:not([data-settled])'],
+      composer: ['[data-testid="chat-input"] .ProseMirror', '[data-testid="chat-input"] [contenteditable="true"]'],
+      scroller: ['[data-testid="chat-transcript-scroller"]'],
+      loadingOlder: ['[data-plane-row="chat:earlier-turns"]'],
+      title: ['[data-testid="drop-ui"] h1.sr-only'],
+      dark: ["html.dark"]
+    },
+    idOf: (el) => rowId(el),
+    keep: stableMessage,
+    bodyOf: (node) => {
+      const body = node.el.querySelector(".response-content-markdown");
+      if (!body) return null;
+      return node.role === "user" ? typedPrompt(body) : body;
+    },
+    // the top row is mounted and no older history is left to load below it
+    atStart: (doc) => !!doc.querySelector('[data-plane-row="transcript:top-inset"]') && !doc.querySelector('[data-plane-row="chat:earlier-turns"]'),
+    aiPhase(doc) {
+      if (doc.querySelector('[data-testid="assistant-message"] [data-sd-animate]')) return "streaming";
+      const working = doc.querySelector('[data-testid="canvas-working-indicator"]:not([data-settled])');
+      const pending = doc.querySelector('[data-testid="assistant-message"] .grok-bot');
+      if (working || pending || doc.querySelector(STOP) || lastToolbarEmpty(doc)) return "thinking";
+      return "idle";
+    },
+    // The gateway key survives server id assignment and virtualized remounts.
+    activeTurnId(doc) {
+      const bar = doc.querySelector(".action-buttons.last-response");
+      if (!bar || bar.querySelector("button")) return null;
+      return bar.closest(GATEWAY)?.getAttribute("data-plane-row") ?? null;
+    },
+    hasTurn: (doc, id) => Array.from(doc.querySelectorAll(GATEWAY)).some((el) => el.getAttribute("data-plane-row") === id),
+    markdown: {
+      ignore: [
+        "button",
+        '[role="button"]',
+        ".thinking-container",
+        "[data-no-copy]",
+        ".sr-only",
+        ".katex-html",
+        `${CODE_CARD} > div:first-child`,
+        "section.inline-media-container:empty",
+        ".action-buttons",
+        "span[hidden]"
+      ],
+      codeLanguage: codeLanguage3,
+      render(el) {
+        if (el.matches(INLINE_CODE) && !el.closest("pre")) return inlineCode(el.textContent ?? "");
+        return null;
+      }
+    }
+  });
+
   // src/content/adapters/registry.ts
   var BY_HOST = {
     "chatgpt.com": chatgpt,
     "claude.ai": claude,
-    "gemini.google.com": gemini
+    "gemini.google.com": gemini,
+    "grok.com": grok
   };
   var ADAPTER_HOSTS = Object.keys(BY_HOST);
   function adapterFor(hostname) {
@@ -1846,7 +1974,7 @@ button { font: inherit; }
   var W = 220;
   var X = 10;
   var TOP = 11;
-  var ROW = 24;
+  var ROW2 = 24;
   var MAX = 6;
   function createGraph(svg, store, isOpen) {
     setHTML(svg, `
@@ -1871,7 +1999,7 @@ button { font: inherit; }
     };
     function make(r, y0, snap) {
       const g = mk("g", { class: `row ${r.type}` }, rowsG);
-      mk("rect", { class: "hl", x: -6, y: -ROW / 2 + 1, width: W + 4, height: ROW - 2, rx: 6 }, g);
+      mk("rect", { class: "hl", x: -6, y: -ROW2 / 2 + 1, width: W + 4, height: ROW2 - 2, rx: 6 }, g);
       const n = {
         id: r.id,
         r,
@@ -1913,7 +2041,7 @@ button { font: inherit; }
       hasTail = store.state.commits.length > MAX;
       top0 = TOP + (hasTail ? 14 : 0);
       rs.forEach((r, i) => {
-        const y = top0 + i * ROW;
+        const y = top0 + i * ROW2;
         let n = rows.get(r.id);
         if (!n) {
           n = make(r, spawnY ?? y, snap);
@@ -1937,10 +2065,10 @@ button { font: inherit; }
       }
       const st = store.state;
       const firstAhead = rs.findIndex((r) => r.type === "commit" && !r.c.pushed);
-      const oy = top0 + ((firstAhead === -1 ? rs.length - 1 : firstAhead) - 0.5) * ROW;
+      const oy = top0 + ((firstAhead === -1 ? rs.length - 1 : firstAhead) - 0.5) * ROW2;
       originY.set(oy);
       originO.set(st.tracked && st.commits.some((c) => c.pushed) ? 1 : 0);
-      const h = rs.length ? top0 + (rs.length - 1) * ROW + 12 : 30;
+      const h = rs.length ? top0 + (rs.length - 1) * ROW2 + 12 : 30;
       height.set(h);
       if (snap) {
         originY.snap(oy);
@@ -2447,6 +2575,8 @@ button { font: inherit; }
   var HX = BOX - 50;
   var HY = 112;
   var R0 = 23;
+  var SCROLL_SPEED = 260;
+  var SCROLL_LAG = 14;
   var MAX_SATS = 6;
   var MAX_PEARLS = 6;
   var NS3 = "http://www.w3.org/2000/svg";
@@ -2587,6 +2717,7 @@ button { font: inherit; }
     let breathPh = 0;
     let breathK = 1;
     let scrollImpulse = 0;
+    let scrolledAt = -Infinity;
     let petDist = 0;
     let petCool = 0;
     let startleCool = 0;
@@ -2606,6 +2737,8 @@ button { font: inherit; }
     let forming = null;
     let nextPulse = 0;
     let lastInputRect = null;
+    let capCount = 0;
+    let capStep = 0;
     const poseX = new Spring(1, { stiffness: 120, damping: 14 });
     const poseY = new Spring(1, { stiffness: 120, damping: 14 });
     const orbitL = new Spring(0, { stiffness: 60, damping: 14 });
@@ -2893,6 +3026,20 @@ button { font: inherit; }
       box.classList.toggle("sending", st.phase === "pushing");
       box.classList.toggle("err", st.phase === "error");
     }
+    function captureBeat(d) {
+      if (d.stage === "loading") {
+        if (d.count <= capCount) return;
+        capCount = d.count;
+        sqy.kick(1.6);
+        by.kick(-170);
+        blink();
+        return;
+      }
+      const step = Math.floor((d.p - 0.25) / 0.75 * 5);
+      if (step <= capStep) return;
+      capStep = step;
+      sqy.kick(-0.7);
+    }
     const unsub = store.subscribe((type, d) => {
       if (type === "staged") {
         d.items.forEach((_, i) => {
@@ -2945,6 +3092,10 @@ button { font: inherit; }
         acts.nod();
       } else if (type === "captureStart") {
         acts.perk();
+        capCount = 0;
+        capStep = 0;
+      } else if (type === "progress" && !motion.reduced) {
+        captureBeat(d);
       } else if (type === "captured") {
         shown = 0;
         d.items.slice(0, MAX_SATS + 2).forEach((_, i) => flyIn(120 + i * 110));
@@ -2980,6 +3131,7 @@ button { font: inherit; }
       onActivity();
       wake(900);
       scrollImpulse += -dy * 3.5;
+      scrolledAt = performance.now();
       look(-0.7, dy < 0 ? -0.85 : 0.75, 450);
     };
     document.addEventListener("scroll", onScroll, { capture: true, passive: true });
@@ -3076,6 +3228,7 @@ button { font: inherit; }
       anchor.set(clamp(frac * innerHeight, 60, Math.max(60, innerHeight - 60)));
       if (innerHeight > 0 && anchor.value <= 1) anchor.snap();
       anchor.step(dt);
+      const capturing = st.phase === "capturing" && !motion.reduced;
       const top = anchor.value - HY;
       box.style.top = `${top.toFixed(1)}px`;
       const px = pointer.x - (innerWidth - BOX);
@@ -3102,22 +3255,27 @@ button { font: inherit; }
         by.set(HY + clamp(dy * 0.05 * f, -6, 6));
       } else {
         bx.set(HX);
-        by.set(HY);
+        by.set(HY + (capturing ? st.captureStage === "loading" ? -7 : 3 : 0));
       }
       if (scrollImpulse) {
-        by.kick(clamp(scrollImpulse, -220, 220));
+        by.velocity = clamp(by.velocity + clamp(scrollImpulse, -220, 220), -SCROLL_SPEED, SCROLL_SPEED);
         scrollImpulse = 0;
       }
       bx.step(dt);
       by.step(dt);
+      if (!dragging && now - scrolledAt < 700 && Math.abs(by.value - by.target) > SCROLL_LAG) {
+        by.value = by.target + Math.sign(by.value - by.target) * SCROLL_LAG;
+        by.velocity = 0;
+      }
       sqx.step(dt);
       sqy.step(dt);
       const thinking = aiPhase === "thinking" && !sleeping;
       const streaming = aiPhase === "streaming" && !sleeping;
       const still = motion.reduced;
       tilt.set(thinking && !still ? Math.sin(t2 * 0.5) * 5 : 0);
-      poseX.set(thinking ? 0.97 : 1);
-      poseY.set(thinking ? 1.04 : 1);
+      const tug = capturing && st.captureStage === "loading";
+      poseX.set(tug ? 0.9 : thinking ? 0.97 : 1);
+      poseY.set(tug ? 1.13 : thinking ? 1.04 : 1);
       poseX.step(dt);
       poseY.step(dt);
       tilt.step(dt);
@@ -4489,6 +4647,9 @@ ${m.markdown}`)}`;
     el.dispatchEvent(new Event("scroll"));
     el.dispatchEvent(new WheelEvent("wheel", { deltaY: -800, bubbles: true }));
   }
+  function fitsOnScreen(el, messages) {
+    return messages > 0 && el.scrollHeight <= el.clientHeight + 4;
+  }
   function oldestScroll(el, reversed) {
     return reversed ? Math.min(0, el.clientHeight - el.scrollHeight) : 0;
   }
@@ -4772,10 +4933,11 @@ ${text2}` : null;
         lastCount = count;
         lastHeight = height;
         onProgress({ stage: "loading", count, progress: 0.25 * (1 - Math.exp(-count / 400)) });
+        if (stable >= 1 && fitsOnScreen(scroller, count)) break;
         if (stable >= 2 && performance.now() - quietSince >= topQuietMs) break;
       }
       retarget();
-      const startConfirmed = scroller.scrollHeight <= scroller.clientHeight + 4 && adapter.messages(doc).length > 0;
+      const startConfirmed = fitsOnScreen(scroller, adapter.messages(doc).length);
       if (adapter.virtualized) {
         const step = readStep(scroller.clientHeight);
         const gapless = await walk(step, true);
@@ -5063,10 +5225,11 @@ ${text2}` : null;
         else this.sampleIds();
         return;
       }
+      const previousUrl = this.lastUrl;
       this.lastUrl = href;
       const chatId = this.settings.services[this.adapter.service] ? this.adapter.chatId(new URL(href)) : null;
       if (chatId === this.chatId) {
-        if (chatId && hrefChanged) {
+        if (chatId && hrefChanged && !this.adapter.sameChatUrl?.(new URL(previousUrl), new URL(href))) {
           this.hrefWatch = true;
           this.watchUntil = performance.now() + SAME_CHAT_WATCH_MS;
           this.confirmSameChat();
@@ -5360,21 +5523,13 @@ ${text2}` : null;
       };
       try {
         progress({ stage: "loading", count: 0, progress: 0 });
-        const started = await request("chat/init/start", { key: route.key });
-        initId = started.initId;
-        heartbeat = window.setInterval(() => {
-          if (initId && this.live(route)) void request("chat/init/progress", { key: route.key, initId, progress: lastProgress }).catch(() => {
-          });
-        }, 2e4);
-        if (!this.live(route)) throw new DOMException("Cancelled", "AbortError");
-        this.store.applyStatus(started.status);
         if (!await this.ownPage(route, OWN_PAGE_WAIT_MS)) {
           if (!this.live(route) || this.refuseCapture()) throw new DOMException(NAVIGATED, "AbortError");
           throw new InitIncompleteError("stale");
         }
         if (this.refuseCapture()) throw new DOMException(NAVIGATED, "AbortError");
         const artifacts = this.settings.saveVisualizations ? this.adapter.artifacts?.bind(this.adapter) : void 0;
-        const result = await captureFullHistory(this.adapter, document, {
+        const capture = captureFullHistory(this.adapter, document, {
           signal: abort.signal,
           onProgress: progress,
           ...artifacts ? { artifacts: (skip) => artifacts(document, { skip }).catch(() => []) } : {},
@@ -5383,6 +5538,25 @@ ${text2}` : null;
           // restore the scroll only while this chat still owns the page
           owns: () => this.live(route) && this.onPage(route)
         });
+        capture.catch(() => {
+        });
+        let started;
+        try {
+          started = await request("chat/init/start", { key: route.key });
+        } catch (e) {
+          abort.abort(new DOMException(NAVIGATED, "AbortError"));
+          await capture.catch(() => {
+          });
+          throw e;
+        }
+        initId = started.initId;
+        heartbeat = window.setInterval(() => {
+          if (initId && this.live(route)) void request("chat/init/progress", { key: route.key, initId, progress: lastProgress }).catch(() => {
+          });
+        }, 2e4);
+        if (!this.live(route)) throw new DOMException("Cancelled", "AbortError");
+        this.store.applyStatus(started.status);
+        const result = await capture;
         abort.signal.throwIfAborted();
         if (!this.live(route) || !this.onPage(route)) throw new DOMException("Cancelled", "AbortError");
         const messages = attachArtifacts(result.messages, result.artifacts);
