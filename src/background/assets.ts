@@ -64,7 +64,7 @@ const MIME: Record<string, string> = {
 };
 
 /** Links to files already in the repository: `[label](<chat>.assets/<name>)`, images included. */
-const REPO_LINK = /(!?)\[((?:\\.|[^\]\\])*\\?)\]\(([^()\s/]+\.assets\/([^()\s]+))\)/g;
+const REPO_LINK = /(!?)\[((?:\\.|[^\]\\])*)\]\(([^()\s/]+\.assets\/([^()\s]+))\)/g;
 
 /**
  * Turns a message read from the repository back into live form: every linked asset gets its bytes

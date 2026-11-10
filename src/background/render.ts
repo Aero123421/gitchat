@@ -2,6 +2,7 @@
 // message assets next to it. Format: see DESIGN.md.
 
 import { ASSET_URL_PREFIX, type CapturedAsset, type CapturedMessage } from '../shared/types';
+import { assetNameOf, MARKER_LINE, markerLine, parseMarker } from './assets';
 import type { ChatDoc } from './model';
 import { assetDir } from './paths';
 import { canonicalMarkdown } from './stage';
@@ -60,52 +61,14 @@ export function renderChat(doc: ChatDoc, path: string): RepoFile[] {
   return out;
 }
 
-/** A link to a message asset: not yet uploaded (`gitchat-asset:`) or a file next to the chat. */
-const COPY_TOKEN = /\\[^\r\n]|`+|(?:(^> \*\*(?:Artifact|File):\*\* )\[((?:\\[^\r\n]|[^\[\]\\\r\n])*)\\\]|!?\[((?:\\[^\r\n]|[^\[\]\\\r\n])*)\])\((?:gitchat-asset:[^()\s]+|[^()\s/]+\.assets\/[^()\s]+)\)/gm;
-
-/** Bounded labels cannot swallow an unmatched bracket or the next line's artifact card. */
-function copyAssetLabels(text: string): string {
-  const tokens = new RegExp(COPY_TOKEN);
-  let out = '';
-  let from = 0;
-  for (let m; (m = tokens.exec(text)); ) {
-    if (m[0].startsWith('`')) {
-      // Only a run of the same length closes an inline code span (which may cross lines).
-      const runs = /`+/g;
-      runs.lastIndex = tokens.lastIndex;
-      for (let end; (end = runs.exec(text)); ) {
-        if (end[0].length !== m[0].length) continue;
-        tokens.lastIndex = runs.lastIndex;
-        break;
-      }
-    } else if (m[2] !== undefined || m[3] !== undefined) {
-      // Captured cards escape brackets but may leave a title's trailing backslash literal.
-      const label = (m[3] ?? m[2]!).replace(/\\([\\[\]])/g, '$1');
-      out += text.slice(from, m.index) + (m[1] ? `${m[1]}${label}\\` : label);
-      from = tokens.lastIndex;
-    }
-  }
-  return out + text.slice(from);
-}
-
-function copyBody(md: string): string {
-  let fence: { prefix: string; marker: string } | null = null;
-  let text = '';
-  let out = '';
-  for (const line of md.split(/(?<=\n)/)) {
-    // Quotes (including nested quotes) and list indentation belong to the fence's container.
-    // Keep that prefix so a fence in a different container cannot close this one.
-    const f = /^([ \t]*(?:>[ \t]*)*)(`{3,}|~{3,})([^\r\n]*)/.exec(line);
-    if (fence || f) {
-      out += copyAssetLabels(text) + line;
-      text = '';
-      if (!fence) fence = { prefix: f![1]!, marker: f![2]! };
-      else if (f && f[1] === fence.prefix && f[2]![0] === fence.marker[0] && f[2]!.length >= fence.marker.length && !f[3]!.trim()) {
-        fence = null;
-      }
-    } else text += line;
-  }
-  return out + copyAssetLabels(text);
+function copyCards(md: string): string {
+  // Only gitchat's whole-line cards lose asset links; other Markdown stays intact.
+  return md.replace(MARKER_LINE, (line, kind: string, rest: string) => {
+    const marker = parseMarker(kind, rest);
+    return marker.target !== null && assetNameOf(marker.target) !== null
+      ? markerLine({ ...marker, target: null })
+      : line;
+  });
 }
 
 /**
@@ -116,7 +79,7 @@ function copyBody(md: string): string {
 export function renderCopy(doc: Pick<ChatDoc, 'title' | 'messages'>): string {
   const lines = [`# ${chatTitle(doc.title)}`, ''];
   for (const m of doc.messages) {
-    const body = canonicalMarkdown(copyBody(m.markdown));
+    const body = canonicalMarkdown(copyCards(m.markdown));
     lines.push(`## ${ROLE_HEADING[m.role]}`, '');
     if (body) lines.push(body, '');
   }

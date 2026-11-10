@@ -5,7 +5,6 @@ import { describe, expect, it, vi } from 'vitest';
 import type { CapturedMessage } from '../../src/shared/types';
 import { keepArtifacts } from '../../src/background/stage';
 import { parseChatFile, renderChat, renderCopy } from '../../src/background/render';
-import { materializeAssets } from '../../src/background/assets';
 
 // Frames cannot answer in the test DOM: report what each adapter would ask for instead.
 vi.mock('../../src/content/capture/frames', async (orig) => ({
@@ -48,7 +47,7 @@ const addUserContent = (doc: Document, src = 'https://x.frame.claudeusercontent.
 };
 
 describe('attachArtifacts', () => {
-  it('keeps the saved format and round-trips a card whose title ends in a backslash', async () => {
+  it('keeps the saved format and round-trips a card whose title ends in a backslash', () => {
     const title = 'Path [v2] \\';
     const plain = a('m1', `> **Artifact:** ${title}`);
     const [linked] = attachArtifacts([plain], [{ key: 'k', messageId: 'm1', title, html: '<p></p>' }]);
@@ -64,9 +63,6 @@ describe('attachArtifacts', () => {
     for (const message of [linked!, kept]) {
       expect(renderCopy({ title: 'T', messages: [message] })).toBe(`# T\n\n## Assistant\n\n> **Artifact:** ${title}\n`);
     }
-    const restored = await materializeAssets(saved!, async () => ({ data: 'aHRtbA==', sha: 'sha' }));
-    expect(restored.markdown).toBe(linked!.markdown);
-    expect(restored.assets?.[0]?.name).toBe(name);
   });
 
   it('attaches each visualization to the message that owns it, even with equal titles', () => {

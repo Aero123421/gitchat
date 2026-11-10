@@ -186,34 +186,32 @@ describe('parseChatFile', () => {
 describe('renderCopy', () => {
   const copy = (markdown: string) => renderCopy(doc({ messages: [{ id: 'a', role: 'assistant', markdown }] }));
 
-  it('leaves asset references in fenced and inline code untouched', () => {
-    const link = '[Chart](gitchat-asset:chart.html)';
-    const code = `\`\`\`md\n${link}\n\`\`\`\n\n~~~~\n${link}\n~~~~\n\n\`${link}\` and \`\`a \` ${link}\`\`\n\n\`across\n${link}\nlines\``;
-    expect(copy(`${code}\n\n${link}`)).toContain(`${code}\n\nChart\n`);
+  it('preserves ordinary links, images, inline code and plain cards exactly', () => {
+    const markdown = [
+      '[docs](https://example.com/a) [asset](gitchat-asset:a.html) [saved](chat.assets/a.html)',
+      '![Diagram](gitchat-asset:diagram.html) ![](chat.assets/empty.png) ![web](https://example.com/a.png)',
+      '\\[literal](gitchat-asset:a.html) `[Chart](gitchat-asset:chart.html)`',
+      '``a ` [Chart](chat.assets/chart.html)``',
+      '`across\n[Chart](gitchat-asset:chart.html)\nlines`',
+      '> **Artifact:** Plain [v2] \\',
+      '> **File:** report.html  ',
+      '> **Artifact:** [Website](https://example.com/a)',
+    ].join('\n');
+    expect(copy(markdown)).toBe(`# State "design": v2\n\n## Assistant\n\n${markdown}\n`);
   });
 
-  it.each(['> ', '> >', '    ', '  >   '])('preserves fences with prefix %j and rewrites links outside them', (prefix) => {
-    const link = '[Chart](gitchat-asset:chart.html)';
-    const code = `${prefix}~~~md\n${prefix}${link}\n${prefix}~~~`;
-    const lead = prefix === '    ' ? '- Item\n\n' : '';
-    expect(copy(`${lead}${code}\n\n${link}`)).toContain(`${lead}${code}\n\nChart\n`);
-  });
-
-  it('only closes a nested fence with the same prefix and matching marker', () => {
-    const link = '[Chart](gitchat-asset:chart.html)';
-    const code = `> ~~~~md\n~~~\n> ~~~\n> \`\`\`\n> > ~~~~\n> ${link}\n> ~~~~~`;
-    expect(copy(`${code}\n\n${link}`)).toContain(`${code}\n\nChart\n`);
-  });
-
-  it('does not let an unmatched label swallow the next artifact card', () => {
-    expect(copy('[intro\n\n> **Artifact:** [Chart](gitchat-asset:chart.html)'))
-      .toContain('[intro\n\n> **Artifact:** Chart\n');
-    expect(copy('[intro [Chart](chat.assets/chart.html)')).toContain('[intro Chart\n');
-  });
-
-  it('replaces asset images with alt text and preserves other images and escaped links', () => {
-    expect(copy('![Diagram](gitchat-asset:diagram.html) ![](chat.assets/empty.png) ![web](https://example.com/a.png) \\[literal](gitchat-asset:a.html)'))
-      .toContain('Diagram  ![web](https://example.com/a.png) \\[literal](gitchat-asset:a.html)');
+  it.each(['', '> ', '> > ', '    ', '- ', '1. ', '  >   '])('preserves fenced code with prefix %j', (prefix) => {
+    const markdown = [
+      `${prefix}~~~md`,
+      `${prefix}[Chart](gitchat-asset:chart.html)`,
+      `${prefix}![Diagram](chat.assets/diagram.png)`,
+      `${prefix}~~~`,
+      '',
+      `${prefix}\`\`\`md`,
+      `${prefix}[Chart](chat.assets/chart.html)`,
+      `${prefix}\`\`\``,
+    ].join('\n');
+    expect(copy(markdown)).toBe(`# State "design": v2\n\n## Assistant\n\n${markdown}\n`);
   });
 
   it('unescapes brackets and backslashes in asset labels', () => {

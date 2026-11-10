@@ -886,7 +886,7 @@ describe('engine: copy as Markdown', () => {
     const before = await t.engine.status(KEY);
     const remoteCommits = t.repo.commits.size;
     const md = await t.engine.copyMarkdown(KEY);
-    expect(md).toBe('# T\n\n## User\n\nquestion u1\n\n## Assistant\n\nsee Chart\n\n## User\n\nquestion u2\n');
+    expect(md).toBe('# T\n\n## User\n\nquestion u1\n\n## Assistant\n\nsee [Chart](gitchat-asset:chart.html)\n\n## User\n\nquestion u2\n');
     const after = await t.engine.status(KEY);
     expect(after.staged).toEqual(before.staged);
     expect(after.commits).toEqual([]);
