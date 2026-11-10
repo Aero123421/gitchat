@@ -2,11 +2,10 @@
 //
 // 1. Loading — scroll the conversation to the very top again and again until the site stops adding
 //    older messages (it loads them lazily, in batches). Reported as a growing message count. Only a
-//    long quiet period at the top counts as "the start": no site gives a trustworthy marker (Claude's
+//    long quiet period at the top ends loading: no site gives a trustworthy start marker (Claude's
 //    aria-posinset="1" is the first *loaded* row). Running out of time is an error, never a success.
-//    Whether the history really starts there is known only when the whole transcript fits on screen,
-//    or the chat is too short to be loaded in batches (`startConfirmed`); otherwise the capture is
-//    complete from its first message on, and the background keeps saved messages above it.
+//    The start is confirmed only when the transcript fits on screen or the chat is too short to
+//    load in batches. Otherwise the background keeps saved messages above this capture.
 // 2. Reading — virtualized lists (only ~20 rows in the DOM at a time) are walked from the top to the
 //    bottom in overlapping steps, collecting every message by ID and every visualization while it is
 //    mounted. After each step we wait until rows are rendered in the viewport. Coverage is checked:
@@ -18,11 +17,13 @@
 // 3. If the AI is still answering, wait for it to finish; then read the end again — that settled read
 //    replaces earlier, provisional text and visualizations.
 // The original scroll position is restored afterwards (also on cancel or failure) while the
-// conversation still owns the scroller.
+// conversation still owns the scroller. The anchor is the message that was visible, so growth
+// below the viewport does not move the user. Switching to another scroller measures that
+// element again.
 
 import type { Adapter, CapturedArtifact } from '../adapters/types';
 import type { CapturedMessage } from '../../shared/types';
-import { assignIds, captureMessage } from './snapshot';
+import { assignIds, captureMessage, scrollReversed } from './snapshot';
 
 export interface InitProgress {
   stage: 'loading' | 'reading';
@@ -119,11 +120,89 @@ function settle(root: Node, quietMs: number, maxMs: number, signal: AbortSignal)
   });
 }
 
-function scrollToTop(el: HTMLElement): void {
-  el.scrollTop = 0;
+/** Move toward older messages. A reversed scroller's oldest end is the negative `scrollTop`. */
+function scrollTowardOldest(el: HTMLElement, reversed: boolean): void {
+  el.scrollTop = reversed ? Math.min(0, el.clientHeight - el.scrollHeight) : 0;
   el.dispatchEvent(new Event('scroll'));
-  // some lists only react to user-like wheel input
+  // some lists only react to user-like wheel input (wheel up, toward older turns)
   el.dispatchEvent(new WheelEvent('wheel', { deltaY: -800, bubbles: true }));
+}
+
+/** `scrollTop` of the oldest end. Reversed lists keep the newest end at 0. */
+function oldestScroll(el: HTMLElement, reversed: boolean): number {
+  return reversed ? Math.min(0, el.clientHeight - el.scrollHeight) : 0;
+}
+
+/** `scrollTop` of the newest end. */
+function newestScroll(el: HTMLElement, reversed: boolean): number {
+  return reversed ? 0 : Math.max(0, el.scrollHeight - el.clientHeight);
+}
+
+function atOldest(el: HTMLElement, reversed: boolean): boolean {
+  return reversed ? el.scrollTop <= oldestScroll(el, true) + 2 : el.scrollTop <= 2;
+}
+
+function atNewest(el: HTMLElement, reversed: boolean): boolean {
+  return reversed ? el.scrollTop >= -2 : el.scrollTop >= newestScroll(el, false) - 2;
+}
+
+function clampScroll(el: HTMLElement, reversed: boolean, y: number): number {
+  return reversed ? Math.max(oldestScroll(el, true), Math.min(0, y)) : Math.max(0, Math.min(newestScroll(el, false), y));
+}
+
+/** 0 at the oldest end, 1 at the newest. */
+function walkProgress(el: HTMLElement, reversed: boolean): number {
+  if (reversed) {
+    const span = -oldestScroll(el, true);
+    return span > 0 ? (el.scrollTop - oldestScroll(el, true)) / span : 1;
+  }
+  const max = el.scrollHeight - el.clientHeight;
+  return max > 0 ? el.scrollTop / max : 1;
+}
+
+/** The message that was on screen, so restore does not use distance-from-bottom. */
+interface ViewAnchor {
+  /** Service id, or role plus the start of the text when the row has none. */
+  key: string | null;
+  /** Distance from the scroller's top edge to the message's top edge. */
+  viewportOffset: number;
+  scrollTop: number;
+  /** Fallback when no message can be measured (no layout). */
+  fromBottom: number;
+  placed: boolean;
+}
+
+function anchorKey(node: { id: string | null; role: string; el: Element }): string | null {
+  if (node.id) return node.id;
+  const text = (node.el.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 120);
+  return text ? `${node.role}\n${text}` : null;
+}
+
+function measureAnchor(adapter: Adapter, doc: Document, scroller: HTMLElement): ViewAnchor {
+  const fromBottom = scroller.scrollHeight - scroller.scrollTop;
+  const blank: ViewAnchor = { key: null, viewportOffset: 0, scrollTop: scroller.scrollTop, fromBottom, placed: false };
+  const box = scroller.getBoundingClientRect();
+  if (box.height <= 0) return blank;
+  for (const n of adapter.messages(doc)) {
+    const r = n.el.getBoundingClientRect();
+    if (r.height <= 0 || r.bottom <= box.top + 1 || r.top >= box.bottom - 1) continue;
+    const key = anchorKey(n);
+    if (!key) continue;
+    return { key, viewportOffset: r.top - box.top, scrollTop: scroller.scrollTop, fromBottom, placed: true };
+  }
+  return blank;
+}
+
+/** Put the anchored message back where it was. False when it cannot be measured. */
+function restoreAnchor(adapter: Adapter, doc: Document, scroller: HTMLElement, anchor: ViewAnchor): boolean {
+  if (!anchor.placed || !anchor.key) return false;
+  const el = adapter.messages(doc).find((n) => anchorKey(n) === anchor.key)?.el;
+  if (!(el instanceof HTMLElement)) return false;
+  const box = scroller.getBoundingClientRect();
+  const r = el.getBoundingClientRect();
+  if (box.height <= 0 || r.height <= 0) return false;
+  scroller.scrollTop = scroller.scrollTop + (r.top - box.top - anchor.viewportOffset);
+  return true;
 }
 
 /**
@@ -249,16 +328,18 @@ export async function captureFullHistory(adapter: Adapter, doc: Document, opts: 
   /**
    * The page can swap the scroller while older turns load. A disconnected node is 0×0, so keeping
    * it would mark the start as confirmed. A replacement is adopted only while the latched node is
-   * still in the document; once that node is gone the read cannot be trusted.
+   * still in the document; once that node is gone the read cannot be trusted. The visible message
+   * is measured again on the new element: the previous distance belongs to the old one.
    */
+  let anchor = measureAnchor(adapter, doc, scroller);
   const retarget = (): void => {
     if (!scroller.isConnected) throw new InitIncompleteError('no-scroller');
     const next = adapter.scrollContainer(doc);
     if (!next?.isConnected) throw new InitIncompleteError('no-scroller');
+    if (next === scroller) return;
     scroller = next;
+    anchor = measureAnchor(adapter, doc, scroller);
   };
-  const restoreTo = scroller.scrollTop;
-  const fromBottom = scroller.scrollHeight - scroller.scrollTop;
   const maxLoadMs = opts.maxLoadMs ?? 10 * 60_000;
   const rowWaitMs = opts.rowWaitMs ?? 3000;
   const stallMs = opts.stallMs ?? 25_000;
@@ -303,7 +384,10 @@ export async function captureFullHistory(adapter: Adapter, doc: Document, opts: 
     }
     for (const p of adapter.rowPositions?.(doc) ?? []) if (!messagePos.has(p)) otherPos.add(p);
     const kept = rows.filter((r) => hasContent(r.msg));
-    const msgs = assignIds(kept.map((r) => r.msg));
+    const msgs = assignIds(
+      kept.map((r) => r.msg),
+      acc.list(),
+    );
     kept.forEach((r, i) => {
       if (r.pos) posById.set(msgs[i]!.id, r.pos);
     });
@@ -325,8 +409,7 @@ export async function captureFullHistory(adapter: Adapter, doc: Document, opts: 
   };
   const scrollTo = async (y: number) => {
     if (!scroller.isConnected) throw new InitIncompleteError('no-scroller');
-    const max = scroller.scrollHeight - scroller.clientHeight;
-    scroller.scrollTop = Math.max(0, Math.min(max, y));
+    scroller.scrollTop = clampScroll(scroller, scrollReversed(adapter, scroller), y);
     scroller.dispatchEvent(new Event('scroll'));
     await waitForRows(adapter, doc, scroller, signal, rowWaitMs);
   };
@@ -337,17 +420,19 @@ export async function captureFullHistory(adapter: Adapter, doc: Document, opts: 
   const walk = async (step: number, report: boolean): Promise<boolean> => {
     let gapless = true;
     lastWindow = null;
-    await scrollTo(0);
-    let furthest = -1;
+    const reversed = scrollReversed(adapter, scroller);
+    await scrollTo(oldestScroll(scroller, reversed));
+    // -Infinity so a reversed list, whose first position is negative, still counts as movement
+    let furthest = -Infinity;
     let known = -1;
     let movedAt = performance.now();
     for (;;) {
       signal.throwIfAborted();
       if (!harvest()) gapless = false;
       await collectArtifacts();
-      const max = scroller.scrollHeight - scroller.clientHeight;
-      if (report) onProgress({ stage: 'reading', count: acc.size, progress: 0.25 + 0.75 * (max > 0 ? scroller.scrollTop / max : 1) });
-      if (scroller.scrollTop >= max - 2) return gapless;
+      const axis = scrollReversed(adapter, scroller);
+      if (report) onProgress({ stage: 'reading', count: acc.size, progress: 0.25 + 0.75 * walkProgress(scroller, axis) });
+      if (atNewest(scroller, axis)) return gapless;
       if (scroller.scrollTop > furthest + 1 || acc.size > known) {
         furthest = Math.max(furthest, scroller.scrollTop);
         known = acc.size;
@@ -392,21 +477,19 @@ export async function captureFullHistory(adapter: Adapter, doc: Document, opts: 
     for (;;) {
       if (performance.now() - loadStart >= maxLoadMs) throw new InitIncompleteError('timeout');
       retarget();
-      scrollToTop(scroller);
+      scrollTowardOldest(scroller, scrollReversed(adapter, scroller));
       await settle(scroller, 450, 4000, signal);
       const count = adapter.loadedCount(doc) ?? adapter.messages(doc).length;
       const height = scroller.scrollHeight;
-      const unchanged = count === lastCount && height === lastHeight && scroller.scrollTop <= 2;
+      const unchanged = count === lastCount && height === lastHeight && atOldest(scroller, scrollReversed(adapter, scroller));
       stable = unchanged && !adapter.isLoadingOlder(doc) ? stable + 1 : 0;
       if (stable === 1) quietSince = performance.now();
       lastCount = count;
       lastHeight = height;
       onProgress({ stage: 'loading', count, progress: 0.25 * (1 - Math.exp(-count / 400)) });
-      // sites re-anchor the scroll after every batch and none marks the true start reliably, so only
-      // a long, complete quiet period at the top counts as having reached it
+      // Sites re-anchor after each batch. Quiet ends loading but does not prove the true start.
       if (stable >= 2 && performance.now() - quietSince >= topQuietMs) break;
     }
-    // the start is certain only when nothing is hidden above or below: the whole transcript fits
     retarget();
     const startConfirmed = scroller.scrollHeight <= scroller.clientHeight + 4 && adapter.messages(doc).length > 0;
 
@@ -463,23 +546,24 @@ export async function captureFullHistory(adapter: Adapter, doc: Document, opts: 
       }
     }
     // the settled end of the conversation replaces anything provisional read before
-    if (adapter.virtualized) await scrollTo(scroller.scrollHeight);
+    if (adapter.virtualized) await scrollTo(newestScroll(scroller, scrollReversed(adapter, scroller)));
     retarget();
     if (!rowsInView(adapter, doc, scroller)) throw new InitIncompleteError('coverage');
     harvest(true);
     await collectArtifacts(true);
     onProgress({ stage: 'reading', count: acc.size, progress: 1 });
-    // a chat this short is never split into loading batches on any supported site (ChatGPT renders
-    // at least 5 turns before loading older ones, Claude 32 rows, Gemini 10 turns): it is whole even
-    // when a long answer makes it taller than the screen (e.g. right after editing the first question)
+    // No supported site loads so few messages in batches; a small chat can have a tall answer.
     const whole = startConfirmed || acc.size <= SMALL_CHAT_MESSAGES;
     return { messages: acc.list(), artifacts: [...arts.values()], readAt, startConfirmed: whole };
   } finally {
-    // back to where the user was (measured from the bottom: the list grew above them) — also after
-    // a cancel or a failure, but only while this conversation still owns the scroller
-    if (scroller.isConnected && (opts.owns?.() ?? true)) {
-      scroller.scrollTop = Math.max(0, scroller.scrollHeight - fromBottom);
-      if (Math.abs(scroller.scrollTop - restoreTo) < 4) scroller.scrollTop = restoreTo;
+    // back to the message that was visible — also after a cancel or a failure, but only while this
+    // conversation still owns the scroller. Growth below that message does not change its place.
+    if (scroller.isConnected && (opts.owns?.() ?? true) && !restoreAnchor(adapter, doc, scroller, anchor)) {
+      if (scrollReversed(adapter, scroller)) scroller.scrollTop = anchor.scrollTop;
+      else {
+        scroller.scrollTop = Math.max(0, scroller.scrollHeight - anchor.fromBottom);
+        if (Math.abs(scroller.scrollTop - anchor.scrollTop) < 4) scroller.scrollTop = anchor.scrollTop;
+      }
     }
   }
 }

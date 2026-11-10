@@ -477,7 +477,7 @@ describe('Controller', () => {
     expect(snap?.messages.map((m) => m.id)).toEqual(['a-0', 'a-1', 'b-2']);
   });
 
-  it('says the start of the chat is certain only when the whole transcript fit on screen (review 1-3)', async () => {
+  it('confirms the start only when the transcript fits or the chat is small', async () => {
     handlers['chat/open'] = (p) => status(`claude:${p.chatId as string}`, { tracked: false });
     handlers['chat/init/start'] = (p) => ({ status: status(p.key as string, { tracked: false, phase: 'capturing' }), initId: 'i-fit' });
     handlers['chat/init/done'] = (p) => status(`claude:${(p.snapshot as ChatSnapshot).chatId}`);
@@ -487,8 +487,7 @@ describe('Controller', () => {
     const done = sent.find((x) => x.type === 'chat/init/done')?.payload.snapshot as ChatSnapshot;
     expect(done.complete).toBe(true);
     expect(done.startConfirmed).toBe(true);
-    // a longer chat, taller than its scroller: older history might not have loaded (a chat of at
-    // most 8 messages counts as whole even when taller: no site loads so few in batches)
+    // A quiet oldest end does not prove that older history finished loading.
     sent.length = 0;
     showChat('a', 12, 2000);
     c.store.switchTo('claude:a', status('claude:a', { tracked: false }));

@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { chatgpt } from '../../src/content/adapters/chatgpt';
-import { captureVisible } from '../../src/content/capture/snapshot';
+import { captureVisible, isAtEnd, scrollReversed } from '../../src/content/capture/snapshot';
 
 const load = (name: string) => {
   document.body.innerHTML = readFileSync(path.resolve('tests/fixtures/chatgpt', name), 'utf8');
@@ -19,6 +19,30 @@ const answer = () => {
 };
 
 describe('chatgpt adapter (new app-shell UI fixtures)', () => {
+  it('waits out long history batches', () => {
+    expect(chatgpt.topQuietMs).toBeGreaterThan(6000);
+  });
+
+  it('uses the active scroller direction for classic and reverse layouts', () => {
+    const el = document.createElement('div');
+    document.body.replaceChildren(el);
+    Object.defineProperty(el, 'clientHeight', { value: 300 });
+    Object.defineProperty(el, 'scrollHeight', { value: 1200 });
+    const adapter = { ...chatgpt, scrollContainer: () => el };
+    el.style.flexDirection = 'column';
+    el.scrollTop = 400;
+    expect(scrollReversed(adapter, el)).toBe(false);
+    expect(isAtEnd(adapter, document)).toBe(false);
+    el.scrollTop = 900;
+    expect(isAtEnd(adapter, document)).toBe(true);
+    el.style.flexDirection = 'column-reverse';
+    el.scrollTop = -400;
+    expect(scrollReversed(adapter, el)).toBe(true);
+    expect(isAtEnd(adapter, document)).toBe(false);
+    el.scrollTop = 0;
+    expect(isAtEnd(adapter, document)).toBe(true);
+  });
+
   it('finds messages with their uuids', () => {
     load('basic.html');
     const msgs = chatgpt.messages(document);

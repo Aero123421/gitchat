@@ -59,19 +59,105 @@ export function captureMessage(adapter: Adapter, node: MessageNode): Omit<Captur
   return { id: node.id, role: 'assistant', markdown, kinds };
 }
 
+type IdInput = Omit<CapturedMessage, 'id'> & { id: string | null };
+
 /**
  * Give every message an ID: the service's own when present, otherwise a content fingerprint made
  * unique by its occurrence (two identical "OK" replies get different IDs).
+ *
+ * `prior` is every message already read in this conversation, in order. A later viewport window
+ * reuses those ids only with a stable anchor or an unambiguous exact overlap. A growing body can
+ * keep its fragment's id within that overlap; ambiguous windows get fresh ids and fail coverage.
  */
-export function assignIds(list: Array<Omit<CapturedMessage, 'id'> & { id: string | null }>): CapturedMessage[] {
-  const seen = new Map<string, number>();
+export function assignIds(list: IdInput[], prior: readonly CapturedMessage[] = []): CapturedMessage[] {
+  const taken = new Set(prior.map((m) => m.id));
+  if (!prior.length) return stampFresh(list, taken);
+  const offset = alignOffset(prior, list);
+  const out: CapturedMessage[] = [];
+  for (let i = 0; i < list.length; i++) {
+    const m = list[i]!;
+    if (m.id) {
+      out.push(m as CapturedMessage);
+      taken.add(m.id);
+      continue;
+    }
+    const aligned = prior[offset + i];
+    if (aligned && sameRow(aligned, m) && !out.some((x) => x.id === aligned.id)) {
+      out.push({ ...m, id: aligned.id });
+      taken.add(aligned.id);
+      continue;
+    }
+    const id = freshId(m, taken);
+    taken.add(id);
+    out.push({ ...m, id });
+  }
+  return out;
+}
+
+/** Align only with an unambiguous overlap; text prefixes alone do not identify a turn. */
+function alignOffset(prior: readonly CapturedMessage[], list: IdInput[]): number {
+  let bestOff = prior.length;
+  let bestScore = 0;
+  let tied = false;
+  for (let off = 0; off < prior.length; off++) {
+    let stable = 0;
+    let exact = 0;
+    let conflict = false;
+    for (let i = 0; i < list.length; i++) {
+      const p = prior[off + i];
+      const m = list[i]!;
+      if (!p) continue;
+      if (m.id) {
+        if (m.id !== p.id || m.role !== p.role) {
+          conflict = true;
+          break;
+        }
+        stable++;
+      } else if (m.role === p.role && m.markdown === p.markdown) exact++;
+    }
+    if (conflict || (!stable && exact < 2)) continue;
+    const score = stable * (list.length + 1) + exact;
+    if (score > bestScore) {
+      bestScore = score;
+      bestOff = off;
+      tied = false;
+    } else if (score === bestScore) tied = true;
+  }
+  return tied ? prior.length : bestOff;
+}
+
+/** Same row: equal text, or one body is the other extended (a streamed answer finishing). */
+function sameRow(prior: CapturedMessage, m: IdInput): boolean {
+  if (m.id && m.id !== prior.id) return false;
+  if (prior.role !== m.role) return false;
+  if (prior.markdown === m.markdown) return true;
+  const short = prior.markdown.length <= m.markdown.length ? prior.markdown : m.markdown;
+  const long = short === prior.markdown ? m.markdown : prior.markdown;
+  return short.length > 0 && long.startsWith(short);
+}
+
+function stampFresh(list: IdInput[], taken: Set<string>): CapturedMessage[] {
   return list.map((m) => {
-    if (m.id) return m as CapturedMessage;
-    const base = `${m.role[0]}-${fingerprint(`${m.role}\n${m.markdown}`)}`;
-    const n = seen.get(base) ?? 0;
-    seen.set(base, n + 1);
-    return { ...m, id: n ? `${base}-${n}` : base };
+    if (m.id) {
+      taken.add(m.id);
+      return m as CapturedMessage;
+    }
+    const id = freshId(m, taken);
+    taken.add(id);
+    return { ...m, id };
   });
+}
+
+/** Fingerprint id, skipping ones already used in this chat or this window. */
+function freshId(m: IdInput, taken: Set<string>): string {
+  const base = `${m.role[0]}-${fingerprint(`${m.role}\n${m.markdown}`)}`;
+  let n = 0;
+  let id = base;
+  while (taken.has(id)) {
+    n += 1;
+    id = `${base}-${n}`;
+  }
+  return id;
 }
 
 /** Everything currently rendered on the page (may be a window of a longer chat). */
@@ -116,16 +202,33 @@ export function readPage(adapter: Adapter, doc: Document): PageRead {
 }
 
 /**
+ * The scroller's oldest history is toward negative `scrollTop` and 0 is the newest end
+ * (`flex-direction: column-reverse`), as reported by the current scroller's computed style.
+ */
+export function scrollReversed(_adapter: Adapter, el?: HTMLElement | null): boolean {
+  if (!el) return false;
+  try {
+    const dir = getComputedStyle(el).flexDirection;
+    return dir === 'column-reverse';
+  } catch {
+    return false;
+  }
+}
+
+/**
  * True when the transcript shows its last message: everything after the first message we already
  * know is on the page, so turns missing from the capture really are gone (a branch edit). Lists
- * that keep every loaded message in the DOM always qualify.
+ * that keep every loaded message in the DOM always qualify. A reversed scroller is at that end
+ * when `scrollTop` is near 0, not when the forward distance-to-bottom is small.
  */
 export function isAtEnd(adapter: Adapter, doc: Document): boolean {
   if (!adapter.virtualized) return true;
   const sc = adapter.scrollContainer(doc);
   if (!sc) return false;
+  const slack = Math.max(40, sc.clientHeight * 0.5);
+  if (scrollReversed(adapter, sc)) return -Math.min(0, sc.scrollTop) <= slack;
   const remaining = sc.scrollHeight - sc.scrollTop - sc.clientHeight;
-  return remaining <= Math.max(40, sc.clientHeight * 0.5);
+  return remaining <= slack;
 }
 
 /** File name of a visualization's asset: readable, and fixed by the artifact's identity. */
