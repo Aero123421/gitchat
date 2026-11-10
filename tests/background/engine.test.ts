@@ -205,6 +205,48 @@ describe('engine: commit and push', () => {
     expect(s.staged.map((x) => x.id)).toEqual(['u2']);
     expect(s.path).toBe(path);
   });
+
+  it('does not fast-forward a stale page over a chat just adopted from another computer', async () => {
+    const t = await setup();
+    const path = 'claude/2026-11-01-shared--c1.md';
+    const remote = [user('u1'), bot('a1', 'EDITED ON OTHER'), user('u9'), bot('a9')];
+    await t.fake.commitFiles(t.repo, { [path]: remoteFile(path, remote, '2026-11-01T00:00:00.000Z') });
+    await t.engine.open({ service: 'claude', chatId: 'c1', url: 'https://claude.ai/chat/c1', title: 'Shared' });
+    await vi.waitFor(async () => expect((await t.engine.status(KEY)).tracked).toBe(true));
+    const view = { id: 'tab', since: 1 };
+    await t.engine.snapshot(snap([user('u1'), bot('a1', 'stale on this page')], { title: 'Shared', view }), 'manual');
+    expect((await t.engine.status(KEY)).staged).toEqual([]);
+    await t.engine.commit(KEY);
+    await t.engine.push(KEY);
+    expect(t.fake.fileAt(t.repo, path)).toContain('EDITED ON OTHER');
+    expect(t.fake.fileAt(t.repo, path)).not.toContain('stale on this page');
+
+    await t.engine.snapshot(snap([user('u1'), bot('a1', 'typed here')], { title: 'Shared', view, capturedAt: '2026-11-09T12:00:00.000Z' }), 'answered');
+    expect((await t.engine.status(KEY)).staged.map((x) => x.id)).toEqual(['a1']);
+    await t.engine.commit(KEY);
+    await t.engine.push(KEY);
+    const file = t.fake.fileAt(t.repo, path)!;
+    expect(file).toContain('typed here');
+    expect(file).toContain('answer a9');
+    expect(file).not.toContain('stale on this page');
+    expect(file).not.toContain('EDITED ON OTHER');
+  });
+
+  it('finds an existing chat when the recursive tree is truncated and contents listings are capped', async () => {
+    const t = await setup({ repo: null });
+    await track(t, [user('u1'), bot('a1')], { title: 'Shared' });
+    t.setSettings({ repo: { owner: 'octo', name: 'chats', branch: 'main' } });
+    const path = 'claude/2026-11-01-shared--c1.md';
+    const files: Record<string, string> = { [path]: remoteFile(path, [user('u1'), bot('a1')], '2026-11-01T00:00:00.000Z') };
+    for (let i = 0; i < 5; i++) files[`claude/note-${i}.md`] = `note ${i}\n`;
+    await t.fake.commitFiles(t.repo, files);
+    t.fake.truncateTrees = true;
+    t.fake.contentsCap = 0;
+    await t.engine.push(KEY);
+    const chatFiles = t.fake.paths(t.repo).filter((p) => p.endsWith('--c1.md'));
+    expect(chatFiles).toEqual([path]);
+    expect(t.fake.fileAt(t.repo, path)).toContain('answer a1');
+  });
 });
 
 describe('engine: automation', () => {

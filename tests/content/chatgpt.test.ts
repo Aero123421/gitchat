@@ -19,6 +19,11 @@ const answer = () => {
 };
 
 describe('chatgpt adapter (new app-shell UI fixtures)', () => {
+  it('treats the thread scroller as column-reverse and waits out long history batches', () => {
+    expect((chatgpt as { scrollReversed?: boolean }).scrollReversed).toBe(true);
+    expect(chatgpt.topQuietMs).toBeGreaterThan(6000);
+  });
+
   it('finds messages with their uuids', () => {
     load('basic.html');
     const msgs = chatgpt.messages(document);

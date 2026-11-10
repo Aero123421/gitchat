@@ -44,8 +44,13 @@ describe('mergeSnapshot', () => {
     const chat = [u('u1'), a('a1'), u('u2'), a('a2'), u('u3'), a('a3')];
     // only the last two turns loaded: nothing before them is removed, the rest is replaced
     expect(ids(mergeSnapshot(chat, snap([u('u2'), a('a2b'), u('u4'), a('a4')], true)))).toEqual(['u1', 'a1', 'u2', 'a2b', 'u4', 'a4']);
-    // nothing in common: everything saved is kept, before the capture
-    expect(ids(mergeSnapshot(chat, snap([u('x1'), a('x2')], true)))).toEqual(['u1', 'a1', 'u2', 'a2', 'u3', 'a3', 'x1', 'x2']);
+    // nothing in common, and the start is not confirmed: keep the saved chat, do not concatenate
+    expect(ids(mergeSnapshot(chat, snap([u('x1'), a('x2')], true)))).toEqual(['u1', 'a1', 'u2', 'a2', 'u3', 'a3']);
+    // a long reread that reached the start replaces the old branch, it does not append it
+    const long = Array.from({ length: 12 }, (_, i) => (i % 2 ? a(`a${i}`) : u(`u${i}`)));
+    const branch = [u('x1'), a('x2'), u('x3'), a('x4'), u('x5'), a('x6'), u('x7'), a('x8'), u('x9'), a('x10')];
+    expect(ids(mergeSnapshot(long, { ...snap(branch, true), startConfirmed: true }))).toEqual(branch.map((m) => m.id));
+    expect(ids(mergeSnapshot(long, snap(branch, true)))).toEqual(long.map((m) => m.id));
     // the start is confirmed (e.g. the whole chat was on screen): a full replacement
     expect(ids(mergeSnapshot(chat, { ...snap([u('x1'), a('x2')], true), startConfirmed: true }))).toEqual(['x1', 'x2']);
     expect(ids(mergeSnapshot(chat, { ...snap([u('u2'), a('a2')], true), startConfirmed: true }))).toEqual(['u2', 'a2']);
@@ -180,6 +185,19 @@ describe('mergeSnapshot', () => {
       });
       // messages the chat no longer has are forgotten
       expect(Object.keys(recordReads(before, [a('a1')], [a('a1')], undefined, 9))).toEqual(['a1']);
+    });
+
+    it('keeps an open tab from rewinding a message after four newer views have read it', () => {
+      const original = [u('u1', 'ORIGINAL')];
+      const remote = [u('u1', 'REMOTE')];
+      let reads = new Map(Object.entries(recordReads(new Map(), original, original, { id: 'A' }, 1)));
+      for (const id of ['B', 'C', 'D', 'E']) {
+        reads = new Map(Object.entries(recordReads(reads, remote, remote, { id }, 2)));
+      }
+      expect(reads.get('u1')?.v).toEqual(['E', 'D', 'C', 'B']);
+      expect(reads.get('u1')?.hv?.A).toBe(messageHash(original[0]!));
+      const r = mergeSnapshot(remote, { ...snap(original, false, true), view: { id: 'A', since: 0 } }, reads);
+      expect(r.ok && r.messages[0]!.markdown).toBe('REMOTE');
     });
   });
 });

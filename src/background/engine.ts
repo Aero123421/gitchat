@@ -212,7 +212,8 @@ export class Engine {
               capturedAt: found.front.captured || at,
               messages: found.messages,
               committed: refsOf(found.messages),
-              pageReads: {},
+              // Baseline for the next page read: the adopted text, not "this device edited it".
+              pageReads: seedPageReads(found.messages, this.now()),
               settled: true,
               updatedAt: this.now(),
             });
@@ -245,7 +246,13 @@ export class Engine {
       const rec = await this.deps.db.getChat(key);
       if (!rec?.tracked || isOlder(snap.capturedAt, rec.seenAt)) return false;
       const reads = pageReadsOf(rec);
-      const merged = mergeSnapshot(rec.messages, { ...snap, messages }, reads);
+      // The first read after adopting another computer's file records what the page shows, but does
+      // not replace the adopted bodies. Otherwise a stale page becomes a one-sided local edit and
+      // the next push fast-forwards over the other computer.
+      const baseline = isAdoptedBaseline(reads);
+      const merged = baseline
+        ? { ok: true as const, messages: keepAdoptedBodies(rec.messages, messages) }
+        : mergeSnapshot(rec.messages, { ...snap, messages }, reads);
       if (!merged.ok) {
         if (merged.code === 'ambiguous') fullRead = reason !== 'sent';
         else this.chatErrors.set(key, merged.message);
@@ -253,7 +260,8 @@ export class Engine {
       }
       this.chatErrors.delete(key);
       rec.messages = merged.messages;
-      rec.pageReads = recordReads(reads, messages, merged.messages, snap.view, this.now());
+      const readView = baseline ? (snap.view ?? { id: 'page' }) : snap.view;
+      rec.pageReads = recordReads(baseline ? stripAdoptedMark(reads) : reads, messages, merged.messages, readView, this.now());
       delete rec.seen;
       rec.settled = reason !== 'sent';
       rec.capturedAt = snap.capturedAt || this.iso();
@@ -914,6 +922,48 @@ export class Engine {
 
 function toInfo(c: LocalCommit): CommitInfo {
   return c.sha ? { id: c.id, n: c.n, t: c.createdAt, pushed: c.pushed, sha: c.sha } : { id: c.id, n: c.n, t: c.createdAt, pushed: c.pushed };
+}
+
+/** Marks page reads copied from an adopted file, before any capture on this device has seen the page. */
+const ADOPTED_VIEW = '\0adopted';
+
+function seedPageReads(messages: CapturedMessage[], at: number): Record<string, PageRead> {
+  const out: Record<string, PageRead> = {};
+  for (const m of messages) out[m.id] = { h: messageHash(m), at, v: [ADOPTED_VIEW] };
+  return out;
+}
+
+function isAdoptedBaseline(reads: Map<string, PageRead>): boolean {
+  if (reads.size === 0) return false;
+  for (const r of reads.values()) {
+    if (!r.h || r.v?.length !== 1 || r.v[0] !== ADOPTED_VIEW) return false;
+  }
+  return true;
+}
+
+function stripAdoptedMark(reads: Map<string, PageRead>): Map<string, PageRead> {
+  const next = new Map<string, PageRead>();
+  for (const [id, r] of reads) {
+    const v = (r.v ?? []).filter((x) => x !== ADOPTED_VIEW);
+    const copy: PageRead = { h: r.h, at: r.at };
+    if (v.length) copy.v = v;
+    if (r.hv && Object.keys(r.hv).length) copy.hv = { ...r.hv };
+    next.set(id, copy);
+  }
+  return next;
+}
+
+/**
+ * The adopted messages stay. A page message whose id is new is kept (this device added it). A page
+ * message whose body differs does not replace the adopted one: that difference is what the page
+ * happened to show, and the next unchanged read keeps the adopted text.
+ */
+function keepAdoptedBodies(adopted: CapturedMessage[], page: CapturedMessage[]): CapturedMessage[] {
+  const byId = new Map(adopted.map((m) => [m.id, m]));
+  return unionMessages(
+    page.map((m) => byId.get(m.id) ?? m),
+    adopted,
+  );
 }
 
 /** Page reads of a chat; records from before `pageReads` know only which ids were read, not when. */

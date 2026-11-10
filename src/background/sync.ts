@@ -25,7 +25,7 @@ import {
   getBlobText,
   getHead,
   getTreeIndex,
-  listDir,
+  repoPath,
   updateRef,
   type Head,
   type TreeEntry,
@@ -164,7 +164,7 @@ async function resolveTarget(
   } else {
     copy = await findChat(gh, repo, head, index, doc.service, doc.chatId);
     if (!copy) {
-      const existing = new Set(index.truncated ? await listDir(gh, repo, head, doc.service) : index.entries.keys());
+      const existing = new Set(await candidatePaths(gh, repo, head, index, doc.service));
       const taken = (p: string) => existing.has(p) || claimed.has(p);
       path = rec?.path && !taken(rec.path) ? rec.path : freePath(doc.service, doc.title, doc.chatId, doc.createdAt, taken);
       return { path, base: null, written: false };
@@ -173,7 +173,9 @@ async function resolveTarget(
   }
   const knowsBase = path === rec?.path && !!rec.remoteBlob;
   const sha = copy?.sha ?? (await findEntry(gh, repo, head, index, path));
-  if (!sha || (knowsBase && sha === rec.remoteBlob)) return { path, base: null, written: false };
+  // Same blob as the base is not enough to skip the merge: a commit whose body differs from that
+  // base still has to be combined with the repository copy, instead of fast-forwarding over it.
+  if (!sha || (knowsBase && rec && sha === rec.remoteBlob && bodyMatchesBase(doc, rec))) return { path, base: null, written: false };
   return {
     path,
     theirs: copy ?? (await readCopy(gh, repo, head, index, path, sha)),
@@ -194,6 +196,13 @@ function combine(doc: ChatDoc, theirs: RemoteCopy, base: Map<string, string> | n
     createdAt: Date.parse(theirCreated) < Date.parse(doc.createdAt) ? theirCreated : doc.createdAt,
     messages: threeWayMerge(base, doc.messages, theirs.messages, oursWins),
   };
+}
+
+/** True when this commit's messages are still the base we last pushed or adopted. */
+function bodyMatchesBase(doc: ChatDoc, rec: ChatRecord): boolean {
+  const base = rec.baseRefs;
+  if (!base || base.length !== doc.messages.length) return false;
+  return doc.messages.every((m, i) => m.id === base[i]!.id && messageHash(m) === base[i]!.hash);
 }
 
 function sameContent(a: CapturedMessage[], b: CapturedMessage[]): boolean {
@@ -246,8 +255,36 @@ async function readCopy(gh: GitHub, repo: RepoRef, head: Head, index: TreeIndex,
  * The chat's file in the repository (written by any device). A file name only suggests a match —
  * two chat ids can start alike — so the front matter must name the same service and chat id.
  */
+/**
+ * Paths to search for a chat file. A truncated recursive tree is not a complete list, and the
+ * Contents API stops at 1000 entries, so the service directory is read from the Git tree one level
+ * at a time.
+ */
+async function candidatePaths(gh: GitHub, repo: RepoRef, head: Head, index: TreeIndex, service: ServiceId): Promise<Iterable<string>> {
+  if (!index.truncated) return index.entries.keys();
+  const prefix = `${service}/`;
+  const known = [...index.entries.keys()].filter((p) => p.startsWith(prefix) && !p.slice(prefix.length).includes('/'));
+  const listed = await listServiceBlobs(gh, repo, head.tree, service);
+  return [...new Set([...known, ...listed])];
+}
+
+interface GitTreeEntry {
+  path: string;
+  type: string;
+  sha: string;
+}
+
+/** Blob paths directly inside `dir`, from a non-recursive Git tree. */
+async function listServiceBlobs(gh: GitHub, repo: RepoRef, rootTree: string, dir: string): Promise<string[]> {
+  const root = await gh.request<{ tree?: GitTreeEntry[] }>('GET', `${repoPath(repo)}/git/trees/${rootTree}`);
+  const sub = (root.data.tree ?? []).find((e) => e.path === dir && e.type === 'tree');
+  if (!sub) return [];
+  const inner = await gh.request<{ tree?: GitTreeEntry[] }>('GET', `${repoPath(repo)}/git/trees/${sub.sha}`);
+  return (inner.data.tree ?? []).filter((e) => e.type === 'blob').map((e) => `${dir}/${e.path}`);
+}
+
 async function findChat(gh: GitHub, repo: RepoRef, head: Head, index: TreeIndex, service: ServiceId, chatId: string): Promise<RemoteCopy | null> {
-  const paths = index.truncated ? await listDir(gh, repo, head, service) : index.entries.keys();
+  const paths = await candidatePaths(gh, repo, head, index, service);
   for (const path of chatFileCandidates(paths, service, chatId)) {
     const sha = await findEntry(gh, repo, head, index, path);
     if (!sha) continue;

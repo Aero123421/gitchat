@@ -40,6 +40,10 @@ export class FakeGitHub {
   tokenReplies: Record<string, unknown>[] = [];
   /** Runs once right before the next ref update (to simulate another device pushing). */
   beforeRefUpdate: ((repo: FakeRepo) => Promise<void>) | null = null;
+  /** Recursive tree listings come back truncated and empty, as when GitHub cuts a huge tree. */
+  truncateTrees = false;
+  /** Directory Contents listings return at most this many entries (GitHub's cap is 1000). */
+  contentsCap: number | null = null;
   private injections: Injection[] = [];
   private pauses: Pause[] = [];
   private seq = 0;
@@ -241,9 +245,19 @@ export class FakeGitHub {
         }
         return json(201, { sha: this.storeTree(repo, base) });
       }
-      const t = repo.trees.get(tail[0] ?? '');
+      const treeSha = tail[0] ?? '';
+      if (treeSha.startsWith('dir~')) {
+        const [, root, dir] = treeSha.split('~');
+        const flat = root ? repo.trees.get(root) : undefined;
+        if (!flat || dir === undefined) return json(404, { message: 'Not Found' });
+        return json(200, { sha: treeSha, truncated: false, tree: this.oneLevel(flat, dir, root!) });
+      }
+      const t = repo.trees.get(treeSha);
       if (!t) return json(404, { message: 'Not Found' });
-      return json(200, { sha: tail[0], truncated: false, tree: [...t].map(([path, sha]) => ({ path, type: 'blob', sha, mode: '100644' })) });
+      const recursive = url.searchParams.get('recursive') === '1';
+      if (recursive && this.truncateTrees) return json(200, { sha: treeSha, truncated: true, tree: [] });
+      if (!recursive) return json(200, { sha: treeSha, truncated: false, tree: this.oneLevel(t, '', treeSha) });
+      return json(200, { sha: treeSha, truncated: false, tree: [...t].map(([path, sha]) => ({ path, type: 'blob', sha, mode: '100644' })) });
     }
     if (kind === 'blobs') {
       if (method === 'POST') return json(201, { sha: await this.putBlob(repo, String(body?.content)) });
@@ -271,7 +285,26 @@ export class FakeGitHub {
     const sha = t?.get(path);
     if (sha) return json(200, { type: 'file', path, sha, content: repo.blobs.get(sha), encoding: 'base64' });
     const children = [...(t?.keys() ?? [])].filter((k) => k.startsWith(`${path}/`) && !k.slice(path.length + 1).includes('/'));
+    if (this.contentsCap !== null) return json(200, children.sort().slice(0, this.contentsCap).map((k) => ({ type: 'file', path: k })));
     return children.length ? json(200, children.map((k) => ({ type: 'file', path: k }))) : json(404, { message: 'Not Found' });
+  }
+
+  /** One level of a flat path→blob map, the way a non-recursive Git tree is shaped. */
+  private oneLevel(flat: Map<string, string>, dir: string, rootSha: string) {
+    const prefix = dir ? `${dir}/` : '';
+    const out = new Map<string, { path: string; type: string; sha: string; mode: string }>();
+    for (const [path, blob] of flat) {
+      if (!path.startsWith(prefix)) continue;
+      const rest = path.slice(prefix.length);
+      if (!rest) continue;
+      const slash = rest.indexOf('/');
+      if (slash < 0) out.set(rest, { path: rest, type: 'blob', sha: blob, mode: '100644' });
+      else {
+        const name = rest.slice(0, slash);
+        out.set(name, { path: name, type: 'tree', sha: `dir~${rootSha}~${prefix}${name}`, mode: '040000' });
+      }
+    }
+    return [...out.values()];
   }
 
   private repoJson(r: FakeRepo) {

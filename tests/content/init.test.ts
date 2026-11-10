@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { captureFullHistory, InitIncompleteError, OrderedMessages, readStep } from '../../src/content/capture/init';
+import { assignIds, isAtEnd } from '../../src/content/capture/snapshot';
 import type { Adapter, MessageNode } from '../../src/content/adapters/types';
 import type { CapturedMessage } from '../../src/shared/types';
 
@@ -55,6 +56,22 @@ describe('OrderedMessages (harvest while scrolling a virtualized list)', () => {
 
   it('always scrolls less than a viewport so windows overlap', () => {
     for (const h of [80, 150, 300, 900]) expect(readStep(h)).toBeLessThan(h);
+  });
+
+  it('keeps a repeated reply\'s identity when the next window starts on it', () => {
+    const raw = (markdown: string) => ({ id: null, role: 'assistant' as const, markdown });
+    const acc = new OrderedMessages();
+    acc.add(assignIds([raw('OK'), raw('OK')]));
+    acc.add(assignIds([raw('OK'), raw('next')], acc.list()));
+    expect(acc.list().map((x) => x.markdown)).toEqual(['OK', 'OK', 'next']);
+  });
+
+  it('replaces a short fragment when the same reply grows', () => {
+    const raw = (markdown: string) => ({ id: null, role: 'assistant' as const, markdown });
+    const acc = new OrderedMessages();
+    acc.add(assignIds([raw('Hel')]));
+    acc.add(assignIds([raw('Hello')], acc.list()));
+    expect(acc.list().map((x) => x.markdown)).toEqual(['Hello']);
   });
 });
 
@@ -322,7 +339,7 @@ describe('captureFullHistory', () => {
     await failed;
   });
 
-  it('confirms the start only when the whole transcript fits on screen (review 1-3)', async () => {
+  it('confirms the start of a full read once the oldest end stays quiet', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'performance', 'Date'] });
     // 4 messages of 100 px in a 500 px scroller: everything is on screen
     const short = harness({ total: 4, batch: 4, delayMs: 10, virtualized: false });
@@ -337,14 +354,209 @@ describe('captureFullHistory', () => {
     const longer = harness({ total: 12, batch: 12, delayMs: 10, virtualized: false });
     run = captureFullHistory(longer.adapter, document, { signal: new AbortController().signal, onProgress: () => {} });
     await vi.advanceTimersByTimeAsync(30_000);
-    expect((await run).startConfirmed).toBe(false);
-    // a long chat: older history may still arrive after the quiet period, so the start is not certain
+    expect((await run).startConfirmed).toBe(true);
+    // a long chat that reached the oldest end and went quiet is the whole branch, not a prefix
     const long = harness({ total: 96, batch: 32, delayMs: 2500, virtualized: false });
     run = captureFullHistory(long.adapter, document, { signal: new AbortController().signal, onProgress: () => {} });
     await vi.advanceTimersByTimeAsync(60_000);
     const res = await run;
     expect(res.messages).toHaveLength(96);
-    expect(res.startConfirmed).toBe(false);
+    expect(res.messages[0]?.id).toBe('m0');
+    expect(res.startConfirmed).toBe(true);
+  });
+
+  it('keeps the visible message in place when the transcript grows below it', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'performance', 'Date'] });
+    document.body.innerHTML = '';
+    const scroller = document.createElement('div');
+    document.body.appendChild(scroller);
+    const row = 100;
+    const client = 200;
+    const n = 10;
+    let top = 100;
+    let extra = 0;
+    for (let i = 0; i < n; i++) {
+      const el = document.createElement('div');
+      el.setAttribute('data-i', String(i));
+      el.setAttribute('data-role', i % 2 ? 'assistant' : 'user');
+      el.textContent = `message ${i}`;
+      const index = i;
+      el.getBoundingClientRect = () => {
+        const y = index * row - top;
+        return { top: y, bottom: y + row, height: row, left: 0, right: 80, width: 80, x: 0, y, toJSON() {} } as DOMRect;
+      };
+      scroller.appendChild(el);
+    }
+    scroller.getBoundingClientRect = () => ({ top: 0, bottom: client, height: client, left: 0, right: 80, width: 80, x: 0, y: 0, toJSON() {} }) as DOMRect;
+    Object.defineProperty(scroller, 'clientHeight', { get: () => client });
+    Object.defineProperty(scroller, 'scrollHeight', { get: () => n * row + extra });
+    Object.defineProperty(scroller, 'scrollTop', {
+      get: () => top,
+      set: (v: number) => {
+        top = Math.max(0, Math.min(v, n * row + extra - client));
+      },
+    });
+    const adapter: Adapter = {
+      service: 'claude',
+      virtualized: false,
+      chatId: () => 'c',
+      title: () => 't',
+      messages: () =>
+        Array.from(scroller.children).map((el): MessageNode => ({ el, role: el.getAttribute('data-role') as 'user' | 'assistant', id: `m${el.getAttribute('data-i')}` })),
+      body: (n0) => n0.el,
+      markdown: {},
+      scrollContainer: () => scroller,
+      isGenerating: () => false,
+      isLoadingOlder: () => false,
+      isAtStart: () => false,
+      loadedCount: () => n,
+      aiPhase: () => 'idle',
+      composer: () => null,
+      theme: () => 'light',
+      topQuietMs: 200,
+    };
+    let grew = false;
+    const run = captureFullHistory(adapter, document, {
+      signal: new AbortController().signal,
+      onProgress: () => {},
+      rowWaitMs: 20,
+      busy: () => {
+        if (grew) return false;
+        grew = true;
+        extra = 400;
+        return true;
+      },
+    });
+    await vi.advanceTimersByTimeAsync(30_000);
+    await run;
+    expect(scroller.scrollTop).toBe(100);
+  });
+
+  it('measures the new scroller when the page replaces it', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'performance', 'Date'] });
+    document.body.innerHTML = '';
+    const make = (height: number, scrollHeight: number, start: number, text: string) => {
+      const el = document.createElement('div');
+      document.body.appendChild(el);
+      let top = start;
+      Object.defineProperty(el, 'clientHeight', { get: () => height });
+      Object.defineProperty(el, 'scrollHeight', { get: () => scrollHeight });
+      Object.defineProperty(el, 'scrollTop', {
+        get: () => top,
+        set: (v: number) => {
+          top = Math.max(0, Math.min(v, scrollHeight - height));
+        },
+      });
+      const row = document.createElement('div');
+      row.textContent = text;
+      row.setAttribute('data-role', 'user');
+      el.appendChild(row);
+      return el;
+    };
+    const older = make(500, 1000, 100, 'on the first scroller');
+    const newer = make(200, 3000, 40, 'on the replacement');
+    let calls = 0;
+    const adapter: Adapter = {
+      service: 'claude',
+      virtualized: false,
+      chatId: () => 'c',
+      title: () => 't',
+      messages: () => {
+        const root = calls >= 2 ? newer : older;
+        return Array.from(root.children).map((el): MessageNode => ({ el, role: 'user', id: el.textContent }));
+      },
+      body: (node) => node.el,
+      markdown: {},
+      scrollContainer: () => {
+        calls += 1;
+        return calls === 1 ? older : newer;
+      },
+      isGenerating: () => false,
+      isLoadingOlder: () => false,
+      isAtStart: () => false,
+      loadedCount: () => 1,
+      aiPhase: () => 'idle',
+      composer: () => null,
+      theme: () => 'light',
+      topQuietMs: 200,
+    };
+    const run = captureFullHistory(adapter, document, { signal: new AbortController().signal, onProgress: () => {}, rowWaitMs: 20 });
+    await vi.advanceTimersByTimeAsync(30_000);
+    await run;
+    expect(newer.scrollTop).toBe(40);
+  });
+
+  it('walks a column-reverse transcript from older history toward scrollTop 0', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'performance', 'Date'] });
+    document.body.innerHTML = '';
+    const scroller = document.createElement('div');
+    document.body.appendChild(scroller);
+    const client = 300;
+    const total = 12;
+    const scrollHeight = total * 100;
+    let top = -200;
+    for (let i = 0; i < total; i++) {
+      const el = document.createElement('div');
+      el.setAttribute('data-i', String(i));
+      el.setAttribute('data-role', i % 2 ? 'assistant' : 'user');
+      el.textContent = `message ${i}`;
+      scroller.appendChild(el);
+    }
+    Object.defineProperty(scroller, 'clientHeight', { get: () => client });
+    Object.defineProperty(scroller, 'scrollHeight', { get: () => scrollHeight });
+    Object.defineProperty(scroller, 'scrollTop', {
+      get: () => top,
+      set: (v: number) => {
+        const min = Math.min(0, client - scrollHeight);
+        top = Math.max(min, Math.min(0, v));
+      },
+    });
+    const adapter: Adapter = {
+      service: 'claude',
+      virtualized: true,
+      chatId: () => 'c',
+      title: () => 't',
+      messages: () =>
+        Array.from(scroller.children).map((el): MessageNode => ({ el, role: el.getAttribute('data-role') as 'user' | 'assistant', id: `m${el.getAttribute('data-i')}` })),
+      body: (node) => node.el,
+      markdown: {},
+      scrollContainer: () => scroller,
+      isGenerating: () => false,
+      isLoadingOlder: () => false,
+      isAtStart: () => false,
+      loadedCount: () => total,
+      aiPhase: () => 'idle',
+      composer: () => null,
+      theme: () => 'light',
+      topQuietMs: 200,
+    };
+    (adapter as { scrollReversed?: boolean }).scrollReversed = true;
+    const run = captureFullHistory(adapter, document, { signal: new AbortController().signal, onProgress: () => {}, rowWaitMs: 20, stallMs: 8_000 });
+    await vi.advanceTimersByTimeAsync(60_000);
+    const res = await run;
+    expect(res.messages.map((m) => m.id)).toEqual(Array.from({ length: total }, (_, i) => `m${i}`));
+    expect(res.startConfirmed).toBe(true);
+    expect(scroller.scrollTop).toBe(-200);
+  });
+
+  it('treats scrollTop 0 as the newest end only on a reversed scroller', () => {
+    const el = document.createElement('div');
+    document.body.appendChild(el);
+    let top = 0;
+    Object.defineProperty(el, 'clientHeight', { get: () => 300 });
+    Object.defineProperty(el, 'scrollHeight', { get: () => 1200 });
+    Object.defineProperty(el, 'scrollTop', { get: () => top, set: (v: number) => (top = v) });
+    const adapter = { virtualized: true, scrollContainer: () => el } as unknown as Adapter;
+    (adapter as { scrollReversed?: boolean }).scrollReversed = true;
+    top = 0;
+    expect(isAtEnd(adapter, document)).toBe(true);
+    top = -400;
+    expect(isAtEnd(adapter, document)).toBe(false);
+    (adapter as { scrollReversed?: boolean }).scrollReversed = false;
+    top = 0;
+    expect(isAtEnd(adapter, document)).toBe(false);
+    top = 900;
+    expect(isAtEnd(adapter, document)).toBe(true);
   });
 
   it('leaves the scroll alone on cancel when the conversation no longer owns the scroller (N16)', async () => {

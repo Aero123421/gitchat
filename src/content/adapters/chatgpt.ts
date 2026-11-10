@@ -21,7 +21,8 @@
 //   `data-chatgpt-copy-code`.
 // - Reasoning summaries share the answer's style attribute but carry `data-markdown-text-tone`.
 // - The transcript is virtualized (~11 turns in the DOM) and older turns load 5 at a time; the app
-//   re-anchors the scroll after each load and has no start marker.
+//   re-anchors the scroll after each load and has no start marker. `.thread-scroll-container` is
+//   `column-reverse`: scrollTop 0 is the newest end, and older history is toward negative scrollTop.
 // - A stale, hidden copy of the transcript (0×0) can stay in the DOM: always read the visible one,
 //   and read nothing while panes exist but none is visible (e.g. right after navigating).
 // Classic UI: `[data-message-author-role]`, `.markdown`, `#prompt-textarea`, stop-button test id.
@@ -151,8 +152,8 @@ export const chatgpt = defineAdapter({
   // Work-mode turns flicker complete → in progress → complete at the end (gap of 1.9 s observed)
   doneQuietMs: 3000,
   watchAttributes: ['data-talvt-turn-state', 'data-response-starting'],
-  // older turns arrive 5 at a time and the app re-anchors the scroll after each batch
-  topQuietMs: 3500,
+  // older turns arrive in batches; reported gaps run up to about 6s, so the quiet window is longer
+  topQuietMs: 7000,
   selectors: {
     user: ['[data-chatgpt-search-unit-key$=":user"], [data-content-search-unit-key$=":user"]', '[data-message-author-role="user"]'],
     assistant: ['[data-chatgpt-search-unit-key$=":assistant"], [data-content-search-unit-key$=":assistant"]', '[data-message-author-role="assistant"]'],
@@ -268,3 +269,10 @@ export const chatgpt = defineAdapter({
     },
   },
 });
+
+/**
+ * Signed-in ChatGPT lays the thread out as `flex-direction: column-reverse`: `scrollTop === 0` is
+ * the newest end and older history is toward negative `scrollTop`. Init and `isAtEnd` walk that
+ * axis. Adapters without this flag keep the normal one, where 0 is the start.
+ */
+(chatgpt as { scrollReversed?: boolean }).scrollReversed = true;

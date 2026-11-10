@@ -84,8 +84,10 @@ const AMBIGUOUS: MergeResult = { ok: false, code: 'ambiguous', message: 'The cap
  *
  * - A complete capture (init) is the whole conversation from its first message on: it replaces the
  *   list from there and may remove messages. Saved messages before its first message are kept unless
- *   the capture is known to start at the chat's beginning (`startConfirmed`): older history may just
- *   not have loaded. A capture sharing no message with the saved ones replaces them only then, too.
+ *   the capture is known to start at the chat's beginning (`startConfirmed`), which a full reread
+ *   sets even when the chat is long or taller than the viewport. A capture sharing no message with
+ *   the saved ones replaces them only then. If the start is not confirmed, that capture is not
+ *   concatenated onto the saved chat: the saved messages stay as they are.
  *   An empty capture, or one with questions but no answers at all, is refused.
  * - A live capture may hold only the part of a long chat that is in the DOM, so it is an upsert:
  *   known ids are updated in place and messages absent from it are kept. New ids after the last
@@ -135,10 +137,12 @@ export function mergeSnapshot(known: CapturedMessage[], snap: ChatSnapshot, read
     }
     const placed = incoming.map(place);
     if (snap.startConfirmed === true || !known.length) return { ok: true, messages: placed };
-    // the start is not confirmed: what lies before the capture's first message is kept
+    // the start is not confirmed: what lies before the capture's first shared message is kept.
+    // Nothing in common is another branch only once the start is confirmed; concatenating the two
+    // histories would save the old branch and the new one as one chat.
     const at = new Map(known.map((m, i) => [m.id, i]));
     const first = incoming.find((m) => at.has(m.id));
-    if (!first) return { ok: true, messages: unionMessages(placed, known) };
+    if (!first) return { ok: true, messages: known };
     const captured = new Set(incoming.map((m) => m.id));
     return { ok: true, messages: [...known.slice(0, at.get(first.id)).filter((m) => !captured.has(m.id)), ...placed] };
   }
@@ -256,10 +260,13 @@ export function recordReads(
   for (const m of captured) {
     const prev = reads.get(m.id);
     const h = messageHash(m);
+    // `v` stays short (which views may prune). `hv` keeps every view that has read this message,
+    // including ones that fell off `v`: an open tab must not look like a new edit of an older text.
     const v = view ? [view.id, ...(prev?.v ?? []).filter((x) => x !== view.id)].slice(0, 4) : prev?.v;
-    // each listed view's own last reading (views dropped from the list are forgotten)
     const hv: Record<string, string> = {};
-    for (const id of v ?? []) {
+    const remembered = new Set([...(v ?? []), ...Object.keys(prev?.hv ?? {})]);
+    if (view) remembered.add(view.id);
+    for (const id of remembered) {
       const was = view && id === view.id ? h : prev?.hv?.[id];
       if (was !== undefined) hv[id] = was;
     }
