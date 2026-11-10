@@ -13,7 +13,7 @@
   <a href="https://github.com/Aero123421/gitchat/releases/latest"><img src="https://img.shields.io/github/v/release/Aero123421/gitchat?color=111113" alt="Latest release"></a>
   <a href="https://github.com/Aero123421/gitchat/actions/workflows/ci.yml"><img src="https://github.com/Aero123421/gitchat/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/Aero123421/gitchat?color=111113" alt="MIT license"></a>
-  <img src="https://img.shields.io/badge/Chrome-120%2B-0a84ff" alt="Chrome 120 or later">
+  <img src="https://img.shields.io/badge/Chrome-140%2B-0a84ff" alt="Chrome 140 or later">
 </p>
 
 <p align="center"><b>English</b> · <a href="README.ja.md">日本語</a></p>
@@ -54,7 +54,7 @@ Three styles, all monochrome glass with one blue accent: **Creature** (the defau
 
 ## Install
 
-gitchat requires Chrome 120 or later. It is not on the Chrome Web Store yet, so it is loaded as an unpacked extension. The ready-to-load files are kept on the [`dist` branch](https://github.com/Aero123421/gitchat/tree/dist), so installing and updating are one git command each.
+gitchat requires Chrome 140 or later. It is not on the Chrome Web Store yet, so it is loaded as an unpacked extension. The ready-to-load files are kept on the [`dist` branch](https://github.com/Aero123421/gitchat/tree/dist), so installing and updating are one git command each.
 
 1. Download the extension to a folder you keep:
 

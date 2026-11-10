@@ -6,7 +6,7 @@ This guide walks through installing gitchat, connecting your GitHub account, cho
 
 ## 1. Install the extension
 
-gitchat requires Chrome 120 or later. Until it is listed on the Chrome Web Store, load it as an unpacked extension.
+gitchat requires Chrome 140 or later. Until it is listed on the Chrome Web Store, load it as an unpacked extension.
 
 ### Option A: With git (recommended)
 

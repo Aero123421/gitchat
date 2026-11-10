@@ -13,7 +13,7 @@
   <a href="https://github.com/Aero123421/gitchat/releases/latest"><img src="https://img.shields.io/github/v/release/Aero123421/gitchat?color=111113" alt="最新リリース"></a>
   <a href="https://github.com/Aero123421/gitchat/actions/workflows/ci.yml"><img src="https://github.com/Aero123421/gitchat/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/Aero123421/gitchat?color=111113" alt="MIT ライセンス"></a>
-  <img src="https://img.shields.io/badge/Chrome-120%2B-0a84ff" alt="Chrome 120 以降">
+  <img src="https://img.shields.io/badge/Chrome-140%2B-0a84ff" alt="Chrome 140 以降">
 </p>
 
 <p align="center"><a href="README.md">English</a> · <b>日本語</b></p>
@@ -54,7 +54,7 @@ AI との良い会話は、残しておきたいし、次のツールにもそ�
 
 ## インストール
 
-Chrome 120 以降が必要です。Chrome ウェブストアにはまだ公開していないため、「パッケージ化されていない拡張機能」として読み込みます。読み込める状態のファイルは [`dist` ブランチ](https://github.com/Aero123421/gitchat/tree/dist) に置いてあるので、インストールも更新も git のコマンド 1 つで済みます。
+Chrome 140 以降が必要です。Chrome ウェブストアにはまだ公開していないため、「パッケージ化されていない拡張機能」として読み込みます。読み込める状態のファイルは [`dist` ブランチ](https://github.com/Aero123421/gitchat/tree/dist) に置いてあるので、インストールも更新も git のコマンド 1 つで済みます。
 
 1. 残しておくフォルダに拡張機能をダウンロードします。
 
