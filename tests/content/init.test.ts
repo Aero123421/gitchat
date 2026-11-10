@@ -1,6 +1,8 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { captureFullHistory, InitIncompleteError, OrderedMessages, readStep } from '../../src/content/capture/init';
+import { chatgpt } from '../../src/content/adapters/chatgpt';
+import { mergeSnapshot } from '../../src/background/stage';
 import { assignIds, isAtEnd } from '../../src/content/capture/snapshot';
 import type { Adapter, MessageNode } from '../../src/content/adapters/types';
 import type { CapturedMessage } from '../../src/shared/types';
@@ -58,20 +60,36 @@ describe('OrderedMessages (harvest while scrolling a virtualized list)', () => {
     for (const h of [80, 150, 300, 900]) expect(readStep(h)).toBeLessThan(h);
   });
 
-  it('keeps a repeated reply\'s identity when the next window starts on it', () => {
-    const raw = (markdown: string) => ({ id: null, role: 'assistant' as const, markdown });
-    const acc = new OrderedMessages();
-    acc.add(assignIds([raw('OK'), raw('OK')]));
-    acc.add(assignIds([raw('OK'), raw('next')], acc.list()));
-    expect(acc.list().map((x) => x.markdown)).toEqual(['OK', 'OK', 'next']);
+  it('treats repeated unanchored replies as ambiguous instead of guessing the last overlap', () => {
+    const raw = { id: null, role: 'assistant' as const, markdown: 'OK' };
+    const prior = assignIds([raw, raw]);
+    const next = assignIds([raw], prior);
+    expect(prior.map((m) => m.id)).not.toContain(next[0]!.id);
   });
 
-  it('replaces a short fragment when the same reply grows', () => {
+  it('replaces a growing reply when its stable question anchors the turn', () => {
     const raw = (markdown: string) => ({ id: null, role: 'assistant' as const, markdown });
     const acc = new OrderedMessages();
-    acc.add(assignIds([raw('Hel')]));
-    acc.add(assignIds([raw('Hello')], acc.list()));
-    expect(acc.list().map((x) => x.markdown)).toEqual(['Hello']);
+    acc.add(assignIds([m('u1'), raw('Hel')]));
+    acc.add(assignIds([m('u1'), raw('Hello')], acc.list()));
+    expect(acc.list().map((x) => x.markdown)).toEqual(['u1', 'Hello']);
+  });
+
+  it('keeps answers to conflicting stable questions separate despite a shared prefix', () => {
+    const raw = (markdown: string) => ({ id: null, role: 'assistant' as const, markdown });
+    const acc = new OrderedMessages();
+    acc.add(assignIds([m('u1'), raw('Yes')]));
+    const before = acc.list();
+    const next = assignIds([m('u2'), raw('Yes, a different answer.')], before);
+    expect(next.every((m) => !before.some((p) => p.id === m.id))).toBe(true);
+    acc.add(next);
+    expect(acc.list().map((m) => m.markdown)).toEqual(['u1', 'Yes', 'u2', 'Yes, a different answer.']);
+  });
+
+  it('does not identify unanchored prefix matches as the same reply', () => {
+    const raw = (markdown: string) => ({ id: null, role: 'assistant' as const, markdown });
+    const prior = assignIds([raw('Yes')]);
+    expect(assignIds([raw('Yes, a different answer.')], prior)[0]!.id).not.toBe(prior[0]!.id);
   });
 });
 
@@ -339,7 +357,7 @@ describe('captureFullHistory', () => {
     await failed;
   });
 
-  it('confirms the start of a full read once the oldest end stays quiet', async () => {
+  it('confirms the start only for a fitting transcript or a small chat', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'performance', 'Date'] });
     // 4 messages of 100 px in a 500 px scroller: everything is on screen
     const short = harness({ total: 4, batch: 4, delayMs: 10, virtualized: false });
@@ -354,15 +372,55 @@ describe('captureFullHistory', () => {
     const longer = harness({ total: 12, batch: 12, delayMs: 10, virtualized: false });
     run = captureFullHistory(longer.adapter, document, { signal: new AbortController().signal, onProgress: () => {} });
     await vi.advanceTimersByTimeAsync(30_000);
-    expect((await run).startConfirmed).toBe(true);
-    // a long chat that reached the oldest end and went quiet is the whole branch, not a prefix
+    expect((await run).startConfirmed).toBe(false);
+    // Quiet loading alone does not prove the first message was reached.
     const long = harness({ total: 96, batch: 32, delayMs: 2500, virtualized: false });
     run = captureFullHistory(long.adapter, document, { signal: new AbortController().signal, onProgress: () => {} });
     await vi.advanceTimersByTimeAsync(60_000);
     const res = await run;
     expect(res.messages).toHaveLength(96);
     expect(res.messages[0]?.id).toBe('m0');
-    expect(res.startConfirmed).toBe(true);
+    expect(res.startConfirmed).toBe(false);
+  });
+
+  it('keeps saved history when only a quiet tail of the chat is loaded', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'performance', 'Date'] });
+    const { adapter, scroller } = harness({ total: 20, batch: 20, delayMs: 10, virtualized: false });
+    const saved = Array.from({ length: 96 }, (_, i) => m(`m${i}`));
+    Array.from(scroller.children).forEach((el, i) => el.setAttribute('data-i', String(i + 76)));
+    const run = captureFullHistory(adapter, document, { signal: new AbortController().signal, onProgress: () => {} });
+    await vi.advanceTimersByTimeAsync(30_000);
+    const captured = await run;
+    expect(captured.startConfirmed).toBe(false);
+    const merged = mergeSnapshot(saved, { service: 'claude', chatId: 'c', url: 'u', title: 't', capturedAt: captured.readAt, complete: true, ...captured });
+    expect(merged.ok && merged.messages).toHaveLength(96);
+  });
+
+  it('reads a forward ChatGPT scroller that clamps negative positions', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'performance', 'Date'] });
+    const { adapter, scroller } = slowList({ total: 30, renderDelayMs: 0 });
+    const forward = { ...chatgpt, messages: adapter.messages, body: adapter.body, scrollContainer: () => scroller, loadedCount: adapter.loadedCount, topQuietMs: 200 };
+    const run = captureFullHistory(forward, document, { signal: new AbortController().signal, onProgress: () => {}, maxLoadMs: 10_000 });
+    const checked = expect(run).resolves.toMatchObject({ messages: Array.from({ length: 30 }, (_, i) => ({ id: `m${i}` })) });
+    await vi.advanceTimersByTimeAsync(60_000);
+    await checked;
+  });
+
+  it('fails coverage when unanchored growing replies cannot connect adjacent windows', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'performance', 'Date'] });
+    const { adapter, scroller } = slowList({ total: 20, renderDelayMs: 0 });
+    const messages = adapter.messages;
+    adapter.messages = (doc) => {
+      const prefix = 'Yes'.repeat(1 + Math.floor(scroller.scrollTop / 100));
+      return messages(doc).filter((node) => node.el.getBoundingClientRect().top >= 0).slice(0, 1).map((node) => {
+        node.el.textContent = prefix;
+        return { ...node, id: null, role: 'assistant' };
+      });
+    };
+    const run = captureFullHistory(adapter, document, { signal: new AbortController().signal, onProgress: () => {}, rowWaitMs: 0 });
+    const failed = expect(run).rejects.toMatchObject({ reason: 'coverage' });
+    await vi.advanceTimersByTimeAsync(120_000);
+    await failed;
   });
 
   it('keeps the visible message in place when the transcript grows below it', async () => {
@@ -530,12 +588,12 @@ describe('captureFullHistory', () => {
       theme: () => 'light',
       topQuietMs: 200,
     };
-    (adapter as { scrollReversed?: boolean }).scrollReversed = true;
+    scroller.style.flexDirection = 'column-reverse';
     const run = captureFullHistory(adapter, document, { signal: new AbortController().signal, onProgress: () => {}, rowWaitMs: 20, stallMs: 8_000 });
     await vi.advanceTimersByTimeAsync(60_000);
     const res = await run;
     expect(res.messages.map((m) => m.id)).toEqual(Array.from({ length: total }, (_, i) => `m${i}`));
-    expect(res.startConfirmed).toBe(true);
+    expect(res.startConfirmed).toBe(false);
     expect(scroller.scrollTop).toBe(-200);
   });
 
@@ -547,12 +605,12 @@ describe('captureFullHistory', () => {
     Object.defineProperty(el, 'scrollHeight', { get: () => 1200 });
     Object.defineProperty(el, 'scrollTop', { get: () => top, set: (v: number) => (top = v) });
     const adapter = { virtualized: true, scrollContainer: () => el } as unknown as Adapter;
-    (adapter as { scrollReversed?: boolean }).scrollReversed = true;
+    el.style.flexDirection = 'column-reverse';
     top = 0;
     expect(isAtEnd(adapter, document)).toBe(true);
     top = -400;
     expect(isAtEnd(adapter, document)).toBe(false);
-    (adapter as { scrollReversed?: boolean }).scrollReversed = false;
+    el.style.flexDirection = 'column';
     top = 0;
     expect(isAtEnd(adapter, document)).toBe(false);
     top = 900;

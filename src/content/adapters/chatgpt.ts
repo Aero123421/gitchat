@@ -269,10 +269,3 @@ export const chatgpt = defineAdapter({
     },
   },
 });
-
-/**
- * Signed-in ChatGPT lays the thread out as `flex-direction: column-reverse`: `scrollTop === 0` is
- * the newest end and older history is toward negative `scrollTop`. Init and `isAtEnd` walk that
- * axis. Adapters without this flag keep the normal one, where 0 is the start.
- */
-(chatgpt as { scrollReversed?: boolean }).scrollReversed = true;

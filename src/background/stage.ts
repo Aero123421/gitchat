@@ -84,8 +84,8 @@ const AMBIGUOUS: MergeResult = { ok: false, code: 'ambiguous', message: 'The cap
  *
  * - A complete capture (init) is the whole conversation from its first message on: it replaces the
  *   list from there and may remove messages. Saved messages before its first message are kept unless
- *   the capture is known to start at the chat's beginning (`startConfirmed`), which a full reread
- *   sets even when the chat is long or taller than the viewport. A capture sharing no message with
+ *   the capture is known to start at the chat's beginning (`startConfirmed`: it fits on screen or
+ *   has too few messages to load in batches). A capture sharing no message with
  *   the saved ones replaces them only then. If the start is not confirmed, that capture is not
  *   concatenated onto the saved chat: the saved messages stay as they are.
  *   An empty capture, or one with questions but no answers at all, is refused.

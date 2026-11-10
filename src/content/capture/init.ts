@@ -2,12 +2,10 @@
 //
 // 1. Loading — scroll the conversation to the very top again and again until the site stops adding
 //    older messages (it loads them lazily, in batches). Reported as a growing message count. Only a
-//    long quiet period at the top counts as "the start": no site gives a trustworthy marker (Claude's
+//    long quiet period at the top ends loading: no site gives a trustworthy start marker (Claude's
 //    aria-posinset="1" is the first *loaded* row). Running out of time is an error, never a success.
-//    A quiet period at the oldest end means this read starts at the first message (`startConfirmed`),
-//    including a long chat or one taller than the viewport. The background then replaces the saved
-//    branch instead of appending the read to it. A chat too short to be loaded in batches is whole
-//    even when that quiet check did not run.
+//    The start is confirmed only when the transcript fits on screen or the chat is too short to
+//    load in batches. Otherwise the background keeps saved messages above this capture.
 // 2. Reading — virtualized lists (only ~20 rows in the DOM at a time) are walked from the top to the
 //    bottom in overlapping steps, collecting every message by ID and every visualization while it is
 //    mounted. After each step we wait until rows are rendered in the viewport. Coverage is checked:
@@ -476,7 +474,6 @@ export async function captureFullHistory(adapter: Adapter, doc: Document, opts: 
     let stable = 0;
     let lastCount = -1;
     let lastHeight = -1;
-    let reachedStart = false;
     for (;;) {
       if (performance.now() - loadStart >= maxLoadMs) throw new InitIncompleteError('timeout');
       retarget();
@@ -490,14 +487,11 @@ export async function captureFullHistory(adapter: Adapter, doc: Document, opts: 
       lastCount = count;
       lastHeight = height;
       onProgress({ stage: 'loading', count, progress: 0.25 * (1 - Math.exp(-count / 400)) });
-      // sites re-anchor the scroll after every batch and none marks the true start reliably, so only
-      // a long, complete quiet period at the oldest end counts as having reached it
-      if (stable >= 2 && performance.now() - quietSince >= topQuietMs) {
-        reachedStart = true;
-        break;
-      }
+      // Sites re-anchor after each batch. Quiet ends loading but does not prove the true start.
+      if (stable >= 2 && performance.now() - quietSince >= topQuietMs) break;
     }
     retarget();
+    const startConfirmed = scroller.scrollHeight <= scroller.clientHeight + 4 && adapter.messages(doc).length > 0;
 
     // ---- 2. read top to bottom
     if (adapter.virtualized) {
@@ -558,12 +552,8 @@ export async function captureFullHistory(adapter: Adapter, doc: Document, opts: 
     harvest(true);
     await collectArtifacts(true);
     onProgress({ stage: 'reading', count: acc.size, progress: 1 });
-    // Reaching the oldest end and staying quiet means this read begins at the first message, even
-    // when the transcript is taller than the viewport or longer than a small chat. A chat this
-    // short is never split into loading batches on any supported site (ChatGPT renders at least 5
-    // turns before loading older ones, Claude 32 rows, Gemini 10 turns): it is whole even when a
-    // long answer makes it taller than the screen.
-    const whole = reachedStart || acc.size <= SMALL_CHAT_MESSAGES;
+    // No supported site loads so few messages in batches; a small chat can have a tall answer.
+    const whole = startConfirmed || acc.size <= SMALL_CHAT_MESSAGES;
     return { messages: acc.list(), artifacts: [...arts.values()], readAt, startConfirmed: whole };
   } finally {
     // back to the message that was visible — also after a cancel or a failure, but only while this

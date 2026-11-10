@@ -956,12 +956,16 @@ function stripAdoptedMark(reads: Map<string, PageRead>): Map<string, PageRead> {
 /**
  * The adopted messages stay. A page message whose id is new is kept (this device added it). A page
  * message whose body differs does not replace the adopted one: that difference is what the page
- * happened to show, and the next unchanged read keeps the adopted text.
+ * happened to show, and the next unchanged read keeps the adopted text. New visualizations enrich
+ * matching cards in that text before the reading is recorded.
  */
 function keepAdoptedBodies(adopted: CapturedMessage[], page: CapturedMessage[]): CapturedMessage[] {
   const byId = new Map(adopted.map((m) => [m.id, m]));
   return unionMessages(
-    page.map((m) => byId.get(m.id) ?? m),
+    page.map((m) => {
+      const old = byId.get(m.id);
+      return old ? keepArtifacts(m, old) : m;
+    }),
     adopted,
   );
 }

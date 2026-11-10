@@ -66,8 +66,8 @@ type IdInput = Omit<CapturedMessage, 'id'> & { id: string | null };
  * unique by its occurrence (two identical "OK" replies get different IDs).
  *
  * `prior` is every message already read in this conversation, in order. A later viewport window
- * reuses those ids, so the second "OK" does not become the first one when the window starts on it,
- * and a body that has only grown keeps the short fragment's id (the fragment is replaced, not kept).
+ * reuses those ids only with a stable anchor or an unambiguous exact overlap. A growing body can
+ * keep its fragment's id within that overlap; ambiguous windows get fresh ids and fail coverage.
  */
 export function assignIds(list: IdInput[], prior: readonly CapturedMessage[] = []): CapturedMessage[] {
   const taken = new Set(prior.map((m) => m.id));
@@ -94,25 +94,36 @@ export function assignIds(list: IdInput[], prior: readonly CapturedMessage[] = [
   return out;
 }
 
-/** Where `list` sits in `prior`. A downward walk prefers the later overlap when scores tie. */
+/** Align only with an unambiguous overlap; text prefixes alone do not identify a turn. */
 function alignOffset(prior: readonly CapturedMessage[], list: IdInput[]): number {
   let bestOff = prior.length;
   let bestScore = 0;
-  for (let off = 0; off <= prior.length; off++) {
-    let score = 0;
+  let tied = false;
+  for (let off = 0; off < prior.length; off++) {
+    let stable = 0;
+    let exact = 0;
+    let conflict = false;
     for (let i = 0; i < list.length; i++) {
       const p = prior[off + i];
       const m = list[i]!;
       if (!p) continue;
-      if (m.id && m.id === p.id) score += 3;
-      else if (sameRow(p, m)) score += p.markdown === m.markdown ? 2 : 1;
+      if (m.id) {
+        if (m.id !== p.id || m.role !== p.role) {
+          conflict = true;
+          break;
+        }
+        stable++;
+      } else if (m.role === p.role && m.markdown === p.markdown) exact++;
     }
-    if (score > bestScore || (score === bestScore && score > 0 && off > bestOff)) {
+    if (conflict || (!stable && exact < 2)) continue;
+    const score = stable * (list.length + 1) + exact;
+    if (score > bestScore) {
       bestScore = score;
       bestOff = off;
-    }
+      tied = false;
+    } else if (score === bestScore) tied = true;
   }
-  return bestScore > 0 ? bestOff : prior.length;
+  return tied ? prior.length : bestOff;
 }
 
 /** Same row: equal text, or one body is the other extended (a streamed answer finishing). */
@@ -192,17 +203,13 @@ export function readPage(adapter: Adapter, doc: Document): PageRead {
 
 /**
  * The scroller's oldest history is toward negative `scrollTop` and 0 is the newest end
- * (`flex-direction: column-reverse`). Set on the adapter (ChatGPT) or detected from computed style.
- * Other adapters keep the normal axis, where 0 is the start.
+ * (`flex-direction: column-reverse`), as reported by the current scroller's computed style.
  */
-export function scrollReversed(adapter: Adapter, el?: HTMLElement | null): boolean {
-  const flagged = (adapter as { scrollReversed?: boolean }).scrollReversed;
-  if (flagged === true) return true;
-  if (flagged === false) return false;
+export function scrollReversed(_adapter: Adapter, el?: HTMLElement | null): boolean {
   if (!el) return false;
   try {
     const dir = getComputedStyle(el).flexDirection;
-    return dir === 'column-reverse' || dir === 'row-reverse';
+    return dir === 'column-reverse';
   } catch {
     return false;
   }

@@ -232,6 +232,30 @@ describe('engine: commit and push', () => {
     expect(file).not.toContain('EDITED ON OTHER');
   });
 
+  it('enriches adopted text with a newly captured visualization across rereads and a rescan', async () => {
+    const t = await setup();
+    const path = 'claude/2026-11-01-shared--c1.md';
+    const remote = [user('u1'), bot('a1', 'Remote text\n\n> **Artifact:** Chart')];
+    await t.fake.commitFiles(t.repo, { [path]: remoteFile(path, remote, '2026-11-01T00:00:00.000Z') });
+    await t.engine.open({ service: 'claude', chatId: 'c1', url: 'https://claude.ai/chat/c1', title: 'Shared' });
+    await vi.waitFor(async () => expect((await t.engine.status(KEY)).tracked).toBe(true));
+    const chart = { name: 'chart.html', mime: 'text/html', data: '<b>chart</b>', encoding: 'utf8' as const };
+    const page = [user('u1'), { ...bot('a1', 'Stale text\n\n> **Artifact:** [Chart](gitchat-asset:chart.html)'), assets: [chart] }];
+    const view = { id: 'tab', since: 1 };
+    for (const h of [10, 11]) {
+      const status = await t.engine.snapshot(snap(page, { view, capturedAt: `2026-11-09T${h}:00:00.000Z` }), 'manual');
+      expect(status.staged.map((m) => m.id)).toEqual(['a1']);
+    }
+    await track(t, page, { view, capturedAt: '2026-11-09T12:00:00.000Z', startConfirmed: true });
+    await t.engine.commit(KEY);
+    await t.engine.push(KEY);
+    const file = t.fake.fileAt(t.repo, path)!;
+    expect(file).toContain('Remote text');
+    expect(file).not.toContain('Stale text');
+    expect(file).toContain('(2026-11-01-shared--c1.assets/chart.html)');
+    expect(t.fake.fileAt(t.repo, 'claude/2026-11-01-shared--c1.assets/chart.html')).toBe(chart.data);
+  });
+
   it('finds an existing chat when the recursive tree is truncated and contents listings are capped', async () => {
     const t = await setup({ repo: null });
     await track(t, [user('u1'), bot('a1')], { title: 'Shared' });

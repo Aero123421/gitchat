@@ -477,7 +477,7 @@ describe('Controller', () => {
     expect(snap?.messages.map((m) => m.id)).toEqual(['a-0', 'a-1', 'b-2']);
   });
 
-  it('confirms the start of a full read even when the transcript is taller than the screen', async () => {
+  it('confirms the start only when the transcript fits or the chat is small', async () => {
     handlers['chat/open'] = (p) => status(`claude:${p.chatId as string}`, { tracked: false });
     handlers['chat/init/start'] = (p) => ({ status: status(p.key as string, { tracked: false, phase: 'capturing' }), initId: 'i-fit' });
     handlers['chat/init/done'] = (p) => status(`claude:${(p.snapshot as ChatSnapshot).chatId}`);
@@ -487,7 +487,7 @@ describe('Controller', () => {
     const done = sent.find((x) => x.type === 'chat/init/done')?.payload.snapshot as ChatSnapshot;
     expect(done.complete).toBe(true);
     expect(done.startConfirmed).toBe(true);
-    // 12 messages, taller than the scroller: a quiet oldest end is still the start of the branch
+    // A quiet oldest end does not prove that older history finished loading.
     sent.length = 0;
     showChat('a', 12, 2000);
     c.store.switchTo('claude:a', status('claude:a', { tracked: false }));
@@ -495,7 +495,7 @@ describe('Controller', () => {
     await vi.advanceTimersByTimeAsync(30_000);
     const again = sent.find((x) => x.type === 'chat/init/done')?.payload.snapshot as ChatSnapshot;
     expect(again.complete).toBe(true);
-    expect(again.startConfirmed).toBe(true);
+    expect(again.startConfirmed).toBeUndefined();
   });
 
   it('tells the popup why init failed, and keeps saying so after the background’s next status (review 2-2)', async () => {
