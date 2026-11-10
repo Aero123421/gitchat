@@ -16,6 +16,7 @@
     push: '<path d="M8 18.5H7a4.2 4.2 0 0 1-.4-8.38A5.6 5.6 0 0 1 17.4 10.5 4 4 0 0 1 17 18.5h-1"/><path d="M12 20.5v-8M9 15.3l3-3 3 3"/>',
     cloud: '<path d="M7 18.5h10a4 4 0 0 0 .5-7.97A5.6 5.6 0 0 0 6.6 10.1 4.2 4.2 0 0 0 7 18.5Z"/>',
     link: '<path d="M10 14a4.2 4.2 0 0 0 6 0l3-3a4.24 4.24 0 0 0-6-6l-1 1"/><path d="M14 10a4.2 4.2 0 0 0-6 0l-3 3a4.24 4.24 0 0 0 6 6l1-1"/>',
+    copy: '<rect x="8.5" y="8.5" width="11" height="12" rx="2"/><path d="M15.5 8.5V6a2 2 0 0 0-2-2H6.5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h2"/>',
     close: '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>',
     check: '<path d="M5 12.5l4.2 4.2L19 7"/>',
     alert: '<path d="M12 8.5v4.5M12 16.6v.01"/><path d="M10.3 3.9 2.6 17.6A2 2 0 0 0 4.3 20.5h15.4a2 2 0 0 0 1.7-2.9L13.7 3.9a2 2 0 0 0-3.4 0Z"/>',
@@ -95,6 +96,9 @@
     return s("svg", { class: "spin", viewBox: "-10 -10 20 20", "aria-hidden": "true" }, s("circle", { r: 8, pathLength: 1 }));
   }
 
+  // src/shared/types.ts
+  var SERVICES = ["chatgpt", "claude", "gemini"];
+
   // src/shared/settings.ts
   var DEFAULT_SETTINGS = {
     widget: "creature",
@@ -107,16 +111,33 @@
     githubClientId: ""
   };
   var KEY = "settings";
+  function knownRepo(value) {
+    if (!value || typeof value !== "object") return null;
+    const repo = value;
+    if (typeof repo.owner !== "string" || typeof repo.name !== "string" || typeof repo.branch !== "string") return null;
+    return { owner: repo.owner, name: repo.name, branch: repo.branch };
+  }
+  function knownServices(value) {
+    const raw = value && typeof value === "object" ? value : {};
+    const services = { ...DEFAULT_SETTINGS.services };
+    for (const id of SERVICES) {
+      const flag = raw[id];
+      if (typeof flag === "boolean") services[id] = flag;
+    }
+    return services;
+  }
   function normalizeSettings(raw) {
     const s2 = raw && typeof raw === "object" ? raw : {};
     const out = {
-      ...DEFAULT_SETTINGS,
-      ...s2,
-      services: { ...DEFAULT_SETTINGS.services, ...s2.services ?? {} },
-      // Missing on settings saved before theme existed; anything else unknown is Auto too.
-      theme: s2.theme === "light" || s2.theme === "dark" || s2.theme === "auto" ? s2.theme : "auto"
+      widget: s2.widget === "creature" || s2.widget === "line" || s2.widget === "dot" ? s2.widget : DEFAULT_SETTINGS.widget,
+      theme: s2.theme === "light" || s2.theme === "dark" || s2.theme === "auto" ? s2.theme : "auto",
+      autoCommit: typeof s2.autoCommit === "boolean" ? s2.autoCommit : DEFAULT_SETTINGS.autoCommit,
+      autoPush: typeof s2.autoPush === "boolean" ? s2.autoPush : DEFAULT_SETTINGS.autoPush,
+      repo: knownRepo(s2.repo),
+      services: knownServices(s2.services),
+      saveVisualizations: typeof s2.saveVisualizations === "boolean" ? s2.saveVisualizations : DEFAULT_SETTINGS.saveVisualizations,
+      githubClientId: typeof s2.githubClientId === "string" ? s2.githubClientId : DEFAULT_SETTINGS.githubClientId
     };
-    if (!["creature", "line", "dot"].includes(out.widget)) out.widget = DEFAULT_SETTINGS.widget;
     if (out.autoPush) out.autoCommit = true;
     return out;
   }
@@ -1875,7 +1896,8 @@ button { font: inherit; }
     const content = h("div", { class: "step-content", "aria-live": "polite" });
     card.append(content);
     root.append(steps, card);
-    let step = app.auth ? app.settings.repo ? "prefs" : "repo" : "welcome";
+    let repoConfirmed = Boolean(app.auth && app.settings.repo);
+    let step = app.auth ? repoConfirmed ? "prefs" : "repo" : "welcome";
     let error = "";
     let tokenFirst = false;
     let replacing = false;
@@ -1921,6 +1943,7 @@ button { font: inherit; }
       try {
         await request("auth/signout", {});
         app.auth = null;
+        repoConfirmed = false;
         await refreshAuth().catch(() => void 0);
         tokenFirst = pasteToken;
         replacing = false;
@@ -1961,7 +1984,8 @@ button { font: inherit; }
               createConnect(
                 async () => {
                   await refreshAuth().catch(() => void 0);
-                  go(app.settings.repo ? "prefs" : "repo");
+                  repoConfirmed = false;
+                  go("repo");
                 },
                 tokenFirst ? { tokenFirst: true } : void 0
               ),
@@ -1971,7 +1995,7 @@ button { font: inherit; }
           break;
         case "repo":
           body.append(title("obRepoTitle"), lead("obRepoBody"));
-          if (app.settings.repo) {
+          if (app.settings.repo && repoConfirmed) {
             const r = app.settings.repo;
             body.append(
               h("div", { class: "note ok" }, icon2("check"), h("span", { class: "mono" }, `${r.owner}/${r.name}`)),
@@ -1984,6 +2008,7 @@ button { font: inherit; }
                   await refreshSettings().catch(() => void 0);
                   if (!app.settings.repo) await patchSettings({ repo }).catch(() => void 0);
                   void refreshSync();
+                  repoConfirmed = true;
                   go("prefs");
                 },
                 // Settings already has Sign out; only the wizard needs a way back to the token form.
@@ -2249,6 +2274,10 @@ button { font: inherit; }
         Object.assign(state, s2);
         emit2("reset");
       },
+      // The playground has no chat to copy: report success without touching the clipboard.
+      copyMarkdown() {
+        return Promise.resolve(state.tracked);
+      },
       failNextPush() {
         state.failNext = true;
         emit2("armed");
@@ -2313,6 +2342,11 @@ button { font: inherit; }
     el.innerHTML = policy.createHTML(html);
   }
 
+  // src/content/ui/core/gesture.js
+  function isUserInput(event) {
+    return event?.isTrusted === true;
+  }
+
   // src/content/ui/core/panel.js
   var OPEN = springEasing({ stiffness: 380, damping: 38 });
   var CLOSE = springEasing({ stiffness: 600, damping: 50 });
@@ -2349,7 +2383,8 @@ button { font: inherit; }
 .panel > .lg-b { background: var(--tint-strong); }
 .panel .content { position: relative; padding: 8px 8px 6px; }
 .panel .graph { display: block; overflow: visible; }
-.panel.untracked .graph, .panel.untracked .ib.commit, .panel.untracked .ib.push, .panel.untracked .ib.link { display: none; }
+.panel.untracked .graph, .panel.untracked .ib.commit, .panel.untracked .ib.push, .panel.untracked .ib.link, .panel.untracked .ib.md { display: none; }
+.panel .ib.fail { color: var(--err); }
 /* automatic actions need no button */
 .panel.auto-commit .ib.commit, .panel.auto-push:not(.error) .ib.push { display: none; }
 
@@ -2623,6 +2658,7 @@ button { font: inherit; }
         <button class="ib commit" aria-label="Commit" title="Commit">${icon.commit}</button>
         <button class="ib push" aria-label="Push" title="Push">${icon.push}<svg class="spin" viewBox="-10 -10 20 20"><circle r="8" pathLength="1"/></svg></button>
         <button class="ib link" aria-label="Copy link" title="Copy link">${icon.link}</button>
+        <button class="ib md" aria-label="Copy as Markdown" title="Copy as Markdown">${icon.copy}</button>
         <button class="ib gear" aria-label="Settings" title="Settings">${icon.gear}</button>
         <span class="sp"></span>
         <button class="sw" data-k="autoCommit" role="switch" aria-checked="false" aria-label="Auto commit" title="Auto commit">${icon.commit}<span class="tr"><span class="kn"></span></span></button>
@@ -2665,15 +2701,25 @@ button { font: inherit; }
         { duration: 240, easing: "ease-out" }
       );
     }
-    btnCommit.addEventListener("click", () => store.commit());
-    btnPush.addEventListener("click", () => store.push());
-    switches.forEach((sw) => sw.addEventListener("click", () => store.setAuto(sw.dataset.k, !store.state.settings[sw.dataset.k])));
+    btnCommit.addEventListener("click", (e) => {
+      if (isUserInput(e)) store.commit();
+    });
+    btnPush.addEventListener("click", (e) => {
+      if (isUserInput(e)) store.push();
+    });
+    for (const key of ["autoCommit", "autoPush"]) {
+      const sw = switches.find((s2) => s2.dataset.k === key);
+      sw.addEventListener("click", (e) => {
+        if (!isUserInput(e)) return;
+        store.setAuto(key, !store.state.settings[key]);
+      });
+    }
     $(".gear").addEventListener("click", () => {
       onRequestClose?.();
       openSettings?.();
     });
     if (!openSettings) $(".gear").hidden = true;
-    for (const [sel, key] of [[".ib.commit", "commit"], [".ib.push", "push"], [".link", "copyLink"], [".gear", "openSettings"], [".sw[data-k=autoCommit]", "autoCommit"], [".sw[data-k=autoPush]", "autoPush"]]) {
+    for (const [sel, key] of [[".ib.commit", "commit"], [".ib.push", "push"], [".link", "copyLink"], [".ib.md", "copyMarkdown"], [".gear", "openSettings"], [".sw[data-k=autoCommit]", "autoCommit"], [".sw[data-k=autoPush]", "autoPush"]]) {
       const b = $(sel);
       const text = label(key);
       if (b && text !== key) {
@@ -2692,6 +2738,20 @@ button { font: inherit; }
       setTimeout(() => {
         setHTML(b, icon.link);
         b.classList.remove("done");
+      }, 1200);
+    });
+    let copying = false;
+    $(".ib.md").addEventListener("click", async (e) => {
+      if (!isUserInput(e) || copying || !store.copyMarkdown) return;
+      const b = $(".ib.md");
+      copying = true;
+      const ok = await store.copyMarkdown().catch(() => false);
+      copying = false;
+      setHTML(b, ok ? icon.check : icon.alert);
+      b.classList.add(ok ? "done" : "fail");
+      setTimeout(() => {
+        setHTML(b, icon.copy);
+        b.classList.remove("done", "fail");
       }, 1200);
     });
     const unsub = store.subscribe((type, d) => {
@@ -2873,10 +2933,13 @@ button { font: inherit; }
     };
     parent.addEventListener("focusin", syncFocus);
     parent.addEventListener("focusout", () => queueMicrotask(syncFocus));
-    buttons.start.addEventListener("click", () => store.init());
-    buttons.cancel.addEventListener("click", () => store.cancelInit?.());
-    buttons.commit.addEventListener("click", () => store.commit());
-    buttons.push.addEventListener("click", () => store.push());
+    const onUserClick = (fn) => (e) => {
+      if (isUserInput(e)) fn();
+    };
+    buttons.start.addEventListener("click", onUserClick(() => store.init()));
+    buttons.cancel.addEventListener("click", onUserClick(() => store.cancelInit?.()));
+    buttons.commit.addEventListener("click", onUserClick(() => store.commit()));
+    buttons.push.addEventListener("click", onUserClick(() => store.push()));
     function visible() {
       const st = store.state;
       return availableActions(st, st.settings);
@@ -4345,6 +4408,7 @@ button { font: inherit; }
       } else sync();
     });
     cap.addEventListener("pointerdown", (e) => {
+      if (!isUserInput(e)) return;
       pressed = { y: e.clientY, dy: e.clientY - cY.value };
       cap.setPointerCapture(e.pointerId);
     });
@@ -4356,7 +4420,7 @@ button { font: inherit; }
       }
       if (dragging) frac = clamp(e.clientY - pressed.dy, 60, innerHeight - 60) / innerHeight;
     });
-    const release = () => {
+    const release = (e) => {
       if (!pressed) return;
       pressed = null;
       if (dragging) {
@@ -4364,6 +4428,7 @@ button { font: inherit; }
         box.classList.remove("drag");
         return;
       }
+      if (!isUserInput(e) || e.type !== "pointerup") return;
       if (panelOpen) return closePanel();
       if (noPanel()) {
         pinUntil = performance.now() + 3e3;
@@ -4616,9 +4681,6 @@ button { font: inherit; }
       }, ms);
     }
   };
-
-  // src/shared/types.ts
-  var SERVICES = ["chatgpt", "claude", "gemini"];
 
   // src/options/settings-view.ts
   var PROJECT_URL = "https://github.com/Aero123421/gitchat";
@@ -4906,7 +4968,7 @@ button { font: inherit; }
         h(
           "div",
           { class: "rows" },
-          row(t("version"), null, h("span", { class: "mono muted" }, "0.1.7")),
+          row(t("version"), null, h("span", { class: "mono muted" }, "0.1.8")),
           // after `git pull` in the extension folder: load the new files without visiting chrome://extensions
           row(t("reloadExtension"), t("reloadExtensionHint"), h("button", { class: "btn small", type: "button", onClick: () => chrome.runtime.reload() }, t("reloadExtension"))),
           row(t("project"), null, h("a", { class: "mono", href: PROJECT_URL, target: "_blank", rel: "noopener noreferrer" }, PROJECT_URL.replace("https://", ""))),

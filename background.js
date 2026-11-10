@@ -1,42 +1,3 @@
-// src/shared/settings.ts
-var DEFAULT_SETTINGS = {
-  widget: "creature",
-  theme: "auto",
-  autoCommit: false,
-  autoPush: false,
-  repo: null,
-  services: { chatgpt: true, claude: true, gemini: true },
-  saveVisualizations: true,
-  githubClientId: ""
-};
-var KEY = "settings";
-function normalizeSettings(raw) {
-  const s = raw && typeof raw === "object" ? raw : {};
-  const out = {
-    ...DEFAULT_SETTINGS,
-    ...s,
-    services: { ...DEFAULT_SETTINGS.services, ...s.services ?? {} },
-    // Missing on settings saved before theme existed; anything else unknown is Auto too.
-    theme: s.theme === "light" || s.theme === "dark" || s.theme === "auto" ? s.theme : "auto"
-  };
-  if (!["creature", "line", "dot"].includes(out.widget)) out.widget = DEFAULT_SETTINGS.widget;
-  if (out.autoPush) out.autoCommit = true;
-  return out;
-}
-function applySettingsPatch(current, patch) {
-  const merged = { ...current, ...patch, services: { ...current.services, ...patch.services ?? {} } };
-  if (patch.autoCommit === false) merged.autoPush = false;
-  if (patch.autoPush === true) merged.autoCommit = true;
-  return normalizeSettings(merged);
-}
-async function loadSettings() {
-  const got = await chrome.storage.sync.get(KEY);
-  return normalizeSettings(got[KEY]);
-}
-async function saveSettings(settings) {
-  await chrome.storage.sync.set({ [KEY]: settings });
-}
-
 // src/shared/protocol.ts
 var EVENTS_PORT = "gitchat:events";
 var GitchatError = class extends Error {
@@ -55,6 +16,67 @@ function isEnvelope(x) {
 var SERVICES = ["chatgpt", "claude", "gemini"];
 var ASSET_URL_PREFIX = "gitchat-asset:";
 var chatKey = (service2, chatId) => `${service2}:${chatId}`;
+
+// src/shared/settings.ts
+var DEFAULT_SETTINGS = {
+  widget: "creature",
+  theme: "auto",
+  autoCommit: false,
+  autoPush: false,
+  repo: null,
+  services: { chatgpt: true, claude: true, gemini: true },
+  saveVisualizations: true,
+  githubClientId: ""
+};
+var KEY = "settings";
+function knownRepo(value) {
+  if (!value || typeof value !== "object") return null;
+  const repo = value;
+  if (typeof repo.owner !== "string" || typeof repo.name !== "string" || typeof repo.branch !== "string") return null;
+  return { owner: repo.owner, name: repo.name, branch: repo.branch };
+}
+function knownServices(value) {
+  const raw = value && typeof value === "object" ? value : {};
+  const services = { ...DEFAULT_SETTINGS.services };
+  for (const id of SERVICES) {
+    const flag = raw[id];
+    if (typeof flag === "boolean") services[id] = flag;
+  }
+  return services;
+}
+function normalizeSettings(raw) {
+  const s = raw && typeof raw === "object" ? raw : {};
+  const out = {
+    widget: s.widget === "creature" || s.widget === "line" || s.widget === "dot" ? s.widget : DEFAULT_SETTINGS.widget,
+    theme: s.theme === "light" || s.theme === "dark" || s.theme === "auto" ? s.theme : "auto",
+    autoCommit: typeof s.autoCommit === "boolean" ? s.autoCommit : DEFAULT_SETTINGS.autoCommit,
+    autoPush: typeof s.autoPush === "boolean" ? s.autoPush : DEFAULT_SETTINGS.autoPush,
+    repo: knownRepo(s.repo),
+    services: knownServices(s.services),
+    saveVisualizations: typeof s.saveVisualizations === "boolean" ? s.saveVisualizations : DEFAULT_SETTINGS.saveVisualizations,
+    githubClientId: typeof s.githubClientId === "string" ? s.githubClientId : DEFAULT_SETTINGS.githubClientId
+  };
+  if (out.autoPush) out.autoCommit = true;
+  return out;
+}
+function applySettingsPatch(current, patch) {
+  const merged = { ...current, ...patch, services: { ...current.services, ...patch.services ?? {} } };
+  if (patch.autoCommit === false) merged.autoPush = false;
+  if (patch.autoPush === true) merged.autoCommit = true;
+  return normalizeSettings(merged);
+}
+async function restrictSettingsStorage() {
+  await chrome.storage.sync.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" });
+}
+async function loadSettings() {
+  await restrictSettingsStorage();
+  const got = await chrome.storage.sync.get(KEY);
+  return normalizeSettings(got[KEY]);
+}
+async function saveSettings(settings) {
+  await restrictSettingsStorage();
+  await chrome.storage.sync.set({ [KEY]: normalizeSettings(settings) });
+}
 
 // src/shared/log.ts
 var PREFIX = "[gitchat]";
@@ -279,7 +301,7 @@ function repoId(repo) {
 
 // src/background/assets.ts
 var MARKER_LINE = /^> \*\*(Artifact|File):\*\* (.*?)[ \t]*$/gm;
-var LINKED = /^\[((?:\\.|[^\]\\])*)\]\(([^()\s]+)\)$/;
+var LINKED = /^\[((?:\\.|[^\]\\])*\\?)\]\(([^()\s]+)\)$/;
 var escapeLabel = (s) => s.replace(/[[\]]/g, "\\$&");
 var unescapeLabel = (s) => s.replace(/\\([[\]\\])/g, "$1");
 function parseMarker(kind, rest) {
@@ -418,7 +440,7 @@ function mergeSnapshot(known, snap, reads) {
     if (snap.startConfirmed === true || !known.length) return { ok: true, messages: placed };
     const at = new Map(known.map((m, i) => [m.id, i]));
     const first = incoming.find((m) => at.has(m.id));
-    if (!first) return { ok: true, messages: unionMessages(placed, known) };
+    if (!first) return { ok: true, messages: known };
     const captured = new Set(incoming.map((m) => m.id));
     return { ok: true, messages: [...known.slice(0, at.get(first.id)).filter((m) => !captured.has(m.id)), ...placed] };
   }
@@ -495,7 +517,9 @@ function recordReads(reads, captured, chat, view, now) {
     const h = messageHash(m);
     const v = view ? [view.id, ...(prev?.v ?? []).filter((x) => x !== view.id)].slice(0, 4) : prev?.v;
     const hv = {};
-    for (const id of v ?? []) {
+    const remembered = /* @__PURE__ */ new Set([...v ?? [], ...Object.keys(prev?.hv ?? {})]);
+    if (view) remembered.add(view.id);
+    for (const id of remembered) {
       const was = view && id === view.id ? h : prev?.hv?.[id];
       if (was !== void 0) hv[id] = was;
     }
@@ -637,6 +661,22 @@ function renderChat(doc, path) {
 `, encoding: "utf8", kind: "chat" }];
   for (const [name, a] of assets) out.push({ path: `${dir}/${name}`, content: a.data, encoding: a.encoding, kind: "asset" });
   return out;
+}
+function copyCards(md) {
+  return md.replace(MARKER_LINE, (line, kind, rest) => {
+    const marker = parseMarker(kind, rest);
+    return marker.target !== null && assetNameOf(marker.target) !== null ? markerLine({ ...marker, target: null }) : line;
+  });
+}
+function renderCopy(doc) {
+  const lines = [`# ${chatTitle(doc.title)}`, ""];
+  for (const m of doc.messages) {
+    const body = canonicalMarkdown(copyCards(m.markdown));
+    lines.push(`## ${ROLE_HEADING[m.role]}`, "");
+    if (body) lines.push(body, "");
+  }
+  return `${lines.join("\n").replace(/\n+$/, "")}
+`;
 }
 function collectAssets(messages) {
   const files = /* @__PURE__ */ new Map();
@@ -787,11 +827,6 @@ async function findEntry(gh, repo, head, index, path) {
   if (sha || !index.truncated) return sha;
   const r = await gh.request("GET", `${repoPath(repo)}/contents/${encodePath(path)}?ref=${head.commit}`, void 0, [404]);
   return r.status === 404 ? void 0 : r.data.sha;
-}
-async function listDir(gh, repo, head, dir) {
-  const r = await gh.request("GET", `${repoPath(repo)}/contents/${encodePath(dir)}?ref=${head.commit}`, void 0, [404]);
-  if (r.status === 404 || !Array.isArray(r.data)) return [];
-  return r.data.filter((e) => e.type === "file").map((e) => e.path);
 }
 async function getBlobText(gh, repo, sha) {
   const r = await gh.request("GET", `${repoPath(repo)}/git/blobs/${sha}`);
@@ -991,7 +1026,7 @@ async function resolveTarget(gh, repo, head, index, doc, rec, claimed) {
   } else {
     copy = await findChat(gh, repo, head, index, doc.service, doc.chatId);
     if (!copy) {
-      const existing = new Set(index.truncated ? await listDir(gh, repo, head, doc.service) : index.entries.keys());
+      const existing = new Set(await candidatePaths(gh, repo, head, index, doc.service));
       const taken = (p) => existing.has(p) || claimed.has(p);
       path = rec?.path && !taken(rec.path) ? rec.path : freePath(doc.service, doc.title, doc.chatId, doc.createdAt, taken);
       return { path, base: null, written: false };
@@ -1000,7 +1035,7 @@ async function resolveTarget(gh, repo, head, index, doc, rec, claimed) {
   }
   const knowsBase = path === rec?.path && !!rec.remoteBlob;
   const sha = copy?.sha ?? await findEntry(gh, repo, head, index, path);
-  if (!sha || knowsBase && sha === rec.remoteBlob) return { path, base: null, written: false };
+  if (!sha || knowsBase && rec && sha === rec.remoteBlob && bodyMatchesBase(doc, rec)) return { path, base: null, written: false };
   return {
     path,
     theirs: copy ?? await readCopy(gh, repo, head, index, path, sha),
@@ -1019,6 +1054,11 @@ function combine(doc, theirs, base) {
     createdAt: Date.parse(theirCreated) < Date.parse(doc.createdAt) ? theirCreated : doc.createdAt,
     messages: threeWayMerge(base, doc.messages, theirs.messages, oursWins)
   };
+}
+function bodyMatchesBase(doc, rec) {
+  const base = rec.baseRefs;
+  if (!base || base.length !== doc.messages.length) return false;
+  return doc.messages.every((m, i) => m.id === base[i].id && messageHash(m) === base[i].hash);
 }
 function sameContent(a, b) {
   return a.length === b.length && a.every((m, i) => m.id === b[i].id && messageHash(m) === messageHash(b[i]));
@@ -1055,8 +1095,22 @@ async function readCopy(gh, repo, head, index, path, sha) {
   for (const m of messages) live.push(await materializeAssets(m, fetchAsset));
   return { path, sha, front, messages: live };
 }
+async function candidatePaths(gh, repo, head, index, service2) {
+  if (!index.truncated) return index.entries.keys();
+  const prefix = `${service2}/`;
+  const known = [...index.entries.keys()].filter((p) => p.startsWith(prefix) && !p.slice(prefix.length).includes("/"));
+  const listed = await listServiceBlobs(gh, repo, head.tree, service2);
+  return [.../* @__PURE__ */ new Set([...known, ...listed])];
+}
+async function listServiceBlobs(gh, repo, rootTree, dir) {
+  const root = await gh.request("GET", `${repoPath(repo)}/git/trees/${rootTree}`);
+  const sub = (root.data.tree ?? []).find((e) => e.path === dir && e.type === "tree");
+  if (!sub) return [];
+  const inner = await gh.request("GET", `${repoPath(repo)}/git/trees/${sub.sha}`);
+  return (inner.data.tree ?? []).filter((e) => e.type === "blob").map((e) => `${dir}/${e.path}`);
+}
 async function findChat(gh, repo, head, index, service2, chatId) {
-  const paths = index.truncated ? await listDir(gh, repo, head, service2) : index.entries.keys();
+  const paths = await candidatePaths(gh, repo, head, index, service2);
   for (const path of chatFileCandidates(paths, service2, chatId)) {
     const sha = await findEntry(gh, repo, head, index, path);
     if (!sha) continue;
@@ -1112,15 +1166,15 @@ var Engine = class {
   }
   /** Runs chat mutations one at a time. */
   exclusive(fn) {
-    const run = this.queue.then(fn, fn);
-    this.queue = run.catch(() => void 0);
-    return run;
+    const run2 = this.queue.then(fn, fn);
+    this.queue = run2.catch(() => void 0);
+    return run2;
   }
   /** Pushing and switching repositories never overlap (a push must finish against the repository it started with). */
   withRepoLock(fn) {
-    const run = this.repoQueue.then(fn, fn);
-    this.repoQueue = run.catch(() => void 0);
-    return run;
+    const run2 = this.repoQueue.then(fn, fn);
+    this.repoQueue = run2.catch(() => void 0);
+    return run2;
   }
   async currentRepo() {
     return repoId((await this.deps.settings.get()).repo);
@@ -1190,7 +1244,8 @@ var Engine = class {
               capturedAt: found.front.captured || at,
               messages: found.messages,
               committed: refsOf(found.messages),
-              pageReads: {},
+              // Baseline for the next page read: the adopted text, not "this device edited it".
+              pageReads: seedPageReads(found.messages, this.now()),
               settled: true,
               updatedAt: this.now()
             });
@@ -1222,7 +1277,8 @@ var Engine = class {
       const rec = await this.deps.db.getChat(key2);
       if (!rec?.tracked || isOlder(snap.capturedAt, rec.seenAt)) return false;
       const reads = pageReadsOf(rec);
-      const merged = mergeSnapshot(rec.messages, { ...snap, messages }, reads);
+      const baseline = isAdoptedBaseline(reads);
+      const merged = baseline ? { ok: true, messages: keepAdoptedBodies(rec.messages, messages) } : mergeSnapshot(rec.messages, { ...snap, messages }, reads);
       if (!merged.ok) {
         if (merged.code === "ambiguous") fullRead = reason !== "sent";
         else this.chatErrors.set(key2, merged.message);
@@ -1230,7 +1286,8 @@ var Engine = class {
       }
       this.chatErrors.delete(key2);
       rec.messages = merged.messages;
-      rec.pageReads = recordReads(reads, messages, merged.messages, snap.view, this.now());
+      const readView = baseline ? snap.view ?? { id: "page" } : snap.view;
+      rec.pageReads = recordReads(baseline ? stripAdoptedMark(reads) : reads, messages, merged.messages, readView, this.now());
       delete rec.seen;
       rec.settled = reason !== "sent";
       rec.capturedAt = snap.capturedAt || this.iso();
@@ -1404,6 +1461,18 @@ var Engine = class {
     });
     for (const key2 of gone) await this.emitStatus(key2);
   }
+  /**
+   * A tracked chat as Markdown to paste elsewhere, from the working copy (what the next commit
+   * saves, older history from other devices included). Read-only: nothing is staged or committed,
+   * and no push or network call is needed.
+   */
+  async copyMarkdown(key2) {
+    return this.exclusive(async () => {
+      const rec = await this.deps.db.getChat(key2);
+      if (!rec?.tracked) throw new GitchatError("Start saving this chat first.", "not-tracked");
+      return renderCopy(rec);
+    });
+  }
   async untrack(key2) {
     await this.exclusive(async () => {
       const rec = await this.deps.db.getChat(key2);
@@ -1501,7 +1570,7 @@ var Engine = class {
       this.again[kind] = true;
       return this.pushing;
     }
-    const run = (async () => {
+    const run2 = (async () => {
       try {
         for (; ; ) {
           await this.withRepoLock(() => this.pushOnce());
@@ -1519,8 +1588,8 @@ var Engine = class {
         await this.emitSync();
       }
     })();
-    this.pushing = run;
-    return run;
+    this.pushing = run2;
+    return run2;
   }
   async pushOnce() {
     const { repo } = await this.deps.settings.get();
@@ -1547,8 +1616,8 @@ var Engine = class {
         return doc ? [{ commit, doc }] : [];
       });
       const gh = await this.deps.github();
-      const run = () => pushCommits(gh, repo, items, (k) => this.deps.db.getChat(k));
-      outcome = await (this.deps.keepAlive ? this.deps.keepAlive(run) : run());
+      const run2 = () => pushCommits(gh, repo, items, (k) => this.deps.db.getChat(k));
+      outcome = await (this.deps.keepAlive ? this.deps.keepAlive(run2) : run2());
     } catch (e) {
       const err = toGitchatError(e);
       await this.setSyncMeta({ lastError: err.message });
@@ -1829,6 +1898,40 @@ var Engine = class {
 function toInfo(c) {
   return c.sha ? { id: c.id, n: c.n, t: c.createdAt, pushed: c.pushed, sha: c.sha } : { id: c.id, n: c.n, t: c.createdAt, pushed: c.pushed };
 }
+var ADOPTED_VIEW = "\0adopted";
+function seedPageReads(messages, at) {
+  const out = {};
+  for (const m of messages) out[m.id] = { h: messageHash(m), at, v: [ADOPTED_VIEW] };
+  return out;
+}
+function isAdoptedBaseline(reads) {
+  if (reads.size === 0) return false;
+  for (const r of reads.values()) {
+    if (!r.h || r.v?.length !== 1 || r.v[0] !== ADOPTED_VIEW) return false;
+  }
+  return true;
+}
+function stripAdoptedMark(reads) {
+  const next = /* @__PURE__ */ new Map();
+  for (const [id, r] of reads) {
+    const v = (r.v ?? []).filter((x) => x !== ADOPTED_VIEW);
+    const copy = { h: r.h, at: r.at };
+    if (v.length) copy.v = v;
+    if (r.hv && Object.keys(r.hv).length) copy.hv = { ...r.hv };
+    next.set(id, copy);
+  }
+  return next;
+}
+function keepAdoptedBodies(adopted, page) {
+  const byId = new Map(adopted.map((m) => [m.id, m]));
+  return unionMessages(
+    page.map((m) => {
+      const old = byId.get(m.id);
+      return old ? keepArtifacts(m, old) : m;
+    }),
+    adopted
+  );
+}
 function pageReadsOf(rec) {
   if (rec.pageReads) return new Map(Object.entries(rec.pageReads));
   return new Map((rec.seen ?? rec.messages.map((m) => m.id)).map((id) => [id, { h: "", at: 0 }]));
@@ -1969,6 +2072,7 @@ function validatePayload(type, payload) {
     case "chat/status":
     case "chat/init/start":
     case "chat/commit":
+    case "chat/markdown":
     case "chat/untrack":
       return key(p.key);
     case "chat/push":
@@ -2081,15 +2185,26 @@ var SCOPE = "repo";
 async function restrictStorage() {
   try {
     await chrome.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" });
-  } catch {
+  } catch (error) {
+    try {
+      await chrome.storage.local.remove(AUTH_KEY);
+    } catch (removeError) {
+      throw new AggregateError(
+        [error, removeError],
+        "Could not restrict token storage to trusted contexts, and the saved token could not be removed."
+      );
+    }
+    throw error;
   }
 }
 async function loadAuth() {
+  await restrictStorage();
   const got = await chrome.storage.local.get(AUTH_KEY);
   const a = got[AUTH_KEY];
   return a?.token ? a : null;
 }
 async function saveAuth(a) {
+  await restrictStorage();
   await chrome.storage.local.set({ [AUTH_KEY]: a });
 }
 async function clearAuth() {
@@ -2098,6 +2213,7 @@ async function clearAuth() {
 async function identify(token, opts = {}) {
   const t = token.trim();
   if (!t) throw new GitchatError("Paste a token first.", "invalid");
+  await restrictStorage();
   const r = await new GitHub(t, opts).request("GET", "/user");
   const scopes = (r.headers.get("x-oauth-scopes") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
   return { login: r.data.login, scopes };
@@ -2117,6 +2233,8 @@ var DeviceFlow = class {
       throw new GitchatError('"Sign in with GitHub" is not available in this build. Use a personal access token, or set an OAuth client ID under Advanced.', "no-client-id");
     }
     const generation = this.generation;
+    await restrictStorage();
+    if (generation !== this.generation) throw new GitchatError("The sign-in was cancelled.", "cancelled");
     const data = await this.post(DEVICE_CODE_URL, { client_id: clientId, scope: SCOPE });
     if (generation !== this.generation) throw new GitchatError("The sign-in was cancelled.", "cancelled");
     if (!data.device_code || !data.user_code || !data.verification_uri) throw signInError(data);
@@ -2134,7 +2252,9 @@ var DeviceFlow = class {
     const generation = this.generation;
     const p = (await chrome.storage.session.get(PENDING_KEY))[PENDING_KEY];
     if (!p) throw new GitchatError("The sign-in expired. Start again.", "expired");
+    await restrictStorage();
     const cancelled = () => new GitchatError("The sign-in was cancelled.", "cancelled");
+    if (generation !== this.generation) throw cancelled();
     let interval = p.interval;
     while (this.now() < p.expiresAt) {
       await this.sleep(interval * 1e3);
@@ -2350,9 +2470,9 @@ function createBackground(opts = {}) {
   });
   let settingsQueue = Promise.resolve();
   const serialSettings = (fn) => {
-    const run = settingsQueue.then(fn, fn);
-    settingsQueue = run.catch(() => void 0);
-    return run;
+    const run2 = settingsQueue.then(fn, fn);
+    settingsQueue = run2.catch(() => void 0);
+    return run2;
   };
   async function settingsUpdated(next) {
     const prev = lastSettings;
@@ -2372,9 +2492,9 @@ function createBackground(opts = {}) {
   let authGeneration = 0;
   let authQueue = Promise.resolve();
   const serialAuth = (fn) => {
-    const run = authQueue.then(fn, fn);
-    authQueue = run.catch(() => void 0);
-    return run;
+    const run2 = authQueue.then(fn, fn);
+    authQueue = run2.catch(() => void 0);
+    return run2;
   };
   const cancelledSignIn = () => new GitchatError("The sign-in was cancelled.", "cancelled");
   async function signedIn() {
@@ -2400,6 +2520,7 @@ function createBackground(opts = {}) {
     "chat/init/cancel": async (p) => (await engine()).initCancel(p.key, p.initId),
     "chat/commit": async (p) => (await engine()).commit(p.key),
     "chat/push": async (p) => (await engine()).push(p.key),
+    "chat/markdown": async (p) => ({ markdown: await (await engine()).copyMarkdown(p.key) }),
     "chat/untrack": async (p) => (await engine()).untrack(p.key),
     "settings/get": () => loadSettings(),
     "settings/set": (p) => patchSettings(p.patch ?? {}),
@@ -2515,15 +2636,30 @@ function createBackground(opts = {}) {
 }
 
 // src/background/index.ts
-void restrictStorage();
-var app = createBackground();
-chrome.runtime.onMessage.addListener(app.onMessage);
-chrome.runtime.onConnect.addListener(app.onConnect);
-chrome.alarms.onAlarm.addListener(app.onAlarm);
-chrome.runtime.onStartup.addListener(app.onStartup);
-chrome.runtime.onInstalled.addListener(app.onInstalled);
+var ready = Promise.allSettled([restrictStorage(), restrictSettingsStorage()]).then((restricted) => {
+  const failures = restricted.flatMap((result2) => result2.status === "rejected" ? [result2.reason] : []);
+  if (failures.length > 1) throw new AggregateError(failures, "Could not restrict extension storage to trusted contexts.");
+  if (failures.length === 1) throw failures[0];
+  return createBackground();
+});
+function run(fn) {
+  void ready.then(fn).catch((error) => console.error("Could not initialize gitchat background.", error));
+}
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (!isEnvelope(msg) || sender.id !== chrome.runtime.id) return false;
+  void ready.then((app) => app.onMessage(msg, sender, sendResponse)).catch((error) => {
+    sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) });
+  });
+  return true;
+});
+chrome.runtime.onConnect.addListener((port) => {
+  void ready.then((app) => app.onConnect(port)).catch(() => port.disconnect());
+});
+chrome.alarms.onAlarm.addListener((alarm) => run((app) => app.onAlarm(alarm)));
+chrome.runtime.onStartup.addListener(() => run((app) => app.onStartup()));
+chrome.runtime.onInstalled.addListener((details) => run((app) => app.onInstalled(details)));
 chrome.storage.onChanged.addListener((changes, area) => {
   const c = changes.settings;
-  if (area === "sync" && c) app.onSettingsStored(normalizeSettings(c.oldValue));
+  if (area === "sync" && c) run((app) => app.onSettingsStored(normalizeSettings(c.oldValue)));
 });
-app.start();
+run((app) => app.start());

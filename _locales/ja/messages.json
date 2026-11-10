@@ -20,6 +20,9 @@
   "copyLink": {
     "message": "GitHub のファイルへのリンクをコピー"
   },
+  "copyMarkdown": {
+    "message": "チャットを Markdown でコピー"
+  },
   "autoCommit": {
     "message": "自動コミット"
   },

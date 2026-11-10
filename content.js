@@ -727,8 +727,8 @@ ${fencedCode(raw.replace(/\n$/, ""), codeLanguage(el))}
     // Work-mode turns flicker complete → in progress → complete at the end (gap of 1.9 s observed)
     doneQuietMs: 3e3,
     watchAttributes: ["data-talvt-turn-state", "data-response-starting"],
-    // older turns arrive 5 at a time and the app re-anchors the scroll after each batch
-    topQuietMs: 3500,
+    // older turns arrive in batches; reported gaps run up to about 6s, so the quiet window is longer
+    topQuietMs: 7e3,
     selectors: {
       user: ['[data-chatgpt-search-unit-key$=":user"], [data-content-search-unit-key$=":user"]', '[data-message-author-role="user"]'],
       assistant: ['[data-chatgpt-search-unit-key$=":assistant"], [data-content-search-unit-key$=":assistant"]', '[data-message-author-role="assistant"]'],
@@ -847,11 +847,77 @@ ${fencedCode(raw.replace(/\n$/, ""), codeLanguage(el))}
   });
 
   // src/content/adapters/claude.ts
-  var CARD = '[data-testid="frame-card-open"]';
+  var CARD = '[data-testid="frame-card-open"], .artifact-block-cell';
+  var ASSISTANT = ['div[data-is-streaming], .font-claude-response, [data-testid="assistant-message"]'];
+  var STREAMING = ['div[data-is-streaming="true"]', '[data-testid="assistant-message"][data-is-streaming="true"]'];
+  var PANEL = 'iframe[src*="/code/artifact/"]';
   var cardTitle = (card) => (card.textContent ?? "").trim() || "Artifact";
+  var isCard = (el) => el.matches(CARD);
+  function frameURL(frame) {
+    try {
+      const raw = frame.getAttribute("src") || frame.src || "";
+      if (!raw) return null;
+      return new URL(raw, "https://claude.ai");
+    } catch {
+      return null;
+    }
+  }
+  function hostIs(url, host) {
+    return url.hostname === host || url.hostname.endsWith(`.${host}`);
+  }
+  function frameWindow(frame) {
+    try {
+      return frame.contentWindow;
+    } catch {
+      return null;
+    }
+  }
+  function frameDocument(frame) {
+    try {
+      return frame.contentDocument;
+    } catch {
+      return null;
+    }
+  }
+  function childFrames(root) {
+    try {
+      return Array.from(root.querySelectorAll("iframe")).filter((el) => el.tagName.toUpperCase() === "IFRAME");
+    } catch {
+      return [];
+    }
+  }
+  function userContentWindow(outer) {
+    const seen = /* @__PURE__ */ new Set();
+    const walk = (root) => {
+      if (seen.has(root)) return null;
+      seen.add(root);
+      const frames = childFrames(root);
+      for (const frame of frames) {
+        const url = frameURL(frame);
+        if (!url || !hostIs(url, "claudeusercontent.com")) continue;
+        const win = frameWindow(frame);
+        if (win) return win;
+      }
+      for (const frame of frames) {
+        const url = frameURL(frame);
+        if (url && !hostIs(url, "claude.ai")) continue;
+        const child = frameDocument(frame);
+        if (!child || child === root) continue;
+        const win = walk(child);
+        if (win) return win;
+      }
+      return null;
+    };
+    try {
+      const doc = frameDocument(outer);
+      return doc ? walk(doc) : null;
+    } catch {
+      return null;
+    }
+  }
   function answerBody(node) {
     const box = node.el.ownerDocument.createElement("div");
-    const parts = node.el.querySelectorAll('.standard-markdown, [data-testid="frame-card-open"]');
+    const parts = node.el.querySelectorAll(`.standard-markdown, ${CARD}`);
     for (const part of Array.from(parts)) {
       if (part.parentElement?.closest(".standard-markdown")) continue;
       box.appendChild(part.cloneNode(true));
@@ -861,13 +927,15 @@ ${fencedCode(raw.replace(/\n$/, ""), codeLanguage(el))}
   var claude = defineAdapter({
     service: "claude",
     siteNames: ["Claude"],
-    chatId: (url) => idFromPath(url, /^\/chat\/([0-9a-f-]{36})/i),
+    // Incognito is a temporary chat: the URL keeps `?incognito=` (empty value counts). No
+    // language-independent DOM flag is present here, so a `/chat/<uuid>` without that query is saved.
+    chatId: (url) => url.searchParams.has("incognito") ? null : idFromPath(url, /^\/chat\/([0-9a-f-]{36})/i),
     // ~20 rows in the DOM at a time
     virtualized: true,
     selectors: {
       user: ['[data-testid="user-message"]'],
-      assistant: ['[data-testid="assistant-message"]'],
-      generating: ['[data-testid="chat-input-stop"]', '[data-testid="assistant-message"][data-is-streaming="true"]'],
+      assistant: ASSISTANT,
+      generating: ['[data-testid="chat-input-stop"]', ...STREAMING],
       composer: ['[data-testid="chat-input"]', 'div[contenteditable="true"].ProseMirror'],
       scroller: ["[data-autoscroll-container]"],
       // the first *loaded* row (positions are rebased after each batch): a hint, never proof of the start
@@ -889,9 +957,9 @@ ${fencedCode(raw.replace(/\n$/, ""), codeLanguage(el))}
       const n = Number(doc.querySelector('[data-testid="transcript-row"] [role="article"][aria-setsize]')?.getAttribute("aria-setsize"));
       return Number.isFinite(n) && n > 0 ? n : null;
     },
-    // The open artifact lives in a same-origin wrapper iframe that holds a cross-origin frame on
-    // <uuid>.frame.claudeusercontent.com; gitchat's frame script there returns the rendered HTML. The
-    // card of the open artifact carries aria-current="true", which ties the panel to its message.
+    // The open artifact is a cross-origin frame on <uuid>.frame.claudeusercontent.com. The viewer is
+    // same-origin and may nest another same-origin document (claude.ai/code/frame/) before that frame.
+    // The card of the open artifact carries aria-current="true", which ties the panel to its message.
     async artifacts(doc, ctx) {
       const requests = [];
       const current = Array.from(doc.querySelectorAll(CARD)).filter((c) => c.getAttribute("aria-current") === "true").pop();
@@ -903,32 +971,30 @@ ${fencedCode(raw.replace(/\n$/, ""), codeLanguage(el))}
         const opened = ctx.opened();
         return opened?.messageId && opened.title === panelTitle ? { messageId: opened.messageId, title: opened.title } : null;
       };
-      for (const outer of Array.from(doc.querySelectorAll('iframe[src*="/code/artifact/"]'))) {
-        const id = /\/code\/artifact\/([^/?#]+)/.exec(outer.getAttribute("src") ?? "")?.[1];
-        const owner = ownerOf((outer.getAttribute("title") ?? "").trim());
-        if (!owner) continue;
-        const key = id ? `artifact:${id}` : `${owner.messageId}:artifact`;
-        if (ctx.skip(key)) continue;
-        let inner = null;
+      for (const outer of Array.from(doc.querySelectorAll(PANEL))) {
         try {
-          inner = outer.contentDocument?.querySelector('iframe[src*="claudeusercontent.com"]') ?? null;
+          const id = /\/code\/artifact\/([^/?#]+)/.exec(outer.getAttribute("src") ?? "")?.[1];
+          if (!id) continue;
+          const owner = ownerOf((outer.getAttribute("title") ?? "").trim());
+          if (!owner) continue;
+          const key = `artifact:${id}`;
+          if (ctx.skip(key)) continue;
+          const win = userContentWindow(outer);
+          if (!win) continue;
+          requests.push({ key, messageId: owner.messageId, title: owner.title, win });
         } catch {
         }
-        if (!inner?.contentWindow) continue;
-        requests.push({ key, messageId: owner.messageId, title: owner.title, win: inner.contentWindow });
       }
       return serializeFrames(requests);
     },
     // The streaming answer's turn. The observer keeps it, so unmounting that row is not "done".
     activeTurnId(doc) {
-      const streaming = Array.from(doc.querySelectorAll('[data-testid="assistant-message"][data-is-streaming="true"]')).pop();
-      return streaming?.getAttribute("data-turn-key") ?? null;
+      const streaming = Array.from(doc.querySelectorAll(STREAMING.join(", "))).pop();
+      return streaming?.closest("[data-turn-key]")?.getAttribute("data-turn-key") ?? null;
     },
     hasTurn: (doc, id) => !!doc.querySelector(`[data-turn-key="${CSS.escape(id)}"]`),
     aiPhase(doc) {
-      const msgs = doc.querySelectorAll('[data-testid="assistant-message"]');
-      const last2 = msgs[msgs.length - 1];
-      if (last2?.getAttribute("data-is-streaming") === "true") return "streaming";
+      if (doc.querySelector(STREAMING.join(", "))) return "streaming";
       if (doc.querySelector('[data-testid="chat-input-stop"]')) return "thinking";
       return "idle";
     },
@@ -944,7 +1010,7 @@ ${fencedCode(raw.replace(/\n$/, ""), codeLanguage(el))}
       // `##` renders as <h3>: the site shifts headings down one level
       headingLevel: (el) => Number(el.tagName[1]) - 1,
       render(el, _children, kind) {
-        if (el.getAttribute("data-testid") !== "frame-card-open") return null;
+        if (!isCard(el)) return null;
         kind("viz");
         return `
 
@@ -979,6 +1045,19 @@ ${fencedCode(raw.replace(/\n$/, ""), codeLanguage(el))}
     const n = canvasIndex(chip);
     return n > 1 ? `Canvas ${n}` : "Canvas";
   }
+  var THOUGHTS = "model-thoughts, .thoughts-container, .thoughts-content";
+  var ASSISTANT_BODY = ["message-content .markdown-main-panel", "message-content .markdown", "message-content"];
+  function assistantProse(root) {
+    for (const sel of ASSISTANT_BODY) {
+      for (const el of Array.from(root.querySelectorAll(sel))) {
+        if (!el.closest(THOUGHTS)) return el;
+      }
+    }
+    if (!root.querySelector(THOUGHTS)) return null;
+    const copy = root.cloneNode(true);
+    for (const el of Array.from(copy.querySelectorAll(THOUGHTS))) el.remove();
+    return copy;
+  }
   var gemini = defineAdapter({
     service: "gemini",
     siteNames: ["Google Gemini", "Gemini"],
@@ -994,7 +1073,8 @@ ${fencedCode(raw.replace(/\n$/, ""), codeLanguage(el))}
     selectors: {
       user: ["user-query"],
       assistant: ["model-response"],
-      assistantBody: ["message-content .markdown-main-panel", "message-content .markdown", "message-content"],
+      // bodyOf applies these outside the thinking panel; pick() alone would take the expanded one
+      assistantBody: ASSISTANT_BODY,
       generating: ["pending-request", 'model-response .markdown[aria-busy="true"]'],
       composer: ["rich-textarea .ql-editor", 'rich-textarea [contenteditable="true"]'],
       scroller: ["infinite-scroller.chat-history", "infinite-scroller"],
@@ -1006,7 +1086,7 @@ ${fencedCode(raw.replace(/\n$/, ""), codeLanguage(el))}
       return id ? `${id}:${role === "user" ? "u" : "a"}` : null;
     },
     bodyOf: (node) => {
-      if (node.role !== "user") return null;
+      if (node.role !== "user") return assistantProse(node.el);
       const box = node.el.ownerDocument.createElement("div");
       for (const p of Array.from(node.el.querySelectorAll("p.query-text-line"))) box.appendChild(p.cloneNode(true));
       return box.childElementCount ? box : null;
@@ -1038,6 +1118,9 @@ ${fencedCode(raw.replace(/\n$/, ""), codeLanguage(el))}
         ".cdk-visually-hidden",
         "source-footnote",
         "thinking-overlay",
+        "model-thoughts",
+        ".thoughts-container",
+        ".thoughts-content",
         "message-actions"
       ],
       codeLanguage: codeLanguage2,
@@ -1188,6 +1271,11 @@ ${fencedCode(raw.replace(/\n$/, ""), codeLanguage(el))}
     }
     setAuto(key, value) {
       this.actions.setAuto(key, value);
+    }
+    /** Forward synchronously so the clipboard write still belongs to the trusted click. */
+    copyMarkdown() {
+      if (!this.state.tracked) return Promise.resolve(false);
+      return this.actions.copyMarkdown();
     }
     // ---- updates from the controller
     /** A different chat (or no chat) is showing. */
@@ -1620,6 +1708,7 @@ button { font: inherit; }
     push: '<path d="M8 18.5H7a4.2 4.2 0 0 1-.4-8.38A5.6 5.6 0 0 1 17.4 10.5 4 4 0 0 1 17 18.5h-1"/><path d="M12 20.5v-8M9 15.3l3-3 3 3"/>',
     cloud: '<path d="M7 18.5h10a4 4 0 0 0 .5-7.97A5.6 5.6 0 0 0 6.6 10.1 4.2 4.2 0 0 0 7 18.5Z"/>',
     link: '<path d="M10 14a4.2 4.2 0 0 0 6 0l3-3a4.24 4.24 0 0 0-6-6l-1 1"/><path d="M14 10a4.2 4.2 0 0 0-6 0l-3 3a4.24 4.24 0 0 0 6 6l1-1"/>',
+    copy: '<rect x="8.5" y="8.5" width="11" height="12" rx="2"/><path d="M15.5 8.5V6a2 2 0 0 0-2-2H6.5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h2"/>',
     close: '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>',
     check: '<path d="M5 12.5l4.2 4.2L19 7"/>',
     alert: '<path d="M12 8.5v4.5M12 16.6v.01"/><path d="M10.3 3.9 2.6 17.6A2 2 0 0 0 4.3 20.5h15.4a2 2 0 0 0 1.7-2.9L13.7 3.9a2 2 0 0 0-3.4 0Z"/>',
@@ -1654,6 +1743,11 @@ button { font: inherit; }
     }
     policy ??= globalThis.trustedTypes.createPolicy("gitchat", { createHTML: (s) => s });
     el.innerHTML = policy.createHTML(html);
+  }
+
+  // src/content/ui/core/gesture.js
+  function isUserInput(event) {
+    return event?.isTrusted === true;
   }
 
   // src/content/ui/core/panel.js
@@ -1692,7 +1786,8 @@ button { font: inherit; }
 .panel > .lg-b { background: var(--tint-strong); }
 .panel .content { position: relative; padding: 8px 8px 6px; }
 .panel .graph { display: block; overflow: visible; }
-.panel.untracked .graph, .panel.untracked .ib.commit, .panel.untracked .ib.push, .panel.untracked .ib.link { display: none; }
+.panel.untracked .graph, .panel.untracked .ib.commit, .panel.untracked .ib.push, .panel.untracked .ib.link, .panel.untracked .ib.md { display: none; }
+.panel .ib.fail { color: var(--err); }
 /* automatic actions need no button */
 .panel.auto-commit .ib.commit, .panel.auto-push:not(.error) .ib.push { display: none; }
 
@@ -1966,6 +2061,7 @@ button { font: inherit; }
         <button class="ib commit" aria-label="Commit" title="Commit">${icon.commit}</button>
         <button class="ib push" aria-label="Push" title="Push">${icon.push}<svg class="spin" viewBox="-10 -10 20 20"><circle r="8" pathLength="1"/></svg></button>
         <button class="ib link" aria-label="Copy link" title="Copy link">${icon.link}</button>
+        <button class="ib md" aria-label="Copy as Markdown" title="Copy as Markdown">${icon.copy}</button>
         <button class="ib gear" aria-label="Settings" title="Settings">${icon.gear}</button>
         <span class="sp"></span>
         <button class="sw" data-k="autoCommit" role="switch" aria-checked="false" aria-label="Auto commit" title="Auto commit">${icon.commit}<span class="tr"><span class="kn"></span></span></button>
@@ -2008,15 +2104,25 @@ button { font: inherit; }
         { duration: 240, easing: "ease-out" }
       );
     }
-    btnCommit.addEventListener("click", () => store.commit());
-    btnPush.addEventListener("click", () => store.push());
-    switches.forEach((sw) => sw.addEventListener("click", () => store.setAuto(sw.dataset.k, !store.state.settings[sw.dataset.k])));
+    btnCommit.addEventListener("click", (e) => {
+      if (isUserInput(e)) store.commit();
+    });
+    btnPush.addEventListener("click", (e) => {
+      if (isUserInput(e)) store.push();
+    });
+    for (const key of ["autoCommit", "autoPush"]) {
+      const sw = switches.find((s) => s.dataset.k === key);
+      sw.addEventListener("click", (e) => {
+        if (!isUserInput(e)) return;
+        store.setAuto(key, !store.state.settings[key]);
+      });
+    }
     $(".gear").addEventListener("click", () => {
       onRequestClose?.();
       openSettings?.();
     });
     if (!openSettings) $(".gear").hidden = true;
-    for (const [sel, key] of [[".ib.commit", "commit"], [".ib.push", "push"], [".link", "copyLink"], [".gear", "openSettings"], [".sw[data-k=autoCommit]", "autoCommit"], [".sw[data-k=autoPush]", "autoPush"]]) {
+    for (const [sel, key] of [[".ib.commit", "commit"], [".ib.push", "push"], [".link", "copyLink"], [".ib.md", "copyMarkdown"], [".gear", "openSettings"], [".sw[data-k=autoCommit]", "autoCommit"], [".sw[data-k=autoPush]", "autoPush"]]) {
       const b = $(sel);
       const text2 = label(key);
       if (b && text2 !== key) {
@@ -2035,6 +2141,20 @@ button { font: inherit; }
       setTimeout(() => {
         setHTML(b, icon.link);
         b.classList.remove("done");
+      }, 1200);
+    });
+    let copying = false;
+    $(".ib.md").addEventListener("click", async (e) => {
+      if (!isUserInput(e) || copying || !store.copyMarkdown) return;
+      const b = $(".ib.md");
+      copying = true;
+      const ok = await store.copyMarkdown().catch(() => false);
+      copying = false;
+      setHTML(b, ok ? icon.check : icon.alert);
+      b.classList.add(ok ? "done" : "fail");
+      setTimeout(() => {
+        setHTML(b, icon.copy);
+        b.classList.remove("done", "fail");
       }, 1200);
     });
     const unsub = store.subscribe((type, d) => {
@@ -2216,10 +2336,13 @@ button { font: inherit; }
     };
     parent.addEventListener("focusin", syncFocus);
     parent.addEventListener("focusout", () => queueMicrotask(syncFocus));
-    buttons.start.addEventListener("click", () => store.init());
-    buttons.cancel.addEventListener("click", () => store.cancelInit?.());
-    buttons.commit.addEventListener("click", () => store.commit());
-    buttons.push.addEventListener("click", () => store.push());
+    const onUserClick = (fn) => (e) => {
+      if (isUserInput(e)) fn();
+    };
+    buttons.start.addEventListener("click", onUserClick(() => store.init()));
+    buttons.cancel.addEventListener("click", onUserClick(() => store.cancelInit?.()));
+    buttons.commit.addEventListener("click", onUserClick(() => store.commit()));
+    buttons.push.addEventListener("click", onUserClick(() => store.push()));
     function visible() {
       const st = store.state;
       return availableActions(st, st.settings);
@@ -3435,6 +3558,7 @@ button { font: inherit; }
       } else sync();
     });
     cap.addEventListener("pointerdown", (e) => {
+      if (!isUserInput(e)) return;
       pressed = { y: e.clientY, dy: e.clientY - cY.value };
       cap.setPointerCapture(e.pointerId);
     });
@@ -3446,7 +3570,7 @@ button { font: inherit; }
       }
       if (dragging) frac = clamp(e.clientY - pressed.dy, 60, innerHeight - 60) / innerHeight;
     });
-    const release = () => {
+    const release = (e) => {
       if (!pressed) return;
       pressed = null;
       if (dragging) {
@@ -3454,6 +3578,7 @@ button { font: inherit; }
         box.classList.remove("drag");
         return;
       }
+      if (!isUserInput(e) || e.type !== "pointerup") return;
       if (panelOpen) return closePanel();
       if (noPanel()) {
         pinUntil = performance.now() + 3e3;
@@ -4144,16 +4269,89 @@ button { font: inherit; }
     const { markdown, kinds } = toMarkdown(body, adapter.markdown);
     return { id: node.id, role: "assistant", markdown, kinds };
   }
-  function assignIds(list2) {
-    const seen = /* @__PURE__ */ new Map();
+  function assignIds(list2, prior = []) {
+    const taken = new Set(prior.map((m) => m.id));
+    if (!prior.length) return stampFresh(list2, taken);
+    const offset = alignOffset(prior, list2);
+    const out = [];
+    for (let i = 0; i < list2.length; i++) {
+      const m = list2[i];
+      if (m.id) {
+        out.push(m);
+        taken.add(m.id);
+        continue;
+      }
+      const aligned = prior[offset + i];
+      if (aligned && sameRow(aligned, m) && !out.some((x) => x.id === aligned.id)) {
+        out.push({ ...m, id: aligned.id });
+        taken.add(aligned.id);
+        continue;
+      }
+      const id = freshId(m, taken);
+      taken.add(id);
+      out.push({ ...m, id });
+    }
+    return out;
+  }
+  function alignOffset(prior, list2) {
+    let bestOff = prior.length;
+    let bestScore = 0;
+    let tied = false;
+    for (let off = 0; off < prior.length; off++) {
+      let stable = 0;
+      let exact = 0;
+      let conflict = false;
+      for (let i = 0; i < list2.length; i++) {
+        const p = prior[off + i];
+        const m = list2[i];
+        if (!p) continue;
+        if (m.id) {
+          if (m.id !== p.id || m.role !== p.role) {
+            conflict = true;
+            break;
+          }
+          stable++;
+        } else if (m.role === p.role && m.markdown === p.markdown) exact++;
+      }
+      if (conflict || !stable && exact < 2) continue;
+      const score = stable * (list2.length + 1) + exact;
+      if (score > bestScore) {
+        bestScore = score;
+        bestOff = off;
+        tied = false;
+      } else if (score === bestScore) tied = true;
+    }
+    return tied ? prior.length : bestOff;
+  }
+  function sameRow(prior, m) {
+    if (m.id && m.id !== prior.id) return false;
+    if (prior.role !== m.role) return false;
+    if (prior.markdown === m.markdown) return true;
+    const short = prior.markdown.length <= m.markdown.length ? prior.markdown : m.markdown;
+    const long = short === prior.markdown ? m.markdown : prior.markdown;
+    return short.length > 0 && long.startsWith(short);
+  }
+  function stampFresh(list2, taken) {
     return list2.map((m) => {
-      if (m.id) return m;
-      const base = `${m.role[0]}-${fingerprint(`${m.role}
-${m.markdown}`)}`;
-      const n = seen.get(base) ?? 0;
-      seen.set(base, n + 1);
-      return { ...m, id: n ? `${base}-${n}` : base };
+      if (m.id) {
+        taken.add(m.id);
+        return m;
+      }
+      const id = freshId(m, taken);
+      taken.add(id);
+      return { ...m, id };
     });
+  }
+  function freshId(m, taken) {
+    const base = `${m.role[0]}-${fingerprint(`${m.role}
+${m.markdown}`)}`;
+    let n = 0;
+    let id = base;
+    while (taken.has(id)) {
+      n += 1;
+      id = `${base}-${n}`;
+    }
+    return id;
   }
   function captureVisible(adapter, doc, nodes = adapter.messages(doc)) {
     return assignIds(nodes.map((n) => captureMessage(adapter, n)).filter((m) => m.markdown || m.kinds?.length));
@@ -4176,12 +4374,23 @@ ${m.markdown}`)}`;
       capturedAt: (/* @__PURE__ */ new Date()).toISOString()
     };
   }
+  function scrollReversed(_adapter, el) {
+    if (!el) return false;
+    try {
+      const dir = getComputedStyle(el).flexDirection;
+      return dir === "column-reverse";
+    } catch {
+      return false;
+    }
+  }
   function isAtEnd(adapter, doc) {
     if (!adapter.virtualized) return true;
     const sc = adapter.scrollContainer(doc);
     if (!sc) return false;
+    const slack = Math.max(40, sc.clientHeight * 0.5);
+    if (scrollReversed(adapter, sc)) return -Math.min(0, sc.scrollTop) <= slack;
     const remaining = sc.scrollHeight - sc.scrollTop - sc.clientHeight;
-    return remaining <= Math.max(40, sc.clientHeight * 0.5);
+    return remaining <= slack;
   }
   function artifactAssetName(art) {
     return `${assetSlug(art.title)}-${fingerprint(art.key)}.html`;
@@ -4275,10 +4484,63 @@ ${m.markdown}`)}`;
       signal.addEventListener("abort", onAbort, { once: true });
     });
   }
-  function scrollToTop(el) {
-    el.scrollTop = 0;
+  function scrollTowardOldest(el, reversed) {
+    el.scrollTop = reversed ? Math.min(0, el.clientHeight - el.scrollHeight) : 0;
     el.dispatchEvent(new Event("scroll"));
     el.dispatchEvent(new WheelEvent("wheel", { deltaY: -800, bubbles: true }));
+  }
+  function oldestScroll(el, reversed) {
+    return reversed ? Math.min(0, el.clientHeight - el.scrollHeight) : 0;
+  }
+  function newestScroll(el, reversed) {
+    return reversed ? 0 : Math.max(0, el.scrollHeight - el.clientHeight);
+  }
+  function atOldest(el, reversed) {
+    return reversed ? el.scrollTop <= oldestScroll(el, true) + 2 : el.scrollTop <= 2;
+  }
+  function atNewest(el, reversed) {
+    return reversed ? el.scrollTop >= -2 : el.scrollTop >= newestScroll(el, false) - 2;
+  }
+  function clampScroll(el, reversed, y) {
+    return reversed ? Math.max(oldestScroll(el, true), Math.min(0, y)) : Math.max(0, Math.min(newestScroll(el, false), y));
+  }
+  function walkProgress(el, reversed) {
+    if (reversed) {
+      const span = -oldestScroll(el, true);
+      return span > 0 ? (el.scrollTop - oldestScroll(el, true)) / span : 1;
+    }
+    const max = el.scrollHeight - el.clientHeight;
+    return max > 0 ? el.scrollTop / max : 1;
+  }
+  function anchorKey(node) {
+    if (node.id) return node.id;
+    const text2 = (node.el.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 120);
+    return text2 ? `${node.role}
+${text2}` : null;
+  }
+  function measureAnchor(adapter, doc, scroller) {
+    const fromBottom = scroller.scrollHeight - scroller.scrollTop;
+    const blank = { key: null, viewportOffset: 0, scrollTop: scroller.scrollTop, fromBottom, placed: false };
+    const box = scroller.getBoundingClientRect();
+    if (box.height <= 0) return blank;
+    for (const n of adapter.messages(doc)) {
+      const r = n.el.getBoundingClientRect();
+      if (r.height <= 0 || r.bottom <= box.top + 1 || r.top >= box.bottom - 1) continue;
+      const key = anchorKey(n);
+      if (!key) continue;
+      return { key, viewportOffset: r.top - box.top, scrollTop: scroller.scrollTop, fromBottom, placed: true };
+    }
+    return blank;
+  }
+  function restoreAnchor(adapter, doc, scroller, anchor) {
+    if (!anchor.placed || !anchor.key) return false;
+    const el = adapter.messages(doc).find((n) => anchorKey(n) === anchor.key)?.el;
+    if (!(el instanceof HTMLElement)) return false;
+    const box = scroller.getBoundingClientRect();
+    const r = el.getBoundingClientRect();
+    if (box.height <= 0 || r.height <= 0) return false;
+    scroller.scrollTop = scroller.scrollTop + (r.top - box.top - anchor.viewportOffset);
+    return true;
   }
   var OrderedMessages = class {
     order = [];
@@ -4378,14 +4640,15 @@ ${m.markdown}`)}`;
     const found = adapter.scrollContainer(doc);
     if (!found?.isConnected) throw new InitIncompleteError("no-scroller");
     let scroller = found;
+    let anchor = measureAnchor(adapter, doc, scroller);
     const retarget = () => {
       if (!scroller.isConnected) throw new InitIncompleteError("no-scroller");
       const next = adapter.scrollContainer(doc);
       if (!next?.isConnected) throw new InitIncompleteError("no-scroller");
+      if (next === scroller) return;
       scroller = next;
+      anchor = measureAnchor(adapter, doc, scroller);
     };
-    const restoreTo = scroller.scrollTop;
-    const fromBottom = scroller.scrollHeight - scroller.scrollTop;
     const maxLoadMs = opts.maxLoadMs ?? 10 * 6e4;
     const rowWaitMs = opts.rowWaitMs ?? 3e3;
     const stallMs = opts.stallMs ?? 25e3;
@@ -4420,7 +4683,10 @@ ${m.markdown}`)}`;
       }
       for (const p of adapter.rowPositions?.(doc) ?? []) if (!messagePos.has(p)) otherPos.add(p);
       const kept = rows.filter((r) => hasContent(r.msg));
-      const msgs = assignIds(kept.map((r) => r.msg));
+      const msgs = assignIds(
+        kept.map((r) => r.msg),
+        acc.list()
+      );
       kept.forEach((r, i) => {
         if (r.pos) posById.set(msgs[i].id, r.pos);
       });
@@ -4440,25 +4706,25 @@ ${m.markdown}`)}`;
     };
     const scrollTo = async (y) => {
       if (!scroller.isConnected) throw new InitIncompleteError("no-scroller");
-      const max = scroller.scrollHeight - scroller.clientHeight;
-      scroller.scrollTop = Math.max(0, Math.min(max, y));
+      scroller.scrollTop = clampScroll(scroller, scrollReversed(adapter, scroller), y);
       scroller.dispatchEvent(new Event("scroll"));
       await waitForRows(adapter, doc, scroller, signal, rowWaitMs);
     };
     const walk = async (step, report) => {
       let gapless = true;
       lastWindow = null;
-      await scrollTo(0);
-      let furthest = -1;
+      const reversed = scrollReversed(adapter, scroller);
+      await scrollTo(oldestScroll(scroller, reversed));
+      let furthest = -Infinity;
       let known = -1;
       let movedAt = performance.now();
       for (; ; ) {
         signal.throwIfAborted();
         if (!harvest()) gapless = false;
         await collectArtifacts();
-        const max = scroller.scrollHeight - scroller.clientHeight;
-        if (report) onProgress({ stage: "reading", count: acc.size, progress: 0.25 + 0.75 * (max > 0 ? scroller.scrollTop / max : 1) });
-        if (scroller.scrollTop >= max - 2) return gapless;
+        const axis = scrollReversed(adapter, scroller);
+        if (report) onProgress({ stage: "reading", count: acc.size, progress: 0.25 + 0.75 * walkProgress(scroller, axis) });
+        if (atNewest(scroller, axis)) return gapless;
         if (scroller.scrollTop > furthest + 1 || acc.size > known) {
           furthest = Math.max(furthest, scroller.scrollTop);
           known = acc.size;
@@ -4496,11 +4762,11 @@ ${m.markdown}`)}`;
       for (; ; ) {
         if (performance.now() - loadStart >= maxLoadMs) throw new InitIncompleteError("timeout");
         retarget();
-        scrollToTop(scroller);
+        scrollTowardOldest(scroller, scrollReversed(adapter, scroller));
         await settle(scroller, 450, 4e3, signal);
         const count = adapter.loadedCount(doc) ?? adapter.messages(doc).length;
         const height = scroller.scrollHeight;
-        const unchanged = count === lastCount && height === lastHeight && scroller.scrollTop <= 2;
+        const unchanged = count === lastCount && height === lastHeight && atOldest(scroller, scrollReversed(adapter, scroller));
         stable = unchanged && !adapter.isLoadingOlder(doc) ? stable + 1 : 0;
         if (stable === 1) quietSince = performance.now();
         lastCount = count;
@@ -4554,7 +4820,7 @@ ${m.markdown}`)}`;
           await sleep(400, signal);
         }
       }
-      if (adapter.virtualized) await scrollTo(scroller.scrollHeight);
+      if (adapter.virtualized) await scrollTo(newestScroll(scroller, scrollReversed(adapter, scroller)));
       retarget();
       if (!rowsInView(adapter, doc, scroller)) throw new InitIncompleteError("coverage");
       harvest(true);
@@ -4563,9 +4829,12 @@ ${m.markdown}`)}`;
       const whole = startConfirmed || acc.size <= SMALL_CHAT_MESSAGES;
       return { messages: acc.list(), artifacts: [...arts.values()], readAt, startConfirmed: whole };
     } finally {
-      if (scroller.isConnected && (opts.owns?.() ?? true)) {
-        scroller.scrollTop = Math.max(0, scroller.scrollHeight - fromBottom);
-        if (Math.abs(scroller.scrollTop - restoreTo) < 4) scroller.scrollTop = restoreTo;
+      if (scroller.isConnected && (opts.owns?.() ?? true) && !restoreAnchor(adapter, doc, scroller, anchor)) {
+        if (scrollReversed(adapter, scroller)) scroller.scrollTop = anchor.scrollTop;
+        else {
+          scroller.scrollTop = Math.max(0, scroller.scrollHeight - anchor.fromBottom);
+          if (Math.abs(scroller.scrollTop - anchor.scrollTop) < 4) scroller.scrollTop = anchor.scrollTop;
+        }
       }
     }
   }
@@ -4577,6 +4846,7 @@ ${m.markdown}`)}`;
   var OWN_PAGE_WAIT_MS = 1e4;
   var AUTO_RESCAN_MS = 6e4;
   var SAME_CHAT_WATCH_MS = 4e3;
+  var COPY_REFRESH_MS = 1500;
   var NAVIGATED = "gitchat:navigated";
   var STRENGTH = { manual: 0, sent: 1, answered: 2 };
   var stronger = (a, b) => a && STRENGTH[a] >= STRENGTH[b] ? a : b;
@@ -4592,7 +4862,8 @@ ${m.markdown}`)}`;
         push: () => void this.call("chat/push"),
         init: () => void this.init(),
         cancelInit: () => this.abort?.abort(),
-        setAuto: (key, value) => void this.setAuto(key, value)
+        setAuto: (key, value) => void this.setAuto(key, value),
+        copyMarkdown: () => this.copyMarkdown()
       });
       this.widget = new Widget(this.store, () => void request("app/open-settings", {}).catch(() => {
       }));
@@ -5190,6 +5461,46 @@ ${m.markdown}`)}`;
         if (status && this.live(route)) this.store.applyStatus(status);
       } catch (e) {
         log.warn(`${type} failed`, e);
+      }
+    }
+    /**
+     * Copies the tracked chat as Markdown. The text comes from the background's working copy, so no
+     * scroll through the history is needed; what the page shows now is staged first, but only for a
+     * moment. Start the clipboard write in the click's task, before waiting for any text.
+     */
+    async copyMarkdown() {
+      const route = this.route();
+      if (!route || !this.store.state.tracked || this.abort || !this.onPage(route)) return false;
+      const check = () => {
+        if (!this.live(route) || !this.onPage(route)) throw new DOMException("Navigated", "AbortError");
+      };
+      const text2 = async () => {
+        await Promise.race([this.refresh(), new Promise((r) => setTimeout(r, COPY_REFRESH_MS))]);
+        check();
+        const { markdown } = await request("chat/markdown", { key: route.key });
+        check();
+        return markdown;
+      };
+      try {
+        if (typeof ClipboardItem !== "undefined") {
+          const blob = text2().then((markdown) => {
+            check();
+            return new Blob([markdown], { type: "text/plain" });
+          });
+          void blob.catch(() => {
+          });
+          check();
+          await navigator.clipboard.write([new ClipboardItem({ "text/plain": blob })]);
+        } else {
+          const markdown = await text2();
+          check();
+          await navigator.clipboard.writeText(markdown);
+        }
+        check();
+        return true;
+      } catch (e) {
+        log.warn("copy failed", e);
+        return false;
       }
     }
     async setAuto(key, value) {

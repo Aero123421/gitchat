@@ -28,6 +28,7 @@
   }
 
   // src/shared/types.ts
+  var SERVICES = ["chatgpt", "claude", "gemini"];
   var chatKey = (service, chatId) => `${service}:${chatId}`;
 
   // src/content/ui/core/icons.js
@@ -36,6 +37,7 @@
     push: '<path d="M8 18.5H7a4.2 4.2 0 0 1-.4-8.38A5.6 5.6 0 0 1 17.4 10.5 4 4 0 0 1 17 18.5h-1"/><path d="M12 20.5v-8M9 15.3l3-3 3 3"/>',
     cloud: '<path d="M7 18.5h10a4 4 0 0 0 .5-7.97A5.6 5.6 0 0 0 6.6 10.1 4.2 4.2 0 0 0 7 18.5Z"/>',
     link: '<path d="M10 14a4.2 4.2 0 0 0 6 0l3-3a4.24 4.24 0 0 0-6-6l-1 1"/><path d="M14 10a4.2 4.2 0 0 0-6 0l-3 3a4.24 4.24 0 0 0 6 6l1-1"/>',
+    copy: '<rect x="8.5" y="8.5" width="11" height="12" rx="2"/><path d="M15.5 8.5V6a2 2 0 0 0-2-2H6.5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h2"/>',
     close: '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>',
     check: '<path d="M5 12.5l4.2 4.2L19 7"/>',
     alert: '<path d="M12 8.5v4.5M12 16.6v.01"/><path d="M10.3 3.9 2.6 17.6A2 2 0 0 0 4.3 20.5h15.4a2 2 0 0 0 1.7-2.9L13.7 3.9a2 2 0 0 0-3.4 0Z"/>',
@@ -132,16 +134,33 @@
     githubClientId: ""
   };
   var KEY = "settings";
+  function knownRepo(value) {
+    if (!value || typeof value !== "object") return null;
+    const repo = value;
+    if (typeof repo.owner !== "string" || typeof repo.name !== "string" || typeof repo.branch !== "string") return null;
+    return { owner: repo.owner, name: repo.name, branch: repo.branch };
+  }
+  function knownServices(value) {
+    const raw = value && typeof value === "object" ? value : {};
+    const services = { ...DEFAULT_SETTINGS.services };
+    for (const id of SERVICES) {
+      const flag = raw[id];
+      if (typeof flag === "boolean") services[id] = flag;
+    }
+    return services;
+  }
   function normalizeSettings(raw) {
     const s2 = raw && typeof raw === "object" ? raw : {};
     const out = {
-      ...DEFAULT_SETTINGS,
-      ...s2,
-      services: { ...DEFAULT_SETTINGS.services, ...s2.services ?? {} },
-      // Missing on settings saved before theme existed; anything else unknown is Auto too.
-      theme: s2.theme === "light" || s2.theme === "dark" || s2.theme === "auto" ? s2.theme : "auto"
+      widget: s2.widget === "creature" || s2.widget === "line" || s2.widget === "dot" ? s2.widget : DEFAULT_SETTINGS.widget,
+      theme: s2.theme === "light" || s2.theme === "dark" || s2.theme === "auto" ? s2.theme : "auto",
+      autoCommit: typeof s2.autoCommit === "boolean" ? s2.autoCommit : DEFAULT_SETTINGS.autoCommit,
+      autoPush: typeof s2.autoPush === "boolean" ? s2.autoPush : DEFAULT_SETTINGS.autoPush,
+      repo: knownRepo(s2.repo),
+      services: knownServices(s2.services),
+      saveVisualizations: typeof s2.saveVisualizations === "boolean" ? s2.saveVisualizations : DEFAULT_SETTINGS.saveVisualizations,
+      githubClientId: typeof s2.githubClientId === "string" ? s2.githubClientId : DEFAULT_SETTINGS.githubClientId
     };
-    if (!["creature", "line", "dot"].includes(out.widget)) out.widget = DEFAULT_SETTINGS.widget;
     if (out.autoPush) out.autoCommit = true;
     return out;
   }
