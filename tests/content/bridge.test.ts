@@ -16,7 +16,7 @@ const status = (over: Partial<ChatStatus> = {}): ChatStatus => ({
 });
 
 function setup(initial: ChatStatus) {
-  const actions = { commit: vi.fn(), push: vi.fn(), init: vi.fn(), cancelInit: vi.fn(), setAuto: vi.fn() };
+  const actions = { commit: vi.fn(), push: vi.fn(), init: vi.fn(), cancelInit: vi.fn(), setAuto: vi.fn(), copyMarkdown: vi.fn(async () => true) };
   const store = new UiStore(actions);
   const events: Array<[string, Record<string, unknown>]> = [];
   store.switchTo(initial.key, initial);
@@ -103,5 +103,14 @@ describe('UiStore (status → widget events)', () => {
     const { store, events } = setup(status());
     store.applySettings({ ...DEFAULT_SETTINGS, autoCommit: true, autoPush: true });
     expect(events.at(-1)).toEqual(['settings', { key: 'autoPush', value: true, linked: 'autoCommit' }]);
+  });
+
+  it('copies only a tracked chat', async () => {
+    const { store, actions } = setup(status({ tracked: false }));
+    await expect(store.copyMarkdown()).resolves.toBe(false);
+    expect(actions.copyMarkdown).not.toHaveBeenCalled();
+    store.applyStatus(status({ tracked: true }));
+    await expect(store.copyMarkdown()).resolves.toBe(true);
+    expect(actions.copyMarkdown).toHaveBeenCalledTimes(1);
   });
 });

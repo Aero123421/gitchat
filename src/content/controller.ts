@@ -50,6 +50,11 @@ const AUTO_RESCAN_MS = 60_000;
  * treated as a different chat.
  */
 const SAME_CHAT_WATCH_MS = 4000;
+/**
+ * How long a copy waits for the page to be staged. Chrome's user activation lasts about 5 s and the
+ * clipboard write needs it, so a slow read is skipped (the copy then has the last capture).
+ */
+const COPY_REFRESH_MS = 1500;
 /** Abort reason when the tab moves to another chat: unlike Cancel, it does not undo a finished capture. */
 const NAVIGATED = 'gitchat:navigated';
 
@@ -122,6 +127,7 @@ export class Controller {
       init: () => void this.init(),
       cancelInit: () => this.abort?.abort(),
       setAuto: (key, value) => void this.setAuto(key, value),
+      copyMarkdown: () => this.copyMarkdown(),
     });
     this.widget = new Widget(this.store, () => void request('app/open-settings', {}).catch(() => {}));
     this.observer = new AiObserver(adapter, document, {
@@ -744,6 +750,27 @@ export class Controller {
       if (status && this.live(route)) this.store.applyStatus(status);
     } catch (e) {
       log.warn(`${type} failed`, e);
+    }
+  }
+
+  /**
+   * Copies the tracked chat as Markdown. The text comes from the background's working copy, so no
+   * scroll through the history is needed; what the page shows now is staged first, but only for a
+   * moment — the clipboard needs the click's user activation, which runs out after a few seconds.
+   */
+  private async copyMarkdown(): Promise<boolean> {
+    const route = this.route();
+    if (!route || !this.store.state.tracked || this.abort) return false;
+    try {
+      await Promise.race([this.refresh(), new Promise((r) => setTimeout(r, COPY_REFRESH_MS))]);
+      if (!this.live(route)) return false;
+      const { markdown } = await request('chat/markdown', { key: route.key });
+      if (!this.live(route)) return false;
+      await navigator.clipboard.writeText(markdown);
+      return true;
+    } catch (e) {
+      log.warn('copy failed', e);
+      return false;
     }
   }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatDoc } from '../../src/background/model';
-import { parseChatFile, parseFrontMatter, renderChat } from '../../src/background/render';
+import { parseChatFile, parseFrontMatter, renderChat, renderCopy } from '../../src/background/render';
 
 const doc = (over: Partial<ChatDoc> = {}): ChatDoc => ({
   service: 'claude',
@@ -180,5 +180,33 @@ describe('parseChatFile', () => {
   it('falls back to scanning when a length no longer fits (edited by hand)', () => {
     const file = renderChat(doc(), 'claude/x.md')[0]!.content.replace('How should I design state?', 'How should I design my state?');
     expect(parseChatFile(file).messages.map((m) => m.markdown)).toEqual(['How should I design my state?', 'Use $E=mc^2$.\n\n```ts\nconst a = 1;\n```']);
+  });
+});
+
+describe('renderCopy', () => {
+  it('writes the title and messages without front matter or message comments', () => {
+    const md = renderCopy(doc());
+    expect(md).toBe('# State "design": v2\n\n## User\n\nHow should I design state?\n\n## Assistant\n\nUse $E=mc^2$.\n\n```ts\nconst a = 1;\n```\n');
+    expect(md).not.toContain('gitchat:message');
+    expect(md).not.toMatch(/^---/);
+  });
+
+  it('turns asset links back into their card labels and keeps other links', () => {
+    const md = renderCopy(
+      doc({
+        title: '',
+        messages: [
+          { id: 'a', role: 'assistant', markdown: '> **Artifact:** [Chart \\[v2\\]](gitchat-asset:chart.html)\n\nSee [docs](https://example.com/a).' },
+          { id: 'b', role: 'assistant', markdown: '> **File:** [Plan](2026-11-09-plan--abc.assets/plan.html)' },
+          { id: 'c', role: 'user', markdown: '' },
+        ],
+      }),
+    );
+    expect(md).toContain('> **Artifact:** Chart [v2]\n\nSee [docs](https://example.com/a).');
+    expect(md).toContain('> **File:** Plan');
+    expect(md).not.toContain('gitchat-asset:');
+    expect(md).not.toContain('.assets/');
+    expect(md.startsWith('# Untitled chat\n')).toBe(true);
+    expect(md.endsWith('## User\n')).toBe(true);
   });
 });

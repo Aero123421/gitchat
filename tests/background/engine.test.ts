@@ -877,3 +877,35 @@ describe('engine: waiting, recovery and status', () => {
     expect((await engine.status(KEY)).staged.map((x) => x.id)).toEqual(['a1']);
   });
 });
+
+describe('engine: copy as Markdown', () => {
+  it('renders the working copy of a tracked chat and changes nothing', async () => {
+    const t = await setup();
+    await track(t, [user('u1'), bot('a1', 'see [Chart](gitchat-asset:chart.html)')]);
+    await t.engine.snapshot(snap([user('u1'), bot('a1', 'see [Chart](gitchat-asset:chart.html)'), user('u2')], { capturedAt: '2026-11-09T10:01:00.000Z' }));
+    const before = await t.engine.status(KEY);
+    const remoteCommits = t.repo.commits.size;
+    const md = await t.engine.copyMarkdown(KEY);
+    expect(md).toBe('# T\n\n## User\n\nquestion u1\n\n## Assistant\n\nsee Chart\n\n## User\n\nquestion u2\n');
+    const after = await t.engine.status(KEY);
+    expect(after.staged).toEqual(before.staged);
+    expect(after.commits).toEqual([]);
+    expect(t.repo.commits.size).toBe(remoteCommits);
+  });
+
+  it('refuses a chat that is not being saved', async () => {
+    const t = await setup();
+    await expect(t.engine.copyMarkdown(KEY)).rejects.toMatchObject({ code: 'not-tracked' });
+    await track(t, [user('u1')]);
+    await t.engine.untrack(KEY);
+    await expect(t.engine.copyMarkdown(KEY)).rejects.toMatchObject({ code: 'not-tracked' });
+  });
+
+  it('works signed out and without a repository', async () => {
+    const t = await setup();
+    await track(t, [user('u1'), bot('a1')]);
+    t.signOut();
+    t.setSettings({ repo: null });
+    await expect(t.engine.copyMarkdown(KEY)).resolves.toContain('answer a1');
+  });
+});

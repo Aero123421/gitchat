@@ -49,7 +49,8 @@ export const panelCSS = `
 .panel > .lg-b { background: var(--tint-strong); }
 .panel .content { position: relative; padding: 8px 8px 6px; }
 .panel .graph { display: block; overflow: visible; }
-.panel.untracked .graph, .panel.untracked .ib.commit, .panel.untracked .ib.push, .panel.untracked .ib.link { display: none; }
+.panel.untracked .graph, .panel.untracked .ib.commit, .panel.untracked .ib.push, .panel.untracked .ib.link, .panel.untracked .ib.md { display: none; }
+.panel .ib.fail { color: var(--err); }
 /* automatic actions need no button */
 .panel.auto-commit .ib.commit, .panel.auto-push:not(.error) .ib.push { display: none; }
 
@@ -347,6 +348,7 @@ export function createPanel(root, store, { onRequestClose, openSettings, label =
         <button class="ib commit" aria-label="Commit" title="Commit">${icon.commit}</button>
         <button class="ib push" aria-label="Push" title="Push">${icon.push}<svg class="spin" viewBox="-10 -10 20 20"><circle r="8" pathLength="1"/></svg></button>
         <button class="ib link" aria-label="Copy link" title="Copy link">${icon.link}</button>
+        <button class="ib md" aria-label="Copy as Markdown" title="Copy as Markdown">${icon.copy}</button>
         <button class="ib gear" aria-label="Settings" title="Settings">${icon.gear}</button>
         <span class="sp"></span>
         <button class="sw" data-k="autoCommit" role="switch" aria-checked="false" aria-label="Auto commit" title="Auto commit">${icon.commit}<span class="tr"><span class="kn"></span></span></button>
@@ -417,7 +419,7 @@ export function createPanel(root, store, { onRequestClose, openSettings, label =
   });
   if (!openSettings) $('.gear').hidden = true;
   // localized labels when the host passes them (the playground does not)
-  for (const [sel, key] of [['.ib.commit', 'commit'], ['.ib.push', 'push'], ['.link', 'copyLink'], ['.gear', 'openSettings'], ['.sw[data-k=autoCommit]', 'autoCommit'], ['.sw[data-k=autoPush]', 'autoPush']]) {
+  for (const [sel, key] of [['.ib.commit', 'commit'], ['.ib.push', 'push'], ['.link', 'copyLink'], ['.ib.md', 'copyMarkdown'], ['.gear', 'openSettings'], ['.sw[data-k=autoCommit]', 'autoCommit'], ['.sw[data-k=autoPush]', 'autoPush']]) {
     const b = $(sel);
     const text = label(key);
     if (b && text !== key) {
@@ -435,6 +437,22 @@ export function createPanel(root, store, { onRequestClose, openSettings, label =
     setTimeout(() => {
       setHTML(b, icon.link);
       b.classList.remove('done');
+    }, 1200);
+  });
+
+  // The clipboard write needs this click's user activation: no synthetic clicks, one copy at a time.
+  let copying = false;
+  $('.ib.md').addEventListener('click', async (e) => {
+    if (!isUserInput(e) || copying || !store.copyMarkdown) return;
+    const b = $('.ib.md');
+    copying = true;
+    const ok = await store.copyMarkdown().catch(() => false);
+    copying = false;
+    setHTML(b, ok ? icon.check : icon.alert);
+    b.classList.add(ok ? 'done' : 'fail');
+    setTimeout(() => {
+      setHTML(b, icon.copy);
+      b.classList.remove('done', 'fail');
     }, 1200);
   });
 

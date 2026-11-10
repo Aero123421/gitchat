@@ -60,6 +60,24 @@ export function renderChat(doc: ChatDoc, path: string): RepoFile[] {
   return out;
 }
 
+/** A link to a message asset: not yet uploaded (`gitchat-asset:`) or a file next to the chat. */
+const ASSET_MARKDOWN_LINK = /\[((?:\\.|[^\\\]])*)\]\((?:gitchat-asset:[^()\s]+|[^()\s/]+\.assets\/[^()\s]+)\)/g;
+
+/**
+ * The chat as Markdown to paste elsewhere: the title and one section per message, without the front
+ * matter and message comments the repository file needs. A pasted text cannot bring the asset
+ * files along, so a link to one turns back into its card label ("> **Artifact:** <title>").
+ */
+export function renderCopy(doc: Pick<ChatDoc, 'title' | 'messages'>): string {
+  const lines = [`# ${chatTitle(doc.title)}`, ''];
+  for (const m of doc.messages) {
+    const body = canonicalMarkdown(m.markdown.replace(ASSET_MARKDOWN_LINK, (_m, label: string) => label.replace(/\\([[\]])/g, '$1')));
+    lines.push(`## ${ROLE_HEADING[m.role]}`, '');
+    if (body) lines.push(body, '');
+  }
+  return `${lines.join('\n').replace(/\n+$/, '')}\n`;
+}
+
 /**
  * Gives every asset a unique, safe file name; returns the per-message renames. Names that other
  * messages already link to in the repository (read back from a file, without data) are taken, so

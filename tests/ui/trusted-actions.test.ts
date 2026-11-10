@@ -35,6 +35,7 @@ function arm(store: ReturnType<typeof createStore>) {
     commit: vi.spyOn(store, 'commit').mockImplementation(() => {}),
     push: vi.spyOn(store, 'push').mockImplementation(() => {}),
     setAuto: vi.spyOn(store, 'setAuto').mockImplementation(() => {}),
+    copyMarkdown: vi.spyOn(store, 'copyMarkdown').mockResolvedValue(true),
   };
 }
 
@@ -74,7 +75,7 @@ describe('widget git actions require trusted user input', () => {
           return el;
         };
 
-        for (const sel of ['.ab.commit', '.ab.push', '.ab.start', '.ab.cancel', '.ib.commit', '.ib.push', '.sw[data-k="autoCommit"]', '.sw[data-k="autoPush"]']) {
+        for (const sel of ['.ab.commit', '.ab.push', '.ab.start', '.ab.cancel', '.ib.commit', '.ib.push', '.ib.md', '.sw[data-k="autoCommit"]', '.sw[data-k="autoPush"]']) {
           click(q(sel), false);
         }
         expect(spies.commit).not.toHaveBeenCalled();
@@ -82,6 +83,7 @@ describe('widget git actions require trusted user input', () => {
         expect(spies.init).not.toHaveBeenCalled();
         expect(spies.cancelInit).not.toHaveBeenCalled();
         expect(spies.setAuto).not.toHaveBeenCalled();
+        expect(spies.copyMarkdown).not.toHaveBeenCalled();
 
         click(q('.ab.commit'), true);
         click(q('.ab.push'), true);
@@ -91,6 +93,7 @@ describe('widget git actions require trusted user input', () => {
         click(q('.ib.push'), true);
         click(q('.sw[data-k="autoCommit"]'), true);
         click(q('.sw[data-k="autoPush"]'), true);
+        click(q('.ib.md'), true);
 
         expect(spies.commit).toHaveBeenCalledTimes(2);
         expect(spies.push).toHaveBeenCalledTimes(2);
@@ -99,6 +102,7 @@ describe('widget git actions require trusted user input', () => {
         expect(spies.setAuto).toHaveBeenCalledTimes(2);
         expect(spies.setAuto).toHaveBeenNthCalledWith(1, 'autoCommit', true);
         expect(spies.setAuto).toHaveBeenNthCalledWith(2, 'autoPush', true);
+        expect(spies.copyMarkdown).toHaveBeenCalledTimes(1);
       } finally {
         inst.destroy();
         host.remove();

@@ -131,6 +131,7 @@ export function createBackground(opts: BackgroundOptions = {}) {
     'chat/init/cancel': async (p) => (await engine()).initCancel(p.key, p.initId),
     'chat/commit': async (p) => (await engine()).commit(p.key),
     'chat/push': async (p) => (await engine()).push(p.key),
+    'chat/markdown': async (p) => ({ markdown: await (await engine()).copyMarkdown(p.key) }),
     'chat/untrack': async (p) => (await engine()).untrack(p.key),
 
     'settings/get': () => loadSettings(),

@@ -119,6 +119,7 @@ export function validatePayload(type: RequestType, payload: unknown): ServiceId 
     case 'chat/status':
     case 'chat/init/start':
     case 'chat/commit':
+    case 'chat/markdown':
     case 'chat/untrack':
       return key(p.key);
     case 'chat/push':

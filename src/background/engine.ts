@@ -9,7 +9,7 @@ import { RateLimitError, type GitHub } from './github/client';
 import { gitBlobSha } from './hash';
 import type { ChatDoc, ChatRecord, CommitWithDoc, LocalCommit, PageRead, SyncMeta } from './model';
 import { chatPath, encodePath, repoId } from './paths';
-import { chatTitle } from './render';
+import { chatTitle, renderCopy } from './render';
 import { diffStaged, hashesOf, keepArtifacts, keepChangesSince, mergeSnapshot, messageHash, recordReads, refsOf, threeWayMerge, unionMessages, uniqueIds } from './stage';
 import type { Db } from './store/db';
 import { findRemoteChat, oursIsNewer, pushCommits, type PushOutcome, type RemoteCopy } from './sync';
@@ -447,6 +447,19 @@ export class Engine {
       return keys;
     });
     for (const key of gone) await this.emitStatus(key);
+  }
+
+  /**
+   * A tracked chat as Markdown to paste elsewhere, from the working copy (what the next commit
+   * saves, older history from other devices included). Read-only: nothing is staged or committed,
+   * and no push or network call is needed.
+   */
+  async copyMarkdown(key: ChatKey): Promise<string> {
+    return this.exclusive(async () => {
+      const rec = await this.deps.db.getChat(key);
+      if (!rec?.tracked) throw new GitchatError('Start saving this chat first.', 'not-tracked');
+      return renderCopy(rec);
+    });
   }
 
   async untrack(key: ChatKey): Promise<ChatStatus> {

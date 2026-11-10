@@ -727,4 +727,65 @@ describe('Controller', () => {
     await vi.advanceTimersByTimeAsync(50);
     expect(snapshots()).toHaveLength(1);
   });
+
+  describe('copy as Markdown', () => {
+    let writeText: ReturnType<typeof vi.fn>;
+    beforeEach(() => {
+      writeText = vi.fn(async () => undefined);
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+      handlers['chat/markdown'] = () => ({ markdown: '# T\n\n## User\n\nhi\n' });
+    });
+
+    it('stages what the page shows, then copies the background’s text', async () => {
+      const c = await open(makeAdapter());
+      sent.length = 0;
+      const copied = c.store.copyMarkdown();
+      await vi.advanceTimersByTimeAsync(50);
+      await expect(copied).resolves.toBe(true);
+      expect(sent.map((s) => s.type)).toEqual(['chat/snapshot', 'chat/markdown']);
+      expect(sent[1]?.payload).toEqual({ key: 'claude:a' });
+      expect(writeText).toHaveBeenCalledWith('# T\n\n## User\n\nhi\n');
+    });
+
+    it('does not let a slow page read use up the click (the copy goes ahead without it)', async () => {
+      const c = await open(makeAdapter());
+      handlers['chat/snapshot'] = () => new Promise(() => {});
+      sent.length = 0;
+      const copied = c.store.copyMarkdown();
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(sent.map((s) => s.type)).toEqual(['chat/snapshot']);
+      await vi.advanceTimersByTimeAsync(600);
+      await expect(copied).resolves.toBe(true);
+      expect(sent.map((s) => s.type)).toEqual(['chat/snapshot', 'chat/markdown']);
+    });
+
+    it('copies nothing for a chat that is not being saved', async () => {
+      handlers['chat/open'] = (p) => status(`claude:${p.chatId as string}`, { tracked: false });
+      const c = await open(makeAdapter());
+      sent.length = 0;
+      await expect(c.store.copyMarkdown()).resolves.toBe(false);
+      expect(sent).toEqual([]);
+      expect(writeText).not.toHaveBeenCalled();
+    });
+
+    it('reports a failed copy, and never copies a chat the tab has left', async () => {
+      const c = await open(makeAdapter());
+      writeText.mockRejectedValueOnce(new Error('denied'));
+      const failed = c.store.copyMarkdown();
+      await vi.advanceTimersByTimeAsync(50);
+      await expect(failed).resolves.toBe(false);
+
+      let answer!: (v: unknown) => void;
+      handlers['chat/markdown'] = () => new Promise((r) => (answer = r));
+      writeText.mockClear();
+      const left = c.store.copyMarkdown();
+      await vi.advanceTimersByTimeAsync(50);
+      showChat('b');
+      await c.checkRoute();
+      answer({ markdown: '# a\n' });
+      await vi.advanceTimersByTimeAsync(50);
+      await expect(left).resolves.toBe(false);
+      expect(writeText).not.toHaveBeenCalled();
+    });
+  });
 });

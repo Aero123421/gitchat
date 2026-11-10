@@ -31,6 +31,8 @@ export interface UiActions {
   init(): void;
   cancelInit(): void;
   setAuto(key: 'autoCommit' | 'autoPush', value: boolean): void;
+  /** Copies the tracked chat to the clipboard as Markdown; resolves to whether it was copied. */
+  copyMarkdown(): Promise<boolean>;
 }
 
 type Listener = (type: string, detail: Record<string, unknown>, state: UiState) => void;
@@ -111,6 +113,12 @@ export class UiStore {
 
   setAuto(key: 'autoCommit' | 'autoPush', value: boolean): void {
     this.actions.setAuto(key, value);
+  }
+
+  /** Only a tracked chat: its whole text is already here, so the copy fits in the click's time. */
+  copyMarkdown(): Promise<boolean> {
+    if (!this.state.tracked) return Promise.resolve(false);
+    return this.actions.copyMarkdown();
   }
 
   // ---- updates from the controller
