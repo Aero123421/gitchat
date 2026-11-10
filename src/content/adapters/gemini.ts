@@ -29,13 +29,8 @@ function canvasIndex(chip: Element): number {
   return chips.indexOf(chip) + 1;
 }
 
-/**
- * Card label of a Canvas preview. Gemini puts the name on the chip's `.title`.
- * "Canvas", then "Canvas 2", … is only the stand-in when that element is absent or blank.
- */
+/** Keep legacy labels so a closed preview still matches its saved link and file. */
 function canvasTitle(chip: Element): string {
-  const title = chip.querySelector('.title')?.textContent?.trim() ?? '';
-  if (title) return title;
   const n = canvasIndex(chip);
   return n > 1 ? `Canvas ${n}` : 'Canvas';
 }

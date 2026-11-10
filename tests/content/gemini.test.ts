@@ -89,20 +89,19 @@ describe('gemini adapter (live-site fixtures)', () => {
     expect(answers.some((m) => m.markdown.includes('only the thought'))).toBe(false);
   });
 
-  it('uses the chip title and falls back only when it is absent', async () => {
+  it('keeps legacy Canvas labels even when chips have titles', async () => {
     load('canvas-title.html');
     const answer = captureVisible(gemini, document).find((m) => m.role === 'assistant');
-    expect(answer?.markdown).toMatch(/^> \*\*Artifact:\*\* Snake Game$/m);
+    expect(answer?.markdown).toMatch(/^> \*\*Artifact:\*\* Canvas$/m);
     expect(answer?.markdown).toMatch(/^> \*\*Artifact:\*\* Canvas 2$/m);
     expect(answer?.markdown).toMatch(/^> \*\*Artifact:\*\* Canvas 3$/m);
-    expect(answer?.markdown).toMatch(/^> \*\*Artifact:\*\* Notes$/m);
-    expect(answer?.markdown).not.toMatch(/^> \*\*Artifact:\*\* Canvas$/m);
+    expect(answer?.markdown).toMatch(/^> \*\*Artifact:\*\* Canvas 4$/m);
 
     for (const frame of Array.from(document.querySelectorAll<HTMLIFrameElement>('iframe'))) {
       Object.defineProperty(frame, 'contentWindow', { configurable: true, get: () => window });
     }
     const arts = await gemini.artifacts!(document);
-    expect(arts.map((a) => a.title)).toEqual(['Snake Game', 'Canvas 2', 'Canvas 3', 'Notes']);
+    expect(arts.map((a) => a.title)).toEqual(['Canvas', 'Canvas 2', 'Canvas 3', 'Canvas 4']);
   });
 
   it('reads every turn of a long chat even when they are off-screen', () => {
