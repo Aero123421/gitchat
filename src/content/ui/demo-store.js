@@ -209,6 +209,11 @@ export function createStore() {
       emit('reset');
     },
 
+    // The playground has no chat to copy: report success without touching the clipboard.
+    copyMarkdown() {
+      return Promise.resolve(state.tracked);
+    },
+
     failNextPush() {
       state.failNext = true;
       emit('armed');

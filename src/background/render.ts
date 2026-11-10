@@ -2,6 +2,7 @@
 // message assets next to it. Format: see DESIGN.md.
 
 import { ASSET_URL_PREFIX, type CapturedAsset, type CapturedMessage } from '../shared/types';
+import { assetNameOf, MARKER_LINE, markerLine, parseMarker } from './assets';
 import type { ChatDoc } from './model';
 import { assetDir } from './paths';
 import { canonicalMarkdown } from './stage';
@@ -58,6 +59,31 @@ export function renderChat(doc: ChatDoc, path: string): RepoFile[] {
   const out: RepoFile[] = [{ path, content: `${lines.join('\n').replace(/\n+$/, '')}\n`, encoding: 'utf8', kind: 'chat' }];
   for (const [name, a] of assets) out.push({ path: `${dir}/${name}`, content: a.data, encoding: a.encoding, kind: 'asset' });
   return out;
+}
+
+function copyCards(md: string): string {
+  // Only gitchat's whole-line cards lose asset links; other Markdown stays intact.
+  return md.replace(MARKER_LINE, (line, kind: string, rest: string) => {
+    const marker = parseMarker(kind, rest);
+    return marker.target !== null && assetNameOf(marker.target) !== null
+      ? markerLine({ ...marker, target: null })
+      : line;
+  });
+}
+
+/**
+ * The chat as Markdown to paste elsewhere: the title and one section per message, without the front
+ * matter and message comments the repository file needs. A pasted text cannot bring the asset
+ * files along, so a link to one turns back into its card label ("> **Artifact:** <title>").
+ */
+export function renderCopy(doc: Pick<ChatDoc, 'title' | 'messages'>): string {
+  const lines = [`# ${chatTitle(doc.title)}`, ''];
+  for (const m of doc.messages) {
+    const body = canonicalMarkdown(copyCards(m.markdown));
+    lines.push(`## ${ROLE_HEADING[m.role]}`, '');
+    if (body) lines.push(body, '');
+  }
+  return `${lines.join('\n').replace(/\n+$/, '')}\n`;
 }
 
 /**

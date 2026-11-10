@@ -20,6 +20,9 @@
   "copyLink": {
     "message": "Copy link to the file on GitHub"
   },
+  "copyMarkdown": {
+    "message": "Copy the chat as Markdown"
+  },
   "autoCommit": {
     "message": "Auto commit"
   },

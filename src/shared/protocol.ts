@@ -63,6 +63,8 @@ export interface Requests {
   'chat/commit': { req: { key: ChatKey }; res: ChatStatus };
   /** Commits anything staged for `key` first, then pushes all pending commits. */
   'chat/push': { req: { key?: ChatKey }; res: ChatStatus | null };
+  /** A tracked chat as Markdown for the clipboard (title + messages, no front matter). Changes nothing. */
+  'chat/markdown': { req: { key: ChatKey }; res: { markdown: string } };
   /** Stop tracking a chat on this device (the file in the repository is kept). */
   'chat/untrack': { req: { key: ChatKey }; res: ChatStatus };
 

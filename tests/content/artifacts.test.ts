@@ -4,6 +4,7 @@ import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { CapturedMessage } from '../../src/shared/types';
 import { keepArtifacts } from '../../src/background/stage';
+import { parseChatFile, renderChat, renderCopy } from '../../src/background/render';
 
 // Frames cannot answer in the test DOM: report what each adapter would ask for instead.
 vi.mock('../../src/content/capture/frames', async (orig) => ({
@@ -46,6 +47,24 @@ const addUserContent = (doc: Document, src = 'https://x.frame.claudeusercontent.
 };
 
 describe('attachArtifacts', () => {
+  it('keeps the saved format and round-trips a card whose title ends in a backslash', () => {
+    const title = 'Path [v2] \\';
+    const plain = a('m1', `> **Artifact:** ${title}`);
+    const [linked] = attachArtifacts([plain], [{ key: 'k', messageId: 'm1', title, html: '<p></p>' }]);
+    const name = linked!.assets![0]!.name;
+    expect(linked!.markdown).toBe(`> **Artifact:** [Path \\[v2\\] \\](gitchat-asset:${name})`);
+    const chat = {
+      service: 'claude' as const, chatId: 'abc', url: 'https://claude.ai/chat/abc', title: 'T',
+      createdAt: '2026-11-09T09:00:00.000Z', capturedAt: '2026-11-09T10:00:00.000Z', messages: [linked!],
+    };
+    const [saved] = parseChatFile(renderChat(chat, 'claude/x.md')[0]!.content).messages;
+    const kept = keepArtifacts(saved!, plain);
+    expect(kept.markdown).toBe(`> **Artifact:** [Path \\[v2\\] \\](x.assets/${name})`);
+    for (const message of [linked!, kept]) {
+      expect(renderCopy({ title: 'T', messages: [message] })).toBe(`# T\n\n## Assistant\n\n> **Artifact:** ${title}\n`);
+    }
+  });
+
   it('attaches each visualization to the message that owns it, even with equal titles', () => {
     const msgs = [a('m1', '> **Artifact:** Chart'), a('m2', '> **Artifact:** Chart')];
     const out = attachArtifacts(msgs, [{ key: 'artifact:x1', messageId: 'm1', title: 'Chart', html: '<p>old</p>' }]);

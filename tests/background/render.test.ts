@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatDoc } from '../../src/background/model';
-import { parseChatFile, parseFrontMatter, renderChat } from '../../src/background/render';
+import { parseChatFile, parseFrontMatter, renderChat, renderCopy } from '../../src/background/render';
 
 const doc = (over: Partial<ChatDoc> = {}): ChatDoc => ({
   service: 'claude',
@@ -180,5 +180,73 @@ describe('parseChatFile', () => {
   it('falls back to scanning when a length no longer fits (edited by hand)', () => {
     const file = renderChat(doc(), 'claude/x.md')[0]!.content.replace('How should I design state?', 'How should I design my state?');
     expect(parseChatFile(file).messages.map((m) => m.markdown)).toEqual(['How should I design my state?', 'Use $E=mc^2$.\n\n```ts\nconst a = 1;\n```']);
+  });
+});
+
+describe('renderCopy', () => {
+  const copy = (markdown: string) => renderCopy(doc({ messages: [{ id: 'a', role: 'assistant', markdown }] }));
+
+  it('preserves ordinary links, images, inline code and plain cards exactly', () => {
+    const markdown = [
+      '[docs](https://example.com/a) [asset](gitchat-asset:a.html) [saved](chat.assets/a.html)',
+      '![Diagram](gitchat-asset:diagram.html) ![](chat.assets/empty.png) ![web](https://example.com/a.png)',
+      '\\[literal](gitchat-asset:a.html) `[Chart](gitchat-asset:chart.html)`',
+      '``a ` [Chart](chat.assets/chart.html)``',
+      '`across\n[Chart](gitchat-asset:chart.html)\nlines`',
+      '> **Artifact:** Plain [v2] \\',
+      '> **File:** report.html  ',
+      '> **Artifact:** [Website](https://example.com/a)',
+    ].join('\n');
+    expect(copy(markdown)).toBe(`# State "design": v2\n\n## Assistant\n\n${markdown}\n`);
+  });
+
+  it.each(['', '> ', '> > ', '    ', '- ', '1. ', '  >   '])('preserves fenced code with prefix %j', (prefix) => {
+    const markdown = [
+      `${prefix}~~~md`,
+      `${prefix}[Chart](gitchat-asset:chart.html)`,
+      `${prefix}![Diagram](chat.assets/diagram.png)`,
+      `${prefix}~~~`,
+      '',
+      `${prefix}\`\`\`md`,
+      `${prefix}[Chart](chat.assets/chart.html)`,
+      `${prefix}\`\`\``,
+    ].join('\n');
+    expect(copy(markdown)).toBe(`# State "design": v2\n\n## Assistant\n\n${markdown}\n`);
+  });
+
+  it('unescapes brackets and backslashes in asset labels', () => {
+    expect(copy(String.raw`> **Artifact:** [Path \[v2\] \\](gitchat-asset:path.html)`))
+      .toContain('> **Artifact:** Path [v2] \\\n');
+    // Captured and saved cards have an unescaped trailing backslash.
+    expect(copy('> **Artifact:** [Path \\](gitchat-asset:x)'))
+      .toContain('> **Artifact:** Path \\\n');
+    expect(copy('> **Artifact:** [Path \\](chat.assets/path.html)'))
+      .toContain('> **Artifact:** Path \\\n');
+  });
+
+  it('writes the title and messages without front matter or message comments', () => {
+    const md = renderCopy(doc());
+    expect(md).toBe('# State "design": v2\n\n## User\n\nHow should I design state?\n\n## Assistant\n\nUse $E=mc^2$.\n\n```ts\nconst a = 1;\n```\n');
+    expect(md).not.toContain('gitchat:message');
+    expect(md).not.toMatch(/^---/);
+  });
+
+  it('turns asset links back into their card labels and keeps other links', () => {
+    const md = renderCopy(
+      doc({
+        title: '',
+        messages: [
+          { id: 'a', role: 'assistant', markdown: '> **Artifact:** [Chart \\[v2\\]](gitchat-asset:chart.html)\n\nSee [docs](https://example.com/a).' },
+          { id: 'b', role: 'assistant', markdown: '> **File:** [Plan](2026-11-09-plan--abc.assets/plan.html)' },
+          { id: 'c', role: 'user', markdown: '' },
+        ],
+      }),
+    );
+    expect(md).toContain('> **Artifact:** Chart [v2]\n\nSee [docs](https://example.com/a).');
+    expect(md).toContain('> **File:** Plan');
+    expect(md).not.toContain('gitchat-asset:');
+    expect(md).not.toContain('.assets/');
+    expect(md.startsWith('# Untitled chat\n')).toBe(true);
+    expect(md.endsWith('## User\n')).toBe(true);
   });
 });

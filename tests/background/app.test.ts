@@ -84,6 +84,12 @@ describe('router', () => {
     expect(await t.call('chat/status', { key: 'claude:abc' }, CONTENT_SCRIPT)).toMatchObject({ ok: true });
   });
 
+  it('copies a chat as Markdown only for its own site, and only while it is saved', async () => {
+    expect(await t.call('chat/markdown', { key: 'chatgpt:abc' }, CONTENT_SCRIPT)).toMatchObject({ ok: false, code: 'forbidden' });
+    expect(await t.call('chat/markdown', { key: 'nonsense' } as never, CONTENT_SCRIPT)).toMatchObject({ ok: false, code: 'invalid' });
+    expect(await t.call('chat/markdown', { key: 'claude:abc' }, CONTENT_SCRIPT)).toMatchObject({ ok: false, code: 'not-tracked' });
+  });
+
   it('rejects malformed payloads', async () => {
     expect(await t.call('chat/status', { key: 'nonsense' } as never, CONTENT_SCRIPT)).toMatchObject({ ok: false, code: 'invalid' });
     expect(await t.call('chat/snapshot', { snapshot: snapshot({ messages: [{ id: 'u1', role: 'system', markdown: 'x' }] }) } as never, CONTENT_SCRIPT)).toMatchObject({ ok: false, code: 'invalid' });

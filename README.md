@@ -33,7 +33,7 @@ A small widget sits at the right edge of the chat page.
 - **Stage**: when the AI finishes an answer, the new messages appear as droplets next to it. Nothing is saved yet.
 - **Commit**: hover the widget and press Commit. The droplets merge in and become blue dots, one per commit not yet on GitHub.
 - **Push**: press Push and the dots rise away: the chat file is in your repository.
-- **Panel**: click the widget for the chat's commit graph (oldest at the top; the dotted line marks what is already on GitHub), a button to copy the file's GitHub link, and the **Auto commit** and **Auto push** switches. While a switch is on, its button is hidden.
+- **Panel**: click the widget for the chat's commit graph (oldest at the top; the dotted line marks what is already on GitHub), a button to copy the file's GitHub link, a button to copy the whole chat as Markdown, and the **Auto commit** and **Auto push** switches. While a switch is on, its button is hidden.
 
 <p align="center">
   <img src="docs/images/styles-en.png" width="470" alt="The three widget styles: Creature, Line and Dot">

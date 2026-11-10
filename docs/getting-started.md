@@ -127,6 +127,8 @@ Once a chat is tracked and pushed:
 2. Click **Copy link to the file on GitHub** (the link icon).
 3. Paste the URL into another chat or pass the file in your repository to an AI agent such as Claude Code.
 
+To paste the conversation itself instead, click **Copy the chat as Markdown** (the copy icon) in the panel. It copies the whole chat — also the older messages the page has not loaded — as a title and one `## User` / `## Assistant` section per message, without the front matter and hidden message comments of the saved file. It works for any chat you started saving, before a commit or push and offline. Visualizations, artifacts and Canvas previews cannot travel in pasted text: they stay as their `> **Artifact:** <title>` line.
+
 In your repository, files are organized by service:
 
 ```text
