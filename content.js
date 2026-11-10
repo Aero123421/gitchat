@@ -1151,15 +1151,18 @@ ${fencedCode(raw.replace(/\n$/, ""), codeLanguage(el))}
   var STOP = 'form button:has(g[id="name=player-stop"])';
   var CODE_CARD = "[data-code-card]";
   var rowId = (el) => el.closest(ROW)?.id.slice("response-".length) || null;
+  var after = (a, b) => !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
   function stableMessage(el) {
     const doc = el.ownerDocument;
-    const newest = doc.querySelector(".action-buttons.last-response")?.closest(ROW);
-    if (!newest?.querySelector('[data-testid="assistant-message"]')) return true;
     const rid = new URL(doc.location.href).searchParams.get("rid");
-    if (rid === rowId(newest)) return true;
-    const row = el.closest(GATEWAY);
-    const answer = newest.closest(GATEWAY);
-    return row !== answer && !(el.matches('[data-testid="user-message"]') && row === answer?.previousElementSibling);
+    const row = el.closest(ROW);
+    if (!rid || !row) return true;
+    const leaf = doc.getElementById(`response-${rid}`);
+    if (leaf) return !after(leaf, row);
+    if (phase(doc) === "idle") return true;
+    const prompts = doc.querySelectorAll('[data-testid="user-message"]');
+    const newest = prompts[prompts.length - 1]?.closest(ROW);
+    return !newest || newest !== row && !after(newest, row);
   }
   function codeLanguage3(pre) {
     const label = pre.closest(CODE_CARD)?.querySelector(":scope > div:first-child span")?.textContent?.trim() ?? "";
@@ -1198,6 +1201,13 @@ ${fencedCode(raw.replace(/\n$/, ""), codeLanguage(el))}
     const bar = doc.querySelector(".action-buttons.last-response");
     return !!bar && !bar.querySelector("button") && !!bar.closest(ROW)?.querySelector('[data-testid="assistant-message"]');
   }
+  function phase(doc) {
+    if (doc.querySelector('[data-testid="assistant-message"] [data-sd-animate]')) return "streaming";
+    const working = doc.querySelector('[data-testid="canvas-working-indicator"]:not([data-settled])');
+    const pending = doc.querySelector('[data-testid="assistant-message"] .grok-bot');
+    if (working || pending || doc.querySelector(STOP) || lastToolbarEmpty(doc)) return "thinking";
+    return "idle";
+  }
   var grok = defineAdapter({
     service: "grok",
     siteNames: ["Grok"],
@@ -1235,13 +1245,7 @@ ${fencedCode(raw.replace(/\n$/, ""), codeLanguage(el))}
     },
     // the top row is mounted and no older history is left to load below it
     atStart: (doc) => !!doc.querySelector('[data-plane-row="transcript:top-inset"]') && !doc.querySelector('[data-plane-row="chat:earlier-turns"]'),
-    aiPhase(doc) {
-      if (doc.querySelector('[data-testid="assistant-message"] [data-sd-animate]')) return "streaming";
-      const working = doc.querySelector('[data-testid="canvas-working-indicator"]:not([data-settled])');
-      const pending = doc.querySelector('[data-testid="assistant-message"] .grok-bot');
-      if (working || pending || doc.querySelector(STOP) || lastToolbarEmpty(doc)) return "thinking";
-      return "idle";
-    },
+    aiPhase: (doc) => phase(doc),
     // The gateway key survives server id assignment and virtualized remounts.
     activeTurnId(doc) {
       const bar = doc.querySelector(".action-buttons.last-response");
@@ -1481,10 +1485,10 @@ ${fencedCode(raw.replace(/\n$/, ""), codeLanguage(el))}
       const linked = changed.find((k) => k !== key) ?? null;
       this.emit("settings", { key, value: next[key], linked });
     }
-    setAi(phase, ms) {
-      if (this.state.ai === phase) return;
-      this.state.ai = phase;
-      this.emit("ai", { phase, ms });
+    setAi(phase2, ms) {
+      if (this.state.ai === phase2) return;
+      this.state.ai = phase2;
+      this.emit("ai", { phase: phase2, ms });
     }
     setStalled(on) {
       if (this.state.stalled === on) return;
@@ -2998,17 +3002,17 @@ button { font: inherit; }
       forming = null;
       sats.push({ el: f.el, a: f.a, w: 0, ph: 0, rad: new Spring(R0, { stiffness: 120, damping: 16 }).set(0), dying: true });
     }
-    function onAi(phase, d) {
+    function onAi(phase2, d) {
       lastActive = performance.now();
       if (!store.state.tracked) {
         aiPhase = "idle";
         return;
       }
       aiT0 = performance.now();
-      if (phase === "thinking") {
+      if (phase2 === "thinking") {
         aiPhase = "thinking";
         blink();
-      } else if (phase === "streaming") {
+      } else if (phase2 === "streaming") {
         aiPhase = "streaming";
         aiStreamMs = d.ms || 2800;
         startForming();
@@ -5397,8 +5401,8 @@ ${text2}` : null;
     }
     /** The site's "AI is working" signal right now (the observer only looks every so often). */
     aiBusy() {
-      const phase = this.adapter.aiPhase(document);
-      return phase ? phase !== "idle" : this.adapter.isGenerating(document);
+      const phase2 = this.adapter.aiPhase(document);
+      return phase2 ? phase2 !== "idle" : this.adapter.isGenerating(document);
     }
     // ---- staging
     /**
