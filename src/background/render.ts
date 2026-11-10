@@ -1,6 +1,7 @@
 // Renders a chat into its repository files: one Markdown file (front matter + messages) and the
 // message assets next to it. Format: see DESIGN.md.
 
+import { sanitizeVisualizationHtml } from '../content/capture/frames';
 import { ASSET_URL_PREFIX, type CapturedAsset, type CapturedMessage } from '../shared/types';
 import type { ChatDoc } from './model';
 import { assetDir } from './paths';
@@ -56,8 +57,15 @@ export function renderChat(doc: ChatDoc, path: string): RepoFile[] {
   });
 
   const out: RepoFile[] = [{ path, content: `${lines.join('\n').replace(/\n+$/, '')}\n`, encoding: 'utf8', kind: 'chat' }];
-  for (const [name, a] of assets) out.push({ path: `${dir}/${name}`, content: a.data, encoding: a.encoding, kind: 'asset' });
+  for (const [name, a] of assets) out.push({ path: `${dir}/${name}`, content: assetBytes(a), encoding: a.encoding, kind: 'asset' });
   return out;
+}
+
+/** UTF-8 HTML is untrusted visualization markup. Neutralize it in the bytes that are committed. */
+function assetBytes(a: CapturedAsset): string {
+  const mime = a.mime.split(';')[0]?.trim().toLowerCase() ?? '';
+  if (a.encoding !== 'utf8' || mime !== 'text/html') return a.data;
+  return sanitizeVisualizationHtml(a.data);
 }
 
 /**

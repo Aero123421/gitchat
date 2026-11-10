@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatDoc } from '../../src/background/model';
 import { parseChatFile, parseFrontMatter, renderChat } from '../../src/background/render';
+import { sanitizeVisualizationHtml } from '../../src/content/capture/frames';
 
 const doc = (over: Partial<ChatDoc> = {}): ChatDoc => ({
   service: 'claude',
@@ -96,6 +97,9 @@ describe('renderChat', () => {
       ['claude/2026-11-09-a (b)--abc.assets/chart.html', 'utf8', 'asset'],
       ['claude/2026-11-09-a (b)--abc.assets/chart-2.html', 'base64', 'asset'],
     ]);
+    // Safe HTML and non-HTML bytes are written unchanged.
+    expect(files[1]?.content).toBe('<b>hi</b>');
+    expect(files[2]?.content).toBe('iVBORw0KGgo=');
   });
 
   it('uses a placeholder title and keeps ids from breaking the comment', () => {
@@ -122,6 +126,72 @@ describe('renderChat', () => {
     expect(files.map((f) => f.path)).toEqual(['claude/x--abc.md', 'claude/x--abc.assets/chart-2.html']);
     expect(files[0]!.content).toContain('[A](x--abc.assets/chart.html)');
     expect(files[0]!.content).toContain('[B](x--abc.assets/chart-2.html)');
+  });
+
+  it('neutralizes scripts, inline handlers and escaping URLs in the HTML bytes that are committed', () => {
+    const sample = [
+      '<!doctype html><html><head><title>Chart</title></head><body>',
+      '<script>alert(1)</script>',
+      '<script src="../x.js"></script>',
+      '<h1 onclick="alert(1)">Revenue</h1>',
+      '<img src="../secret.png" alt="chart">',
+      '<a href="javascript:alert(1)">go</a>',
+      '<style>h1 { color: #123; background: url("../bg.png"); }</style>',
+      '</body></html>',
+    ].join('');
+    const files = renderChat(
+      doc({
+        messages: [
+          {
+            id: 'm1',
+            role: 'assistant',
+            markdown: '[Chart](gitchat-asset:chart.html)',
+            assets: [{ name: 'chart.html', mime: 'text/html', data: sample, encoding: 'utf8' }],
+          },
+        ],
+      }),
+      'claude/x--abc.md',
+    );
+    const bytes = files.find((f) => f.kind === 'asset')?.content ?? '';
+    expect(bytes).not.toMatch(/<script[\s>/]/i);
+    expect(bytes).not.toMatch(/<\/script/i);
+    expect(bytes).not.toMatch(/\son[a-z][\w:-]*\s*=/i);
+    expect(bytes).not.toContain('../');
+    expect(bytes).not.toMatch(/javascript:/i);
+    expect(bytes).toContain('http-equiv="Content-Security-Policy"');
+    expect(bytes).toContain("script-src 'none'");
+    expect(bytes).toContain('Revenue');
+    expect(bytes).toContain('color: #123');
+    expect(bytes).toContain('alt="chart"');
+    expect(bytes).toContain('src="#"');
+    expect(sanitizeVisualizationHtml(bytes)).toBe(bytes);
+  });
+});
+
+describe('sanitizeVisualizationHtml', () => {
+  it('absolutizes an escaping URL with the frame origin and leaves a safe fragment untouched', () => {
+    const abs = sanitizeVisualizationHtml('<img src="../secret.png" alt="chart"><a href="javascript&#58;alert(1)">x</a>', 'https://viz.example');
+    expect(abs).toContain('src="https://viz.example/secret.png"');
+    expect(abs).toContain('href="#"');
+    expect(abs).not.toContain('../');
+    expect(abs).not.toMatch(/javascript/i);
+    expect(abs).toContain("script-src 'none'");
+    expect(sanitizeVisualizationHtml(abs)).toBe(abs);
+    expect(sanitizeVisualizationHtml('<b>chart</b>')).toBe('<b>chart</b>');
+  });
+
+  it('rewrites encoded dot-segments and root paths, and drops inline handlers', () => {
+    const out = sanitizeVisualizationHtml('<body onload="alert(1)"><img src="%2e%2e/secret.png"><img src="/etc/passwd"></body>');
+    expect(out).not.toMatch(/\sonload\s*=/i);
+    expect(out).not.toContain('%2e%2e');
+    expect(out).not.toContain('/etc/passwd');
+    expect(out).toContain("script-src 'none'");
+    const rooted = sanitizeVisualizationHtml('<img src="/assets/app.css">', 'https://charts.example');
+    expect(rooted).toContain('src="https://charts.example/assets/app.css"');
+    const nested = sanitizeVisualizationHtml('<iframe srcdoc="<script>alert(1)</script><a href=&quot;../x&quot;>z</a>"></iframe>');
+    expect(nested).not.toMatch(/<script/i);
+    expect(nested).not.toContain('../');
+    expect(nested).toContain("script-src 'none'");
   });
 });
 
