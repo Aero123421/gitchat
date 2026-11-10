@@ -1,6 +1,6 @@
 # gitchat — design notes (for contributors)
 
-gitchat is a Manifest V3 Chrome extension that saves ChatGPT, Claude and Gemini conversations to the
+gitchat is a Manifest V3 Chrome extension that saves ChatGPT, Claude, Gemini and Grok conversations to the
 user's own GitHub repository as Markdown, with a git-like flow: **auto-stage → commit → push**.
 
 This file is the contract between the parts of the codebase. User-facing docs live in `README.md` and
@@ -188,16 +188,16 @@ Gemini also drops a leading `/u/<n>` account slot), not the raw address bar. The
 
 What the sites look like (verified on the live sites, 2026-11; details in the adapter files):
 
-| | ChatGPT (new app shell + classic) | Claude | Gemini |
-| --- | --- | --- | --- |
-| Message hook | `[data-chatgpt-search-unit-key$=":user"/":assistant"]` or `data-content-search-unit-key` (classic: `data-message-author-role`) | `[data-testid=user-message/assistant-message]` | `user-query` / `model-response` |
-| Stable id | `data-chatgpt-search-message-ids` | `data-turn-key` | `.conversation-container#<16hex>` |
-| Thinking / streaming | `[data-response-starting]` / `[data-talvt-turn-state=in_progress]` | stop button / `data-is-streaming=true` | `pending-request` / `.markdown[aria-busy=true]` |
-| Long chats | virtualized (~11 turns), +5 turns per load | virtualized (~20 rows), +32 rows per load | +10 turns per load, `content-visibility:auto` |
-| Start of chat | none (stability) | `aria-posinset="1"` marks the first *loaded* row only: stability decides | none (stability) |
-| Visualization frames | `*.web-sandbox.oaiusercontent.com` | `*.claudeusercontent.com` | `*.scf.usercontent.goog` |
+| | ChatGPT (new app shell + classic) | Claude | Gemini | Grok |
+| --- | --- | --- | --- | --- |
+| Message hook | `[data-chatgpt-search-unit-key$=":user"/":assistant"]` or `data-content-search-unit-key` (classic: `data-message-author-role`) | `[data-testid=user-message/assistant-message]` | `user-query` / `model-response` | `[data-testid=user-message/assistant-message]` |
+| Stable id | `data-chatgpt-search-message-ids` | `data-turn-key` | `.conversation-container#<16hex>` | `#response-<uuid>` (one row per message) |
+| Thinking / streaming | `[data-response-starting]` / `[data-talvt-turn-state=in_progress]` | stop button / `data-is-streaming=true` | `pending-request` / `.markdown[aria-busy=true]` | working indicator, stop icon, empty toolbar / `[data-sd-animate]` |
+| Long chats | virtualized (~11 turns), +5 turns per load | virtualized (~20 rows), +32 rows per load | +10 turns per load, `content-visibility:auto` | virtualized (~15 rows), ~50 messages first, the rest behind a loader row |
+| Start of chat | none (stability) | `aria-posinset="1"` marks the first *loaded* row only: stability decides | none (stability) | top row without the loader row |
+| Visualization frames | `*.web-sandbox.oaiusercontent.com` | `*.claudeusercontent.com` | none |
 
-Never match localized text (aria-labels, button captions): all three sites translate them.
+Never match localized text (aria-labels, button captions): all four sites translate them.
 
 Each service has an adapter = **data** (ranked selector candidates, JSON) + a few small code hooks.
 When the primary selector stops matching, the next candidate is tried, then generic heuristics.

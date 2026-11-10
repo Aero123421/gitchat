@@ -9,7 +9,7 @@ import { getBlobText, getHead, getTreeIndex, putFile, repoPath, type Head } from
 
 export const README_MARKER = '<!-- gitchat -->';
 const TOPIC = 'gitchat';
-const SERVICE_DIRS = ['chatgpt', 'claude', 'gemini'];
+const SERVICE_DIRS = ['chatgpt', 'claude', 'gemini', 'grok'];
 
 export const README = `${README_MARKER}
 # AI chat archive
@@ -21,6 +21,7 @@ This repository is managed by [gitchat](https://github.com/Aero123421/gitchat). 
 | \`chatgpt/\` | ChatGPT |
 | \`claude/\` | Claude |
 | \`gemini/\` | Gemini |
+| \`grok/\` | Grok |
 
 File names look like \`2026-11-09-chat-title--a1b2c3d4.md\`: the date of the first save, the title, and the
 start of the chat id. Interactive visualizations are saved next to their chat in a \`*.assets/\` folder.

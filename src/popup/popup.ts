@@ -17,7 +17,7 @@ import { refreshPage } from './refresh';
 import { availableActions } from '../shared/actions.js';
 
 const GRAPH_W = 284;
-const SERVICE_NAME: Record<ServiceId, string> = { chatgpt: 'ChatGPT', claude: 'Claude', gemini: 'Gemini' };
+const SERVICE_NAME: Record<ServiceId, string> = { chatgpt: 'ChatGPT', claude: 'Claude', gemini: 'Gemini', grok: 'Grok' };
 
 async function activeTabId(): Promise<number | null> {
   try {

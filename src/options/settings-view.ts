@@ -17,7 +17,7 @@ import { createRepoChooser } from './repo';
 import { app, on, patchSettings, refreshAuth, refreshSettings, refreshSync } from './state';
 
 export const PROJECT_URL = 'https://github.com/Aero123421/gitchat';
-const SERVICE_NAME: Record<ServiceId, string> = { chatgpt: 'ChatGPT', claude: 'Claude', gemini: 'Gemini' };
+const SERVICE_NAME: Record<ServiceId, string> = { chatgpt: 'ChatGPT', claude: 'Claude', gemini: 'Gemini', grok: 'Grok' };
 const SECTIONS = ['account', 'repository', 'behavior', 'appearance', 'advanced', 'about'] as const;
 type SectionId = (typeof SECTIONS)[number];
 const SECTION_LABEL: Record<SectionId, string> = {

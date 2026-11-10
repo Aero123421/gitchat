@@ -2,7 +2,7 @@
 
 [日本語](getting-started.ja.md)
 
-This guide walks through installing gitchat, connecting your GitHub account, choosing a repository, and saving your first conversation from ChatGPT, Claude, or Gemini.
+This guide walks through installing gitchat, connecting your GitHub account, choosing a repository, and saving your first conversation from ChatGPT, Claude, Gemini, or Grok.
 
 ## 1. Install the extension
 
@@ -100,13 +100,13 @@ A live preview of the widget appears on the right edge of the setup page so you 
   - **Auto push**: pushes right after each commit.
   - **Coupling rule**: turning **Auto push** on also turns **Auto commit** on; turning **Auto commit** off also turns **Auto push** off.
 
-Click **Continue**, then **Open settings** (or open ChatGPT, Claude, or Gemini directly) to finish setup.
+Click **Continue**, then **Open settings** (or open ChatGPT, Claude, Gemini, or Grok directly) to finish setup.
 
 ## 3. Save your first conversation
 
 gitchat does not save every chat you open. Every conversation starts as **untracked** until you explicitly start saving it.
 
-1. Open an existing or new conversation on [ChatGPT](https://chatgpt.com), [Claude](https://claude.ai), or [Gemini](https://gemini.google.com) (on a brand-new chat, send the first message so the site assigns a conversation URL).
+1. Open an existing or new conversation on [ChatGPT](https://chatgpt.com), [Claude](https://claude.ai), [Gemini](https://gemini.google.com), or [Grok](https://grok.com) (on a brand-new chat, send the first message so the site assigns a conversation URL).
 2. Hover the gitchat widget on the right edge of the page (or click the gitchat icon in the browser toolbar).
 3. Click the **Start saving this chat** button under the widget (or in the popup).
 4. **Initial capture (init)**:
@@ -147,7 +147,7 @@ Open the settings page at any time from the gear icon in the widget panel, the t
 | --- | --- |
 | **Account** | View the connected GitHub account (`@login`), authentication method (`GitHub sign-in` or `Personal access token`), and token scopes, or sign out on this device. |
 | **Repository** | Open the configured repository on GitHub, switch to a different repository, view the target branch, and check the current sync status. |
-| **Behavior** | Toggle **Auto commit** and **Auto push**; enable or disable gitchat per service (**ChatGPT**, **Claude**, **Gemini**); toggle **Save visualizations** (saves rendered HTML of interactive artifacts/charts in `<chat>.assets/`, on by default). |
+| **Behavior** | Toggle **Auto commit** and **Auto push**; enable or disable gitchat per service (**ChatGPT**, **Claude**, **Gemini**, **Grok**); toggle **Save visualizations** (saves rendered HTML of interactive artifacts/charts in `<chat>.assets/`, on by default). |
 | **Appearance** | Switch the on-page widget between **Creature**, **Line**, and **Dot** with an interactive preview. Set **Theme** to **Auto** (default; the widget follows the chat site, and this page and the popup follow the system), **Light**, or **Dark**. The toolbar icon cannot change with the theme (Chrome allows one icon). |
 | **Advanced** | Set a custom **GitHub OAuth client ID** (to sign in through a GitHub App or OAuth App you control with Device Flow enabled), or click **Reset settings** to sign out on this device and restore default preferences without modifying your repository. |
 | **About** | Extension version, link to the GitHub project, and license (`MIT`). |

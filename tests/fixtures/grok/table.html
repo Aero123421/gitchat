@@ -1,0 +1,32 @@
+<!-- Reconstruction (not a raw dump) of a grok.com table answer, observed 2026-11-10 (ja UI, dark). Shows: a table card (div[data-table-card] > div.table-container > table) with thead/tbody. Column alignment from |:---|:---:|---:| IS preserved as inline style="text-align: left|center|right" on every th and td (an explicit :--- and an unaligned column both looked like "left" here; unaligned columns were not tested separately). Ids are placeholders. -->
+<div data-testid="chat-transcript-scroller" class="h-full overflow-x-hidden overflow-y-auto">
+  <div class="relative w-full" style="height: 600px;">
+    <div data-plane-row="gateway:RESP_ID_6" class="absolute inset-x-0 top-0" style="transform: translateY(0px);">
+      <div id="response-RESP_ID_6" class="relative group flex flex-col justify-center w-full items-start">
+        <div dir="auto" role="article" aria-labelledby="turn-heading-RESP_ID_6" data-testid="assistant-message" class="message-bubble relative chat-md">
+          <h2 id="turn-heading-RESP_ID_6" class="sr-only" data-no-copy="true">Grok</h2>
+          <div class="thinking-container"></div>
+          <div class="relative"><div class="relative response-content-markdown markdown chat-md chat-md-links"><div class="streamdown-chat-md"><div class="sd:space-y-4 sd:whitespace-normal">
+            <p dir="auto" class="break-words">A small aligned table:</p>
+            <div class="relative group/table my-2"><div><div data-table-card="true" class="rounded-xl"><div class="table-container no-scrollbar">
+              <table dir="auto" class="table-card-row-dividers w-full">
+                <thead><tr>
+                  <th class="break-words text-sm font-semibold" data-col-size="xs" style="text-align: left;">Left</th>
+                  <th class="break-words text-sm font-semibold" data-col-size="xs" style="text-align: center;">Center</th>
+                  <th class="break-words text-sm font-semibold" data-col-size="xs" style="text-align: right;">Right</th>
+                </tr></thead>
+                <tbody>
+                  <tr><td class="break-words text-sm" data-col-size="xs" style="text-align: left;">A</td><td class="break-words text-sm" data-col-size="xs" style="text-align: center;">B</td><td class="break-words text-sm" data-col-size="xs" style="text-align: right;">10</td></tr>
+                  <tr><td class="break-words text-sm" data-col-size="xs" style="text-align: left;">C</td><td class="break-words text-sm" data-col-size="xs" style="text-align: center;">D</td><td class="break-words text-sm" data-col-size="xs" style="text-align: right;">20</td></tr>
+                </tbody>
+              </table>
+            </div></div><div class="table-card-scrollbar-hidden"><div class="table-card-scroll-sizer"></div></div></div></div>
+          </div><span hidden=""></span></div></div></div>
+          <section class="inline-media-container"></section>
+          <div class="-ms-2"></div>
+        </div>
+        <div role="group" aria-labelledby="turn-heading-RESP_ID_6" class="action-buttons last-response"><button type="button" aria-label="回答をコピー"></button></div>
+      </div>
+    </div>
+  </div>
+</div>

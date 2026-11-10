@@ -1,4 +1,4 @@
-// Content script entry: runs on chatgpt.com, claude.ai and gemini.google.com (top frame only).
+// Content script entry: runs on chatgpt.com, claude.ai, gemini.google.com and grok.com (top frame only).
 import { adapterFor } from './adapters/registry';
 import { Controller } from './controller';
 import { log } from '../shared/log';

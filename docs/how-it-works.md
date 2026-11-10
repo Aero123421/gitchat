@@ -2,7 +2,7 @@
 
 [日本語](how-it-works.ja.md)
 
-gitchat turns conversations on ChatGPT, Claude, and Gemini into Markdown files in your own GitHub repository using a git-like workflow: **auto-stage → commit → push**.
+gitchat turns conversations on ChatGPT, Claude, Gemini, and Grok into Markdown files in your own GitHub repository using a git-like workflow: **auto-stage → commit → push**.
 
 ## Architecture overview
 
@@ -18,7 +18,7 @@ chat page DOM ──adapter──► CapturedMessage[] ──► ChatSnapshot �
 
 | Part | Runs in | Responsibility |
 | --- | --- | --- |
-| `src/content/` | Chat pages (`chatgpt.com`, `claude.ai`, `gemini.google.com`) | Site adapters, DOM-to-Markdown conversion, AI-phase observer, full-history init, and the Shadow DOM widget host (`<gitchat-ui>`) |
+| `src/content/` | Chat pages (`chatgpt.com`, `claude.ai`, `gemini.google.com`, `grok.com`) | Site adapters, DOM-to-Markdown conversion, AI-phase observer, full-history init, and the Shadow DOM widget host (`<gitchat-ui>`) |
 | `src/frame/` | Visualization iframes (`*.claudeusercontent.com`, `*.web-sandbox.oaiusercontent.com`, `*.scf.usercontent.goog`) | Serializes rendered visualization HTML when requested by the top-level chat page |
 | `src/background/` | Service worker | GitHub auth and Git Data API client, local database (IndexedDB), staging, local commits, multi-device sync engine, and Markdown file rendering |
 | `src/popup/` | Toolbar popup | Current chat status, commit graph, and quick actions |
@@ -27,13 +27,14 @@ chat page DOM ──adapter──► CapturedMessage[] ──► ChatSnapshot �
 
 ## Tracking a conversation ("init")
 
-Not every conversation is saved. A chat starts as **untracked** until you click **Start saving this chat** under the widget (or in the toolbar popup), or until gitchat finds that another device has already saved the same conversation in your repository. Temporary chats (such as ChatGPT's `?temporary-chat=true`) have no persistent conversation ID and are never tracked.
+Not every conversation is saved. A chat starts as **untracked** until you click **Start saving this chat** under the widget (or in the toolbar popup), or until gitchat finds that another device has already saved the same conversation in your repository. Temporary chats (such as ChatGPT's `?temporary-chat=true` and Grok's private chats) have no persistent conversation ID and are never tracked.
 
-Long conversations on all three services load older turns lazily and often virtualize the DOM:
+Long conversations on all four services load older turns lazily and often virtualize the DOM:
 
 - **ChatGPT**: virtualizes the transcript (~11 turns in the DOM at a time) and loads older turns in batches of 5, re-anchoring scroll position after each load.
 - **Claude**: virtualizes the transcript (~20 rows in the DOM at a time) and loads older rows in batches of 32 when scrolled to the top, marking the first turn with `aria-posinset="1"`.
 - **Gemini**: loads the last 10 turns first and fetches older turns in batches of 10 when `infinite-scroller.chat-history` reaches the top, applying `content-visibility: auto` to off-screen turns. A second signed-in Google account (`/u/<n>` in the path) is the same chat.
+- **Grok**: virtualizes the transcript (~15 rows in the DOM, one per message) and shows about the newest 50 messages first; older ones load behind a loader row at the top. A private chat keeps the address at `grok.com/` and is never tracked.
 
 When you start tracking a chat, **init** captures the full history in two stages:
 
@@ -158,7 +159,7 @@ Claude artifacts (`*.claudeusercontent.com`), ChatGPT inline visualizations (`*.
 When **Save visualizations** is enabled (the default) and a visualization is open on screen at capture time (a preview panel is only saved when it is clear which message it belongs to: the card you clicked, or on Claude the card marked as current):
 
 1. The content script sends a `{gitchat: 1, type: 'frame/serialize', nonce}` request to the iframe.
-2. `src/frame/index.ts` inside the iframe verifies that the request comes from `window.top` on an allowed origin (`https://claude.ai`, `https://chatgpt.com`, or `https://gemini.google.com`) and replies with `<!doctype html>\n` + `document.documentElement.outerHTML`.
+2. `src/frame/index.ts` inside the iframe verifies that the request comes from `window.top` on an allowed origin (`https://claude.ai`, `https://chatgpt.com`, `https://gemini.google.com`, or `https://grok.com`) and replies with `<!doctype html>\n` + `document.documentElement.outerHTML`.
 3. The background writes the HTML file to `<chat-file-without-md>.assets/<slug>.html` and rewrites the artifact reference in the Markdown to a relative link (`> **Artifact:** [Title](<chat>.assets/<slug>.html)`).
 
 ### Known limits

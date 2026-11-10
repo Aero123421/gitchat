@@ -5,7 +5,7 @@
 <h1 align="center">gitchat</h1>
 
 <p align="center">
-  Save your ChatGPT, Claude and Gemini chats to your own GitHub repository,<br>
+  Save your ChatGPT, Claude, Gemini and Grok chats to your own GitHub repository,<br>
   one Markdown file per chat, with a git-like <b>stage → commit → push</b>.
 </p>
 
@@ -115,7 +115,7 @@ The setup page opens by itself after installing (or click the gitchat icon in th
 2. **Create a fine-grained token for that repository only.** The setup page opens GitHub's form with the name and the **Contents: Read and write** permission filled in. Under **Repository access**, choose **Only select repositories** and pick the repository, then **Generate token** and copy it.
 3. **Paste the token** into the setup page. It is stored only on this computer.
 4. **Pick the repository and a widget style**, and optionally turn on Auto commit / Auto push.
-5. **Open a chat** on ChatGPT, Claude or Gemini, hover the widget at the right edge, and press **Start saving this chat**.
+5. **Open a chat** on ChatGPT, Claude, Gemini or Grok, hover the widget at the right edge, and press **Start saving this chat**.
 
 <details>
 <summary>What the GitHub pages look like</summary>
@@ -187,8 +187,9 @@ For a full breakdown of storage locations and extension permissions, see [Privac
 | ChatGPT | `chatgpt.com` (new UI, classic UI, Work mode) | Text, headings, lists, links, tables (with alignment), fenced code blocks with language, TeX math (`$...$`, `$$...$$`), inline visualizations (`*.web-sandbox.oaiusercontent.com`) as rendered HTML when on screen | Temporary chats are never saved. Web-search citation pills keep the source name only (URLs are not in the page DOM). Inline visualizations are saved as rendered HTML, not original source. Reasoning summaries are excluded. Only the currently shown branch of an edited chat is saved. |
 | Claude | `claude.ai` | Text, headings, lists, links, tables (with alignment), fenced code blocks with language, TeX math (`$...$`, `$$...$$`), open artifacts (`*.claudeusercontent.com`) as rendered HTML when on screen | An artifact must be open in the side panel at capture time to save its HTML. Only the currently shown branch of an edited chat is saved. |
 | Gemini | `gemini.google.com` (standard chats and Gems) | Text, headings, lists, links, tables (with alignment), fenced code blocks with language, TeX math (`$...$`, `$$...$$`), Canvas previews (`*.scf.usercontent.goog`) as rendered HTML when on screen | Web-search citations are not in the message DOM. Canvas previews are saved as rendered HTML, not original source, and must be on screen at capture time. Only the currently shown branch of an edited chat is saved. |
+| Grok | `grok.com` | Text, headings, lists, links, tables (with alignment), fenced code blocks with language, TeX math (`$...$`, `$$...$$`) | Private chats are never saved. The reasoning steps are not in the page and are left out. Web-search citations keep no URL (the sources are only in a side panel). Only the currently shown branch of an edited chat is saved. |
 
-Verified on 34–40-turn conversations across all three services (full-history init completes in roughly 4–11 seconds).
+Verified on 34–40-turn conversations on ChatGPT, Claude and Gemini (full-history init completes in roughly 4–11 seconds). Grok's adapter is built from a live 36-turn chat; its full-history init has not been timed in the extension yet.
 
 ## Development
 

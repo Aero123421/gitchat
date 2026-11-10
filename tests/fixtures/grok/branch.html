@@ -1,0 +1,35 @@
+<!-- Reconstruction (not a raw dump) of grok.com after editing a prompt and then regenerating its answer, observed 2026-11-10 (ja UI, dark). Shows: only the active branch is in the DOM (the old user/assistant rows are gone, with new ids); the edited user row has a version pager (前のメッセージ / "2 / 2" / 次のメッセージ) and the regenerated assistant row has one too (前の応答 / 次の応答). The counter is span[aria-live=polite][aria-atomic=true] > span[aria-hidden] "2&nbsp;/&nbsp;2" + span.sr-only; both arrows point to it with aria-describedby. The URL ?rid=<id> names the active leaf (here RESP_ID_14); loading the old leaf's rid shows the old branch with "1 / 2". Ids are placeholders. -->
+<div data-testid="chat-transcript-scroller" class="h-full overflow-x-hidden overflow-y-auto">
+  <div class="relative w-full" style="height: 500px;">
+    <div data-plane-row="gateway:RESP_ID_13" class="absolute inset-x-0 top-0" style="transform: translateY(0px);">
+      <div id="response-RESP_ID_13" class="relative group flex flex-col justify-center w-full items-end">
+        <div dir="auto" role="article" aria-labelledby="turn-heading-RESP_ID_13" data-testid="user-message" class="message-bubble relative chat-md prose">
+          <h2 id="turn-heading-RESP_ID_13" class="sr-only" data-no-copy="true">あなた</h2>
+          <div class="relative"><div class="relative response-content-markdown markdown chat-md chat-md-links"><p dir="auto" class="break-words">[gitchat research] edited: reply with only the word edited</p></div></div>
+          <section class="inline-media-container"></section>
+        </div>
+        <div class="-ml-1 w-full"></div>
+        <div role="group" aria-labelledby="turn-heading-RESP_ID_13" class="action-buttons">
+          <button type="button" aria-label="Edit"></button><button type="button" aria-label="コピー"></button><button type="button" aria-label="保存"></button>
+          <span class="inline-flex items-center gap-[2px]"><span class="contents"><button type="button" data-slot="button" aria-disabled="false" aria-label="前のメッセージ" aria-describedby="_r_f0_"><svg aria-hidden="true"></svg></button><span id="_r_f0_" class="px-0.5" aria-live="polite" aria-atomic="true"><span aria-hidden="true">2&nbsp;/&nbsp;2</span><span class="sr-only">メッセージ 2 / 2</span></span><button type="button" data-slot="button" aria-disabled="true" aria-label="次のメッセージ" aria-describedby="_r_f0_"><svg aria-hidden="true"></svg></button></span></span>
+        </div>
+      </div>
+    </div>
+    <div data-plane-row="gateway:RESP_ID_14" class="absolute inset-x-0 top-0" style="transform: translateY(110px);">
+      <div id="response-RESP_ID_14" class="relative group flex flex-col justify-center w-full items-start">
+        <div dir="auto" role="article" aria-labelledby="turn-heading-RESP_ID_14" data-testid="assistant-message" class="message-bubble relative chat-md">
+          <h2 id="turn-heading-RESP_ID_14" class="sr-only" data-no-copy="true">Grok</h2>
+          <div class="thinking-container"><div><div class="not-prose"><button data-testid="canvas-trigger" aria-expanded="false" type="button"><span><span>2s 作業しました</span></span><span><svg aria-hidden="true"></svg></span></button></div><div aria-hidden="true"></div></div></div>
+          <div class="relative"><div class="relative response-content-markdown markdown chat-md chat-md-links"><div class="streamdown-chat-md"><div class="sd:space-y-4 sd:whitespace-normal"><p dir="auto" class="break-words">edited</p></div><span hidden=""></span></div></div></div>
+          <section class="inline-media-container"></section>
+          <div class="-ms-2"></div>
+        </div>
+        <div class="-ml-1 w-full"></div>
+        <div role="group" aria-labelledby="turn-heading-RESP_ID_14" class="action-buttons last-response">
+          <span class="inline-flex items-center gap-[2px]"><span class="contents"><button type="button" data-slot="button" aria-disabled="false" aria-label="前の応答" aria-describedby="_r_f1_"><svg aria-hidden="true"></svg></button><span id="_r_f1_" class="px-0.5" aria-live="polite" aria-atomic="true"><span aria-hidden="true">2&nbsp;/&nbsp;2</span><span class="sr-only">応答 2 / 2</span></span><button type="button" data-slot="button" aria-disabled="true" aria-label="次の応答" aria-describedby="_r_f1_"><svg aria-hidden="true"></svg></button></span></span>
+          <button type="button" aria-label="回答をコピー"></button><button type="button" aria-label="共有リンクを作成"></button><button type="button" aria-label="Like"></button><button type="button" aria-label="Dislike"></button><button type="button" aria-label="再生成"></button><button type="button" aria-label="More actions"></button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

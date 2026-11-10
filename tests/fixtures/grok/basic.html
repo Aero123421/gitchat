@@ -1,0 +1,48 @@
+<!-- Reconstruction (not a raw dump) of a grok.com chat, observed 2026-11-10 (ja UI, dark). Shows: the page shell (h1.sr-only title, transcript scroller, virtual rows), one user row and one finished assistant row with h2, bold, italic, inline code (span, not <code>), link, ul, ol, blockquote, hr; the assistant toolbar and follow-up suggestions sit outside data-testid=assistant-message. Idle composer (no chat-submit button while empty). Ids are placeholders. -->
+<div id="grok-app-root"><div id="grok-content-area"><div data-testid="drop-container"><div data-testid="drop-ui">
+<header role="none"><nav aria-label="トップナビゲーション"><button aria-label="さらに表示"></button><button aria-label="共有リンクを作成"></button><button aria-label="右パネルの切り替え" aria-pressed="false"></button></nav></header>
+<h1 class="sr-only">Markdown Sample with Formatting Elements</h1>
+<div data-testid="chat-transcript-scroller" class="h-full overflow-x-hidden overflow-y-auto outline-none [overflow-anchor:none] scrollbar-gutter-stable">
+  <div class="relative [overflow-x:clip] w-full" style="height: 953px;">
+    <div aria-hidden="true" data-plane-row="transcript:top-inset" data-plane-row-kind="top-inset" class="absolute inset-x-0 top-0 print:hidden" style="transform: translateY(0px);"></div>
+    <div data-plane-row="gateway:RESP_ID_1" class="absolute inset-x-0 top-0" style="--plane-gap-after: 0px; transform: translateY(80px);">
+      <div id="response-RESP_ID_1" class="relative group flex flex-col justify-center w-full items-end">
+        <div dir="auto" role="article" aria-labelledby="turn-heading-RESP_ID_1" data-testid="user-message" class="message-bubble relative text-fg-primary min-h-7 chat-md prose">
+          <h2 id="turn-heading-RESP_ID_1" dir="auto" tabindex="-1" class="sr-only" data-no-copy="true">あなた</h2>
+          <div class="relative"><div class="relative response-content-markdown markdown chat-md chat-md-links"><p dir="auto" class="break-words">[gitchat research] basic: reply with a short markdown sample: an H2 heading, a paragraph with <span>**bold**</span>, <span>*italic*</span>, <span class="text-sm px-1 rounded-sm !font-mono text-orange-500">inline code</span> and a link to <a href="https://example.com" target="_blank" rel="noopener noreferrer nofollow">https://example.com</a>, a bullet list, a numbered list, a blockquote and a horizontal rule.</p></div></div>
+          <section class="inline-media-container flex flex-col gap-1 clear-both"></section>
+        </div>
+        <div class="-ml-1 w-full"></div>
+        <div class="order-first hidden h-0 opacity-0"><div class="min-h-7 py-4 flex flex-col gap-0.5"></div></div>
+        <div role="group" aria-labelledby="turn-heading-RESP_ID_1" class="action-buttons h-8 mt-0.5 mb-2 flex flex-row"><button type="button" aria-label="Edit"></button><button type="button" aria-label="コピー"></button><button type="button" aria-label="保存"></button></div>
+      </div>
+    </div>
+    <div data-plane-row="gateway:RESP_ID_2" class="absolute inset-x-0 top-0" style="--plane-gap-after: 0px; transform: translateY(208px);">
+      <div id="response-RESP_ID_2" class="relative group flex flex-col justify-center w-full items-start">
+        <div dir="auto" role="article" aria-labelledby="turn-heading-RESP_ID_2" data-testid="assistant-message" class="message-bubble relative rounded-3xl text-fg-primary min-h-7 chat-md">
+          <h2 id="turn-heading-RESP_ID_2" dir="auto" tabindex="-1" class="sr-only" data-no-copy="true">Grok</h2>
+          <div class="thinking-container"></div>
+          <div class="relative"><div class="relative response-content-markdown markdown chat-md chat-md-links"><div class="streamdown-chat-md"><div class="sd:space-y-4 sd:whitespace-normal">
+            <h2 class="text-xl">Markdown Sample</h2>
+            <p dir="auto" class="break-words">This is a paragraph containing <strong class="font-semibold">bold text</strong>, <em>italic text</em>, <span class="text-sm px-1 rounded-sm !font-mono text-orange-500">inline code</span>, and a <a href="https://example.com/" target="_blank" rel="noopener noreferrer nofollow">link to example.com</a>.</p>
+            <ul class="list-disc"><li class="py-0">Bullet item one</li><li class="py-0">Bullet item two</li><li class="py-0">Bullet item three</li></ul>
+            <ol class="list-decimal"><li class="py-0">Numbered item one</li><li class="py-0">Numbered item two</li><li class="py-0">Numbered item three</li></ol>
+            <blockquote class="border-s-4"><p dir="auto" class="break-words">This is a blockquote with some sample text.</p></blockquote>
+            <hr class="border-border-l1">
+          </div><span hidden=""></span></div></div></div>
+          <section class="inline-media-container flex flex-col gap-1 clear-both"></section>
+          <div class="-ms-2"></div>
+        </div>
+        <div class="-ml-1 w-full"></div>
+        <div class="order-first hidden h-0 opacity-0"><div class="min-h-7 py-4 flex flex-col gap-0.5"></div></div>
+        <div role="group" aria-labelledby="turn-heading-RESP_ID_2" class="action-buttons last-response h-8 mt-0.5 mb-2 flex flex-row"><button type="button" aria-label="回答をコピー"></button><button type="button" aria-label="共有リンクを作成"></button><button type="button" aria-label="Like"></button><button type="button" aria-label="Dislike"></button><button type="button" aria-label="再生成"></button><button type="button" aria-label="More actions"></button></div>
+        <div class="flex flex-col gap-1 mt-2 items-start w-full"><button><span><svg aria-hidden="true"></svg></span><span>Show a markdown table example</span></button><button><span><svg aria-hidden="true"></svg></span><span>Show a code block example</span></button></div>
+      </div>
+    </div>
+    <div aria-hidden="true" data-plane-row="transcript:bottom-spacing" data-plane-row-kind="bottom-spacing" class="absolute inset-x-0 top-0 print:hidden" style="transform: translateY(747px);"></div>
+  </div>
+</div>
+<form><div data-testid="chat-input"><div class="query-bar group z-20 relative w-full"><div contenteditable="true" role="textbox" aria-multiline="true" aria-label="Grokに何でも聞いてください" translate="no" tabindex="0" class="tiptap ProseMirror w-full query-bar-editor"><p></p></div>
+  <button type="button" aria-label="添付" data-testid="attach-button"></button><button type="button" id="model-select-trigger" aria-label="モデル: ファスト" aria-haspopup="menu"></button><button type="button" aria-label="音声入力 (⌃D)"></button><button type="button" aria-label="音声モードにする (⌘⇧O)"></button>
+</div></div></form>
+</div></div></div></div>

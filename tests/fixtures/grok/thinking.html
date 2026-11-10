@@ -1,0 +1,57 @@
+<!-- Reconstruction (not a raw dump) of finished grok.com answers that "worked" before answering, observed 2026-11-10 (ja UI, dark, Fast and Expert models). Shows: (1) .thinking-container with the collapsed button[data-testid=canvas-trigger] ("6s 作業しました") expanded (aria-expanded="true") into a list of steps; Grok only shows one-line summaries ("Thought" step), never the full reasoning text. (2) A web-search answer: an inline citation pill button.no-copy inside <p> with no URL, and a "10 sources" button (favicons) inside the assistant message but outside .response-content-markdown. Source URLs exist only in the right-hand <aside> panel after that button is clicked. Everything to exclude lives outside .response-content-markdown, except the citation pill. Ids are placeholders. -->
+<div data-testid="chat-transcript-scroller" class="h-full overflow-x-hidden overflow-y-auto">
+  <div class="relative w-full" style="height: 900px;">
+    <div data-plane-row="gateway:RESP_ID_9" class="absolute inset-x-0 top-0" style="transform: translateY(0px);">
+      <div id="response-RESP_ID_9" class="relative group flex flex-col justify-center w-full items-end">
+        <div dir="auto" role="article" aria-labelledby="turn-heading-RESP_ID_9" data-testid="user-message" class="message-bubble relative chat-md prose">
+          <h2 id="turn-heading-RESP_ID_9" class="sr-only" data-no-copy="true">あなた</h2>
+          <div class="relative"><div class="relative response-content-markdown markdown chat-md chat-md-links"><p dir="auto" class="break-words">[gitchat research] thinking 2: reason carefully about whether 2^30 or 10^9 is larger, then answer in one line.</p></div></div>
+          <section class="inline-media-container"></section>
+        </div>
+      </div>
+    </div>
+    <div data-plane-row="gateway:RESP_ID_10" class="absolute inset-x-0 top-0" style="transform: translateY(100px);">
+      <div id="response-RESP_ID_10" class="relative group flex flex-col justify-center w-full items-start">
+        <div dir="auto" role="article" aria-labelledby="turn-heading-RESP_ID_10" data-testid="assistant-message" class="message-bubble relative chat-md">
+          <h2 id="turn-heading-RESP_ID_10" class="sr-only" data-no-copy="true">Grok</h2>
+          <div class="thinking-container"><div>
+            <div class="not-prose"><button data-testid="canvas-trigger" aria-expanded="true" type="button"><span><span>6s 作業しました</span></span><span><svg aria-hidden="true"></svg></span></button></div>
+            <div><div><div class="not-prose"><div>
+              <div><div><div><div aria-label="Thought"><span><svg aria-hidden="true"></svg></span></div></div></div><div class="ps-0.5 pe-2"><span>Comparing 2^30 and 10^9 values</span></div></div>
+            </div></div></div></div>
+            <div aria-hidden="true"></div>
+          </div></div>
+          <div class="relative"><div class="relative response-content-markdown markdown chat-md chat-md-links"><div class="streamdown-chat-md"><div class="sd:space-y-4 sd:whitespace-normal">
+            <p dir="auto" class="break-words">2^30 = 1,073,741,824 is larger than 10^9 = 1,000,000,000.</p>
+          </div><span hidden=""></span></div></div></div>
+          <section class="inline-media-container"></section>
+          <div class="-ms-2"></div>
+        </div>
+        <div role="group" aria-labelledby="turn-heading-RESP_ID_10" class="action-buttons"><button type="button" aria-label="回答をコピー"></button><button type="button" aria-label="再生成"></button></div>
+      </div>
+    </div>
+    <div data-plane-row="gateway:RESP_ID_11" class="absolute inset-x-0 top-0" style="transform: translateY(300px);">
+      <div id="response-RESP_ID_11" class="relative group flex flex-col justify-center w-full items-end">
+        <div dir="auto" role="article" aria-labelledby="turn-heading-RESP_ID_11" data-testid="user-message" class="message-bubble relative chat-md prose">
+          <h2 id="turn-heading-RESP_ID_11" class="sr-only" data-no-copy="true">あなた</h2>
+          <div class="relative"><div class="relative response-content-markdown markdown chat-md chat-md-links"><p dir="auto" class="break-words">[gitchat research] search: according to nodejs.org, what is the current LTS major version of Node.js? One sentence with sources.</p></div></div>
+          <section class="inline-media-container"></section>
+        </div>
+      </div>
+    </div>
+    <div data-plane-row="gateway:RESP_ID_12" class="absolute inset-x-0 top-0" style="transform: translateY(400px);">
+      <div id="response-RESP_ID_12" class="relative group flex flex-col justify-center w-full items-start">
+        <div dir="auto" role="article" aria-labelledby="turn-heading-RESP_ID_12" data-testid="assistant-message" class="message-bubble relative chat-md">
+          <h2 id="turn-heading-RESP_ID_12" class="sr-only" data-no-copy="true">Grok</h2>
+          <div class="thinking-container"><div><div class="not-prose"><button data-testid="canvas-trigger" aria-expanded="false" type="button"><span><span>3s 作業しました</span></span><span><svg aria-hidden="true"></svg></span></button></div><div aria-hidden="true"></div></div></div>
+          <div class="relative"><div class="relative response-content-markdown markdown chat-md chat-md-links"><div class="streamdown-chat-md"><div class="sd:space-y-4 sd:whitespace-normal">
+            <p dir="auto" class="break-words">According to nodejs.org, the current LTS major version of Node.js is shown on the releases page.<button type="button" class="no-copy ms-1 inline ps-2 pe-2">&#8288;Nodejs<span class="text-fg-tertiary text-[11px]"> +1</span></button></p>
+          </div><span hidden=""></span></div></div></div>
+          <section class="inline-media-container"></section>
+          <div class="-ms-2"><button type="button" class="ps-1 pe-2" aria-label="10 sources" aria-expanded="false"><span><img alt="" role="presentation" src="data:image/gif;base64,R0lGODlhAQABAAAAACw="></span><span><img alt="" role="presentation" src="data:image/gif;base64,R0lGODlhAQABAAAAACw="></span><span>10 sources</span></button></div>
+        </div>
+        <div role="group" aria-labelledby="turn-heading-RESP_ID_12" class="action-buttons last-response"><button type="button" aria-label="回答をコピー"></button><button type="button" aria-label="再生成"></button></div>
+      </div>
+    </div>
+  </div>
+</div>

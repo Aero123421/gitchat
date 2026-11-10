@@ -47,7 +47,8 @@ describe('normalizeSettings known fields', () => {
     expect(normalizeSettings(raw)).toEqual({
       ...DEFAULT_SETTINGS,
       widget: 'dot',
-      services: { chatgpt: false, claude: true, gemini: true },
+      // settings saved before Grok existed turn it on, like the other sites by default
+      services: { chatgpt: false, claude: true, gemini: true, grok: true },
       repo: { owner: 'o', name: 'n', branch: 'main' },
     });
     expect(applySettingsPatch(DEFAULT_SETTINGS, { widget: 'line', token: 'secret' } as Partial<Settings>)).toEqual({

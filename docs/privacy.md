@@ -45,14 +45,14 @@ Every permission requested in [`src/manifest.json`](../src/manifest.json) has a 
 | `alarms` | Schedules a wakeup alarm (`gitchat:push-retry`) to retry a failed automatic push after a transient network error or GitHub rate limit. |
 | `https://api.github.com/*` | Communicates with the GitHub REST and Git Data APIs from the background service worker. |
 | `https://github.com/*` | Exchanges OAuth device codes when using "Sign in with GitHub". |
-| `https://chatgpt.com/*`, `https://claude.ai/*`, `https://gemini.google.com/*` | Runs `content.js` on the three supported chat sites to render the widget and read conversation messages into Markdown when you track a chat. |
+| `https://chatgpt.com/*`, `https://claude.ai/*`, `https://gemini.google.com/*`, `https://grok.com/*` | Runs `content.js` on the four supported chat sites to render the widget and read conversation messages into Markdown when you track a chat. |
 | `https://*.claudeusercontent.com/*`, `https://*.scf.usercontent.goog/*`, `https://*.web-sandbox.oaiusercontent.com/*` | Runs `frame.js` (`all_frames: true`) inside the sandboxed iframes used for Claude artifacts, Gemini Canvas, and ChatGPT inline visualizations so their rendered HTML can be saved alongside the chat. |
 
 ### Isolation of scripts and secrets
 
 - **Token isolation**: the GitHub token is read and used exclusively inside the background service worker (`src/background/`). Content scripts (`content.js`) and visualization frame scripts (`frame.js`) never receive the token.
 - **Message validation**: the background service worker only accepts runtime messages and ports whose `sender.id` matches `chrome.runtime.id`.
-- **Cross-frame visualization handshake**: `frame.js` never transmits data on its own. It responds only when `window.top` from an allowed parent origin (`https://claude.ai`, `https://chatgpt.com`, or `https://gemini.google.com`) sends a `frame/serialize` request with a one-time `nonce`, and posts the serialized HTML back only to that `e.origin`.
+- **Cross-frame visualization handshake**: `frame.js` never transmits data on its own. It responds only when `window.top` from an allowed parent origin (`https://claude.ai`, `https://chatgpt.com`, `https://gemini.google.com`, or `https://grok.com`) sends a `frame/serialize` request with a one-time `nonce`, and posts the serialized HTML back only to that `e.origin`.
 
 ## Recommendations for keeping your chats private
 

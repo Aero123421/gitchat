@@ -30,7 +30,7 @@ export interface AdapterSpec {
   doneQuietMs?: number;
   topQuietMs?: number;
   watchAttributes?: readonly string[];
-  /** Names to strip from document.title ("ChatGPT", "Claude", "Gemini"). */
+  /** Names to strip from document.title ("ChatGPT", "Claude", "Gemini", "Grok"). */
   siteNames: string[];
   chatId(url: URL): string | null;
   /** See Adapter.canonicalUrl. Default: origin + pathname. */
@@ -71,6 +71,8 @@ export interface AdapterSpec {
   cardTitle?(card: Element): string;
   /** Custom content element for a message (e.g. a container built from several segments). */
   bodyOf?(node: MessageNode): Element | null;
+  /** The very start of the conversation is rendered, when one selector cannot say it (see `start`). */
+  atStart?(doc: Document): boolean;
   /** Precise AI state from site signals; null falls back to the generic guess. */
   aiPhase?(doc: Document): 'idle' | 'thinking' | 'streaming' | null;
   /** Messages loaded so far, if the site exposes it. */
@@ -192,7 +194,7 @@ export function defineAdapter(spec: AdapterSpec): Adapter & { readonly selectors
       return false;
     },
     isLoadingOlder: (doc) => (s.loadingOlder ? pickAll(doc, s.loadingOlder).some(isShown) : false),
-    isAtStart: (doc) => (s.start ? exists(doc, s.start) : false),
+    isAtStart: (doc) => spec.atStart?.(doc) ?? (s.start ? exists(doc, s.start) : false),
     loadedCount: (doc) => spec.loadedCount?.(doc) ?? null,
     aiPhase: (doc) => spec.aiPhase?.(doc) ?? null,
     composer: (doc) => pick(doc, s.composer),

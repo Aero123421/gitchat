@@ -1,6 +1,6 @@
 // Live preview of the on-page widget, mounted on the right edge of the settings page while the user
 // chooses a style. It is the real widget code driven by the demo store, so what you see is exactly
-// what appears on ChatGPT, Claude and Gemini.
+// what appears on ChatGPT, Claude, Gemini and Grok.
 
 import { createStore } from '../content/ui/demo-store.js';
 import { mountCreature } from '../content/ui/variants/creature.js';

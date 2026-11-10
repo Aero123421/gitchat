@@ -45,14 +45,14 @@ gitchat が通信を行うドメインは次の 2 つのみです。
 | `alarms` | 自動プッシュがネットワークエラーや GitHub のレート制限で失敗した際、一定時間後に再試行用アラーム（`gitchat:push-retry`）で Service Worker を起動するため。 |
 | `https://api.github.com/*` | バックグラウンドの Service Worker から GitHub REST API および Git Data API と通信するため。 |
 | `https://github.com/*` | 「GitHub でサインイン」使用時に OAuth デバイスコードの発行・トークン交換を行うため。 |
-| `https://chatgpt.com/*`, `https://claude.ai/*`, `https://gemini.google.com/*` | 対応する 3 つのチャットサイト上で `content.js` を動かし、ウィジェットの表示と、追跡対象の会話の Markdown 変換を行うため。 |
+| `https://chatgpt.com/*`, `https://claude.ai/*`, `https://gemini.google.com/*`, `https://grok.com/*` | 対応する 4 つのチャットサイト上で `content.js` を動かし、ウィジェットの表示と、追跡対象の会話の Markdown 変換を行うため。 |
 | `https://*.claudeusercontent.com/*`, `https://*.scf.usercontent.goog/*`, `https://*.web-sandbox.oaiusercontent.com/*` | Claude のアーティファクト、Gemini の Canvas、ChatGPT のインライン可視化を描画するサンドボックス iframe 内で `frame.js`（`all_frames: true`）を動かし、レンダリング済み HTML をチャットと一緒に保存できるようにするため。 |
 
 ### スクリプトとトークンの分離
 
 - **トークンの隔離**: GitHub トークンはバックグラウンドの Service Worker（`src/background/`）内部でのみ読み書き・使用されます。チャットページ上のコンテンツスクリプト（`content.js`）や可視化フレーム内のスクリプト（`frame.js`）がトークンを受け取ることはありません。
 - **メッセージ送信元の検証**: バックグラウンドの Service Worker は、`sender.id` が自身の拡張機能 ID（`chrome.runtime.id`）と一致するメッセージおよびポート接続のみを受け付けます。
-- **フレーム間通信の検証**: `frame.js` が自発的にデータを外部へ送信することはありません。許可された親オリジン（`https://claude.ai`, `https://chatgpt.com`, `https://gemini.google.com`）の `window.top` からワンタイムの `nonce` 付きで `frame/serialize` リクエストが届いたときにのみ、その `e.origin` に対してレンダリング済み HTML を返します。
+- **フレーム間通信の検証**: `frame.js` が自発的にデータを外部へ送信することはありません。許可された親オリジン（`https://claude.ai`, `https://chatgpt.com`, `https://gemini.google.com`, `https://grok.com`）の `window.top` からワンタイムの `nonce` 付きで `frame/serialize` リクエストが届いたときにのみ、その `e.origin` に対してレンダリング済み HTML を返します。
 
 ## チャットを安全に保つための推奨設定
 

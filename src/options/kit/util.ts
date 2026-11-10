@@ -4,6 +4,7 @@ export const SERVICE_LINKS = [
   { name: 'ChatGPT', url: 'https://chatgpt.com/' },
   { name: 'Claude', url: 'https://claude.ai/' },
   { name: 'Gemini', url: 'https://gemini.google.com/' },
+  { name: 'Grok', url: 'https://grok.com/' },
 ] as const;
 
 /** Copy text to the clipboard (falls back to a hidden textarea when the async API is unavailable). */
