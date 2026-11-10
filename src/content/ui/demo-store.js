@@ -166,7 +166,8 @@ export function createStore() {
         const el = performance.now() - t0;
         if (el < loadMs) {
           state.captureStage = 'loading';
-          state.captureCount = Math.round(total * (1 - Math.exp((-3 * el) / loadMs)));
+          // older messages arrive in batches, like on the sites
+          state.captureCount = Math.min(total, 30 * (1 + Math.floor(el / 480)));
           state.progress = 0.25 * (el / loadMs);
         } else {
           state.captureStage = 'reading';

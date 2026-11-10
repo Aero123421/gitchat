@@ -48,6 +48,10 @@ document.querySelector('.demo').addEventListener('click', (e) => {
   if (act === 'reply') store.aiTurn();
   else if (act === 'fail') store.failNextPush();
   else if (act === 'untrack') store.untrack();
+  else if (act === 'init') {
+    store.untrack();
+    store.init();
+  }
   else if (act === 'sample') store.resetSample();
   else if (act === 'theme') {
     theme = theme === 'light' ? 'dark' : 'light';
@@ -81,6 +85,10 @@ addEventListener('keydown', (e) => {
   if (e.key === '2') mount('line');
   if (e.key === '3') mount('dot');
   if (e.key === 'r') store.aiTurn();
+  if (e.key === 'i') {
+    store.untrack();
+    store.init();
+  }
 });
 
 mount(location.hash.slice(1) || read('gc-variant', 'creature'));

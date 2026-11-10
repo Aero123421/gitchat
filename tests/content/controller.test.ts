@@ -215,6 +215,41 @@ describe('Controller', () => {
     expect(sent.some((s) => s.type === 'chat/init/done')).toBe(false);
   });
 
+  it('scrolls up at once, without waiting for the background to answer the start', async () => {
+    handlers['chat/open'] = (p) => status(`claude:${p.chatId as string}`, { tracked: false });
+    let answer!: (v: unknown) => void;
+    handlers['chat/init/start'] = () => new Promise((r) => (answer = r));
+    const c = await open(makeAdapter());
+    showChat('a', 2, 2000);
+    const scroller = document.getElementById('scroller')!;
+    scroller.scrollTop = 1500;
+    void c.init();
+    await vi.advanceTimersByTimeAsync(50);
+    expect(sent.some((s) => s.type === 'chat/init/start')).toBe(true);
+    expect(scroller.scrollTop).toBe(0); // moving before the answer
+    answer({ status: status('claude:a', { tracked: false, phase: 'capturing' }), initId: 'i-a' });
+    c.abort?.abort();
+    await vi.advanceTimersByTimeAsync(3000);
+  });
+
+  it('puts the scroll back when the background refuses the start', async () => {
+    handlers['chat/open'] = (p) => status(`claude:${p.chatId as string}`, { tracked: false });
+    handlers['chat/init/start'] = async () => {
+      await new Promise((r) => setTimeout(r, 300));
+      throw new Error('Another tab is already saving this chat.');
+    };
+    const c = await open(makeAdapter());
+    showChat('a', 2, 2000);
+    const scroller = document.getElementById('scroller')!;
+    scroller.scrollTop = 1500;
+    const run = c.init();
+    await vi.advanceTimersByTimeAsync(5000);
+    await run;
+    expect(c.store.state.error).toBe('errInitOtherTab');
+    expect(scroller.scrollTop).toBe(1500);
+    expect(sent.some((s) => s.type === 'chat/init/cancel')).toBe(false);
+  });
+
   it('cancels with its init id and reports an incomplete history instead of saving it', async () => {
     handlers['chat/open'] = (p) => status(`claude:${p.chatId as string}`, { tracked: false });
     handlers['chat/init/start'] = (p) => ({ status: status(p.key as string, { tracked: false }), initId: 'init-2' });
@@ -456,7 +491,8 @@ describe('Controller', () => {
     void c.init();
     await vi.advanceTimersByTimeAsync(20_000);
     expect(sent.some((x) => x.type === 'chat/init/done')).toBe(false);
-    expect(sent.find((x) => x.type === 'chat/init/cancel')?.payload.initId).toBe('i-b');
+    // the page is checked before the background is asked: no init session is opened, none to cancel
+    expect(sent.some((x) => x.type === 'chat/init/start')).toBe(false);
     expect(c.store.state.error).toBe('errInitPrevChat');
     expect(snapshots()).toEqual([]);
   });

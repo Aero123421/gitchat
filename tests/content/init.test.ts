@@ -170,6 +170,33 @@ describe('captureFullHistory', () => {
     expect(res.messages[0]?.id).toBe('m0');
   });
 
+  it('ends loading at once on a chat that fits on screen, without the long quiet period', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'performance', 'Date'] });
+    const { adapter } = harness({ total: 4, batch: 32, delayMs: 100, virtualized: false });
+    let done = false;
+    const run = captureFullHistory(adapter, document, { signal: new AbortController().signal, onProgress: () => {} }).then((r) => {
+      done = true;
+      return r;
+    });
+    await vi.advanceTimersByTimeAsync(1500); // topQuietMs is 2500
+    expect(done).toBe(true);
+    const res = await run;
+    expect(res.messages.map((m) => m.id)).toEqual(['m0', 'm1', 'm2', 'm3']);
+    expect(res.startConfirmed).toBe(true);
+  });
+
+  it('still waits the quiet period when the chat is taller than the screen', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'performance', 'Date'] });
+    const { adapter } = harness({ total: 12, batch: 32, delayMs: 100, virtualized: false });
+    let done = false;
+    const run = captureFullHistory(adapter, document, { signal: new AbortController().signal, onProgress: () => {} }).then(() => (done = true));
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(done).toBe(false);
+    await vi.advanceTimersByTimeAsync(10_000);
+    await run;
+    expect(done).toBe(true);
+  });
+
   it('fails when the latched scroller is replaced by a detached node', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'performance', 'Date'] });
     const { adapter } = harness({ total: 40, batch: 20, delayMs: 100, virtualized: false });

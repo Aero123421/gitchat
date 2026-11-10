@@ -17,6 +17,8 @@
 //     which pinches off into orbit when the answer is done.
 //   git: gulps on commit, watches its dots leave on push, shivers then eyes the button on
 //     error, shakes its head when there is nothing to do, nods when a setting changes.
+//   init: stretches up and looks up while older messages load, tugged up by each new batch;
+//     then rounds out, leans down and reads, with a small nod every fifth of the way.
 
 import { Spring, onFrame, clamp, smooth, lerp, FULL, moving, motion, wake as wakeFrames } from '../core/spring.js';
 import { pointer } from '../core/pointer.js';
@@ -29,6 +31,9 @@ const BOX = 240;
 const HX = BOX - 50;
 const HY = 112;
 const R0 = 23;
+/** Scrolling makes the body lag: at most this fast (px/s) and this far (px) from its place. */
+const SCROLL_SPEED = 260;
+const SCROLL_LAG = 14;
 const MAX_SATS = 6;
 const MAX_PEARLS = 6;
 const NS = 'http://www.w3.org/2000/svg';
@@ -176,6 +181,7 @@ export function mountCreature(host, store, options = {}) {
   let breathPh = 0;
   let breathK = 1;
   let scrollImpulse = 0;
+  let scrolledAt = -Infinity;
   let petDist = 0;
   let petCool = 0;
   let startleCool = 0;
@@ -196,6 +202,9 @@ export function mountCreature(host, store, options = {}) {
   let forming = null; // the AI's answer condensing into a droplet on the body's edge
   let nextPulse = 0;
   let lastInputRect = null;
+  // init: messages found so far and fifths read, so each new batch and step gets a beat
+  let capCount = 0;
+  let capStep = 0;
   const poseX = new Spring(1, { stiffness: 120, damping: 14 });
   const poseY = new Spring(1, { stiffness: 120, damping: 14 });
   const orbitL = new Spring(0, { stiffness: 60, damping: 14 }); // 1 = the gloss circles the body
@@ -502,6 +511,25 @@ export function mountCreature(host, store, options = {}) {
   }
 
   // ---- reactions to git events
+  /**
+   * Init beats: each batch of older messages tugs the stretched body up (with a blink); reading
+   * gives a small nod every fifth of the way down.
+   */
+  function captureBeat(d) {
+    if (d.stage === 'loading') {
+      if (d.count <= capCount) return;
+      capCount = d.count;
+      sqy.kick(1.6);
+      by.kick(-170);
+      blink();
+      return;
+    }
+    const step = Math.floor(((d.p - 0.25) / 0.75) * 5);
+    if (step <= capStep) return;
+    capStep = step;
+    sqy.kick(-0.7);
+  }
+
   const unsub = store.subscribe((type, d) => {
     if (type === 'staged') {
       d.items.forEach((_, i) => {
@@ -558,6 +586,10 @@ export function mountCreature(host, store, options = {}) {
       acts.nod();
     } else if (type === 'captureStart') {
       acts.perk();
+      capCount = 0;
+      capStep = 0;
+    } else if (type === 'progress' && !motion.reduced) {
+      captureBeat(d);
     } else if (type === 'captured') {
       shown = 0;
       d.items.slice(0, MAX_SATS + 2).forEach((_, i) => flyIn(120 + i * 110));
@@ -597,6 +629,7 @@ export function mountCreature(host, store, options = {}) {
     onActivity();
     wakeFrames(900);
     scrollImpulse += -dy * 3.5;
+    scrolledAt = performance.now();
     look(-0.7, dy < 0 ? -0.85 : 0.75, 450);
   };
   document.addEventListener('scroll', onScroll, { capture: true, passive: true });
@@ -703,6 +736,7 @@ export function mountCreature(host, store, options = {}) {
     anchor.set(clamp(frac * innerHeight, 60, Math.max(60, innerHeight - 60)));
     if (innerHeight > 0 && anchor.value <= 1) anchor.snap();
     anchor.step(dt);
+    const capturing = st.phase === 'capturing' && !motion.reduced;
     const top = anchor.value - HY;
     box.style.top = `${top.toFixed(1)}px`;
     const px = pointer.x - (innerWidth - BOX);
@@ -731,14 +765,22 @@ export function mountCreature(host, store, options = {}) {
       by.set(HY + clamp(dy * 0.05 * f, -6, 6));
     } else {
       bx.set(HX);
-      by.set(HY);
+      // init: reaching up while older messages load, leaning down to read
+      by.set(HY + (capturing ? (st.captureStage === 'loading' ? -7 : 3) : 0));
     }
     if (scrollImpulse) {
-      by.kick(clamp(scrollImpulse, -220, 220));
+      // A fast scroll sends an event every frame: cap the speed, not just each kick, or the kicks
+      // add up and fling the body off screen.
+      by.velocity = clamp(by.velocity + clamp(scrollImpulse, -220, 220), -SCROLL_SPEED, SCROLL_SPEED);
       scrollImpulse = 0;
     }
     bx.step(dt);
     by.step(dt);
+    if (!dragging && now - scrolledAt < 700 && Math.abs(by.value - by.target) > SCROLL_LAG) {
+      // it lags behind the page a little, never out of its place (hops and tugs are left alone)
+      by.value = by.target + Math.sign(by.value - by.target) * SCROLL_LAG;
+      by.velocity = 0;
+    }
     sqx.step(dt);
     sqy.step(dt);
     // AI thinking: a little taller, head slowly tilting side to side
@@ -746,8 +788,9 @@ export function mountCreature(host, store, options = {}) {
     const streaming = aiPhase === 'streaming' && !sleeping;
     const still = motion.reduced;
     tilt.set(thinking && !still ? Math.sin(t * 0.5) * 5 : 0);
-    poseX.set(thinking ? 0.97 : 1);
-    poseY.set(thinking ? 1.04 : 1);
+    const tug = capturing && st.captureStage === 'loading';
+    poseX.set(tug ? 0.9 : thinking ? 0.97 : 1);
+    poseY.set(tug ? 1.13 : thinking ? 1.04 : 1);
     poseX.step(dt);
     poseY.step(dt);
     tilt.step(dt);
