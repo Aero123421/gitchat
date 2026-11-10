@@ -636,15 +636,6 @@ export class Controller {
     };
     try {
       progress({ stage: 'loading', count: 0, progress: 0 });
-      const started = await request('chat/init/start', { key: route.key });
-      initId = started.initId;
-      // The background ends an init session that goes quiet (e.g. a closed tab). Waiting for a long
-      // answer is not quiet: keep reporting while the capture runs.
-      heartbeat = window.setInterval(() => {
-        if (initId && this.live(route)) void request('chat/init/progress', { key: route.key, initId, progress: lastProgress }).catch(() => {});
-      }, 20_000);
-      if (!this.live(route)) throw new DOMException('Cancelled', 'AbortError');
-      this.store.applyStatus(started.status);
       // right after a navigation the page may still show the previous chat: wait for this one
       if (!(await this.ownPage(route, OWN_PAGE_WAIT_MS))) {
         if (!this.live(route) || this.refuseCapture()) throw new DOMException(NAVIGATED, 'AbortError');
@@ -652,7 +643,9 @@ export class Controller {
       }
       if (this.refuseCapture()) throw new DOMException(NAVIGATED, 'AbortError');
       const artifacts = this.settings.saveVisualizations ? this.adapter.artifacts?.bind(this.adapter) : undefined;
-      const result = await captureFullHistory(this.adapter, document, {
+      // Scroll up at once: the background's answer (it may be busy with a push) need not hold the
+      // page still. A refused start aborts the read, which puts the scroll back.
+      const capture = captureFullHistory(this.adapter, document, {
         signal: abort.signal,
         onProgress: progress,
         ...(artifacts ? { artifacts: (skip: ReadonlySet<string>) => artifacts(document, { skip }).catch(() => []) } : {}),
@@ -661,6 +654,25 @@ export class Controller {
         // restore the scroll only while this chat still owns the page
         owns: () => this.live(route) && this.onPage(route),
       });
+      // settled below; an early failure must not surface as an unhandled rejection meanwhile
+      capture.catch(() => {});
+      let started: Awaited<ReturnType<typeof request<'chat/init/start'>>>;
+      try {
+        started = await request('chat/init/start', { key: route.key });
+      } catch (e) {
+        abort.abort(new DOMException(NAVIGATED, 'AbortError'));
+        await capture.catch(() => {});
+        throw e;
+      }
+      initId = started.initId;
+      // The background ends an init session that goes quiet (e.g. a closed tab). Waiting for a long
+      // answer is not quiet: keep reporting while the capture runs.
+      heartbeat = window.setInterval(() => {
+        if (initId && this.live(route)) void request('chat/init/progress', { key: route.key, initId, progress: lastProgress }).catch(() => {});
+      }, 20_000);
+      if (!this.live(route)) throw new DOMException('Cancelled', 'AbortError');
+      this.store.applyStatus(started.status);
+      const result = await capture;
       abort.signal.throwIfAborted();
       if (!this.live(route) || !this.onPage(route)) throw new DOMException('Cancelled', 'AbortError');
       const messages = attachArtifacts(result.messages, result.artifacts);

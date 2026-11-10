@@ -128,6 +128,11 @@ function scrollTowardOldest(el: HTMLElement, reversed: boolean): void {
   el.dispatchEvent(new WheelEvent('wheel', { deltaY: -800, bubbles: true }));
 }
 
+/** The whole loaded transcript is visible without scrolling (and is not empty). */
+function fitsOnScreen(el: HTMLElement, messages: number): boolean {
+  return messages > 0 && el.scrollHeight <= el.clientHeight + 4;
+}
+
 /** `scrollTop` of the oldest end. Reversed lists keep the newest end at 0. */
 function oldestScroll(el: HTMLElement, reversed: boolean): number {
   return reversed ? Math.min(0, el.clientHeight - el.scrollHeight) : 0;
@@ -487,11 +492,14 @@ export async function captureFullHistory(adapter: Adapter, doc: Document, opts: 
       lastCount = count;
       lastHeight = height;
       onProgress({ stage: 'loading', count, progress: 0.25 * (1 - Math.exp(-count / 400)) });
+      // A transcript that fits on screen has nothing above it to load: one unchanged look is enough.
+      // (Start markers are not used: Claude's aria-posinset="1" is only the first *loaded* row.)
+      if (stable >= 1 && fitsOnScreen(scroller, count)) break;
       // Sites re-anchor after each batch. Quiet ends loading but does not prove the true start.
       if (stable >= 2 && performance.now() - quietSince >= topQuietMs) break;
     }
     retarget();
-    const startConfirmed = scroller.scrollHeight <= scroller.clientHeight + 4 && adapter.messages(doc).length > 0;
+    const startConfirmed = fitsOnScreen(scroller, adapter.messages(doc).length);
 
     // ---- 2. read top to bottom
     if (adapter.virtualized) {
